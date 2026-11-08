@@ -66,7 +66,7 @@ speech-recognition model (Whisper base, ~80 MB) that then runs locally.
 | `Ctrl+Alt+Space` | Talk. Press again to stop early. Pressing while COre talks interrupts it. |
 | `Ctrl+Alt+S` | Talk about your screen (COre gets a screenshot and can point at things) |
 | `Ctrl+Alt+C` | Show / hide the chat block under the orb |
-| `Ctrl+Alt+H` | Hide / show the orb |
+| `Ctrl+Alt+H` | Hide / show COre (a notification tells you it's hidden) |
 
 - **Chat block:** type under the orb and COre answers like a normal Claude chat (full detail, lists, code blocks),
   in the same conversation as your voice chats. Only the opening of typed replies is read aloud (toggle in ⚙).
@@ -138,6 +138,8 @@ Panel menu → **Open settings file** edits `config.json`, then **Reload setting
 - **Look:** `orb.style` is `"smoke"` (default) or `"liquid"` (the older glossy black blob). `orb.particles`
   controls density (12000 for slow GPUs, 50000+ for a thicker cloud); `orb.radius` its size.
 - **Slow GPU:** lower `orb.renderScale` to `0.7` and `orb.particles` to `12000`.
+- **Performance:** COre's window only covers the area around the orb (it grows while pointing and shrinks back),
+  and draws at `orb.idleFps` (default 30) when nothing is happening, so the desktop stays smooth.
 
 ## Notifications from anything
 

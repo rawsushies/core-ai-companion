@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('core', {
   orbClick: () => ipcRenderer.send('orb:click'),
   orbHome: (home) => ipcRenderer.send('orb:home', home),
   orbAnchor: (a) => ipcRenderer.send('orb:anchor', a),
+  stageNeed: (r) => ipcRenderer.send('stage:need', r),
   sendAudio: (audio, withScreen) => ipcRenderer.send('listen:audio', { audio, withScreen }),
   listenCancelled: (reason) => ipcRenderer.send('listen:cancelled', reason),
   log: (msg) => ipcRenderer.send('overlay:log', String(msg)),
@@ -27,4 +28,5 @@ contextBridge.exposeInMainWorld('core', {
   onHover: on('hover'),
   onConfig: on('config'),
   onDockVisible: on('dock:visible'),
+  onStage: on('stage'),
 });

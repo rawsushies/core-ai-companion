@@ -5,6 +5,7 @@
   'use strict';
 
   const M = window.Motion;
+  const S = window.Stage;
   const bridge = window.core || null;
   const params = new URLSearchParams(location.search);
 
@@ -26,6 +27,13 @@
   let light = 0;
   let dockVisible = false;
   let lastAnchorSent = 0;
+  // Coordinates: COre's logic works in display coordinates (the whole screen,
+  // view). The window only covers `stage`, so drawing subtracts stage.x/y.
+  let view = { w: innerWidth, h: innerHeight };
+  let stage = { x: 0, y: 0, w: innerWidth, h: innerHeight };
+  const stageState = { bigSince: 0 };
+  let lastStageReq = 0;
+  let lastDraw = 0;
   let renderer;
   let body;
   let home;
@@ -68,6 +76,7 @@
   }
   // Read-only peek used by the end-to-end tests.
   window.__coreMode = () => mode;
+  window.__coreGesture = (g) => gesture(g); // test hook: { name: 'point', x, y } | { name: 'explain' }
 
   function setAttention(a) {
     attention = a && ATTENTION[a.level] ? { level: a.level, since: performance.now() } : null;
@@ -90,7 +99,7 @@
 
   function point(x, y) {
     const r = body.r;
-    const park = M.parkFor({ x, y }, r, innerWidth, innerHeight);
+    const park = M.parkFor({ x, y }, r, view.w, view.h);
     // Use the arm on the side facing the target.
     const armIdx = x < park.x ? 0 : 1;
     const arm = body.arms[armIdx];
@@ -198,7 +207,20 @@
   let lastBoundsSent = 0;
   const t0 = last;
 
+  // Is anything happening that needs full frame rate?
+  function isActive() {
+    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || body.dragging || !!attention
+      || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
+  }
+
   function frame(now) {
+    // Idle: draw at idleFps to keep GPU and desktop compositing light.
+    const idleFps = (cfg.orb && cfg.orb.idleFps) || 30;
+    if (!isActive() && now - lastDraw < 1000 / idleFps - 2) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    lastDraw = now;
     const dt = Math.min(0.1, (now - last) / 1000); // motion substeps keep long frames stable
     last = now;
     const t = (now - t0) / 1000;
@@ -218,11 +240,17 @@
     const arms = body.arms.map((a) => (a.mode === 'off' && a.extend < 0.02 ? null : M.armGeometry(shown, a, t)));
     const tailGap = Math.hypot(body.tail.x - body.pos.x, body.tail.y - body.pos.y);
 
+    updateStage(now, pos, arms);
+    const ox = stage.x;
+    const oy = stage.y;
+    const local = (p) => ({ x: p.x - ox, y: p.y - oy });
+    const localArms = arms.map((g) => (g ? { ...g, pts: g.pts.map(local) } : null));
+
     renderer.render({
       t,
-      pos,
+      pos: local(pos),
       vel: body.vel,
-      tail: body.tail,
+      tail: local(body.tail),
       tailR: body.r * (0.35 + 0.2 * Math.min(1, tailGap / body.r)),
       r: body.r,
       amp,
@@ -232,10 +260,10 @@
       glow: vis.glow,
       halo: vis.halo,
       light,
-      arms,
+      arms: localArms,
     });
 
-    placeCaption(pos);
+    placeCaption(local(pos));
 
     if (bridge && now - lastBoundsSent > 100) {
       bridge.orbBounds({ x: body.pos.x, y: body.pos.y, r: body.r });
@@ -247,6 +275,28 @@
       lastAnchorSent = now;
     }
     requestAnimationFrame(frame);
+  }
+
+  // Grow the window when COre needs more room, shrink it when it's settled.
+  function updateStage(now, pos, arms) {
+    if (!bridge || now - lastStageReq < 80) return;
+    const capShown = caption.classList.contains('show');
+    const need = S.neededRect({
+      pos,
+      target: body.target,
+      tail: body.tail,
+      r: body.r,
+      arms,
+      point: pointing ? { x: pointing.x, y: pointing.y } : null,
+      caption: capShown ? { w: caption.offsetWidth, h: caption.offsetHeight, above: dockVisible } : null,
+    });
+    const settled = !pointing && !explainUntil && !body.dragging && Math.hypot(body.vel.x, body.vel.y) < 20
+      && body.arms.every((a) => a.extend < 0.02);
+    const next = S.decide({ stage, need, view, r: body.r, now, settled, state: stageState });
+    if (next) {
+      lastStageReq = now;
+      bridge.stageNeed(next);
+    }
   }
 
   // Keep the caption on screen: centred under the orb, clamped to the edges,
@@ -266,21 +316,24 @@
 
   function setupPointer() {
     let down = null;
+    const toView = (e) => ({ x: e.clientX + stage.x, y: e.clientY + stage.y });
     canvas.addEventListener('pointerdown', (e) => {
-      const d = Math.hypot(e.clientX - body.pos.x, e.clientY - body.pos.y);
+      const p = toView(e);
+      const d = Math.hypot(p.x - body.pos.x, p.y - body.pos.y);
       if (d > body.r * 1.2) return;
-      down = { x: e.clientX, y: e.clientY, moved: false };
+      down = { x: p.x, y: p.y, moved: false };
       canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!down) return;
-      if (!down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) {
+      const p = toView(e);
+      if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 6) {
         down.moved = true;
         body.dragging = true;
         pointing = null;
         if (bridge) bridge.orbDrag(true);
       }
-      if (down.moved) body.target = { x: e.clientX, y: e.clientY };
+      if (down.moved) body.target = { x: p.x, y: p.y };
     });
     canvas.addEventListener('pointerup', () => {
       if (!down) return;
@@ -305,13 +358,18 @@
     const b = (cfg.orb && cfg.orb.backdrop) || 'auto';
     light = b === 'light' ? 1 : b === 'dark' ? 0 : (cfg.lightTheme ? 1 : 0);
     voice.setConfig(cfg.voice);
-    if (body) body.r = cfg.orb.radius || 60;
+    if (c.view) view = { ...c.view };
+    if (c.stage) stage = { ...c.stage };
+    if (body) {
+      body.r = cfg.orb.radius || 60;
+      if (c.view) placeHome();
+    }
   }
 
   function placeHome() {
     const r = cfg.orb.radius || 60;
     const h = cfg.orb.home;
-    home = h && h.x > 0 && h.x < innerWidth && h.y > 0 && h.y < innerHeight ? { ...h } : M.defaultHome(innerWidth, innerHeight, r);
+    home = h && h.x > 0 && h.x < view.w && h.y > 0 && h.y < view.h ? { ...h } : (cfg.defaultHome || M.defaultHome(view.w, view.h, r));
   }
 
   async function boot() {
@@ -328,11 +386,9 @@
     }
     placeHome();
     body = M.createBody({ x: home.x, y: home.y, r: cfg.orb.radius || 60 });
-    addEventListener('resize', () => {
-      renderer.resize();
-      placeHome();
-      if (bridge) bridge.orbAnchor({ x: home.x, y: home.y, r: body.r });
-    });
+    // The window resizes whenever the stage changes; home is in display
+    // coordinates and doesn't move with it.
+    addEventListener('resize', () => renderer.resize());
     // A GPU reset (sleep/wake, driver update) loses the WebGL context; reload
     // the overlay so COre comes back instead of staying invisible.
     canvas.addEventListener('webglcontextlost', (e) => {
@@ -352,6 +408,7 @@
       bridge.onHover((over) => { hoverSince = over ? performance.now() : 0; });
       bridge.onConfig(applyConfig);
       bridge.onDockVisible((v) => { dockVisible = !!v; });
+      bridge.onStage((st) => { if (st) stage = { ...st }; });
       bridge.orbAnchor({ x: home.x, y: home.y, r: body.r });
     } else {
       demo();

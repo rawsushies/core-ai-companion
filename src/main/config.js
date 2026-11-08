@@ -47,6 +47,7 @@ const DEFAULTS = {
     radius: 60, // px
     particles: 24000, // smoke style: more = denser filaments, heavier on the GPU
     renderScale: 1, // lower (0.6-0.8) on slow GPUs
+    idleFps: 30, // frame rate when nothing is happening (moving/talking always runs at full rate)
     backdrop: 'auto', // 'auto' follows your Windows/macOS light or dark theme; or 'light' / 'dark'
     hideFromCaptures: true, // hide the orb for a moment while COre takes a screenshot
     home: null, // {x, y} remembered after you drag it

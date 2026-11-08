@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen,
-  desktopCapturer, shell, nativeImage, session, dialog, nativeTheme, safeStorage,
+  desktopCapturer, shell, nativeImage, session, dialog, nativeTheme, safeStorage, Notification,
 } = require('electron');
 const { spawn } = require('child_process');
 
@@ -276,11 +276,66 @@ async function setupLocalModel() {
 
 // ---------------------------------------------------------------- windows
 
+// ---------------------------------------------------------------- stage
+// The overlay window only covers the part of the screen COre needs ("stage",
+// display coordinates). A full-screen transparent window makes Windows
+// recomposite the whole desktop every frame, which lags the entire system.
+
+let stage = null;
+
+function viewSize() {
+  const d = primaryDisplay();
+  return { w: d.bounds.width, h: d.bounds.height };
+}
+
+function defaultHome() {
+  const d = primaryDisplay();
+  const r = config.data.orb.radius || 60;
+  const wa = d.workArea;
+  return { x: Math.round(wa.x - d.bounds.x + wa.width - r * 3.2), y: Math.round(wa.y - d.bounds.y + wa.height - r * 4.2) };
+}
+
+function homeNow() {
+  const v = viewSize();
+  const h = config.data.orb.home;
+  return h && h.x > 0 && h.x < v.w && h.y > 0 && h.y < v.h ? h : defaultHome();
+}
+
+function clampStage(r) {
+  const v = viewSize();
+  const w = Math.max(64, Math.min(Math.round(r.w), v.w));
+  const h = Math.max(64, Math.min(Math.round(r.h), v.h));
+  return {
+    x: Math.min(Math.max(Math.round(r.x), 0), v.w - w),
+    y: Math.min(Math.max(Math.round(r.y), 0), v.h - h),
+    w,
+    h,
+  };
+}
+
+function initialStage() {
+  const r = config.data.orb.radius || 60;
+  const home = homeNow();
+  const half = Math.max(r * 3.6, 230);
+  return clampStage({ x: home.x - half, y: home.y - half, w: half * 2, h: half * 2 });
+}
+
+function applyStage(next) {
+  stage = clampStage(next);
+  if (!overlay || overlay.isDestroyed()) return;
+  const d = primaryDisplay();
+  overlay.setBounds({ x: d.bounds.x + stage.x, y: d.bounds.y + stage.y, width: stage.w, height: stage.h });
+  toOverlay('stage', stage);
+}
+
 function createOverlay() {
   const d = primaryDisplay();
-  const { x, y, width, height } = d.bounds;
+  stage = initialStage();
   overlay = new BrowserWindow({
-    x, y, width, height,
+    x: d.bounds.x + stage.x,
+    y: d.bounds.y + stage.y,
+    width: stage.w,
+    height: stage.h,
     transparent: true,
     backgroundColor: '#00000000',
     frame: false,
@@ -321,7 +376,7 @@ function createOverlay() {
 function updateHitTest() {
   if (!overlay || overlay.isDestroyed()) return;
   const p = screen.getCursorScreenPoint();
-  const b = overlay.getBounds();
+  const b = primaryDisplay().bounds; // orbBounds are display coordinates
   const dx = p.x - b.x - orbBounds.x;
   const dy = p.y - b.y - orbBounds.y;
   const over = orbDragging || Math.hypot(dx, dy) < orbBounds.r * 1.15;
@@ -517,7 +572,7 @@ function createTray() {
     { label: 'Show chat under the orb', click: () => setDockVisible(true, true) },
     { label: 'Conversation history', click: () => togglePanel(true) },
     { type: 'separator' },
-    { label: 'Hide / show orb', click: toggleOrb },
+    { label: 'Hide / show COre', click: toggleOrb },
     { label: 'New conversation', click: resetConversation },
     { label: 'Settings (config.json)', click: openConfig },
     { label: 'Check for updates', click: () => checkForUpdates(false) },
@@ -529,10 +584,24 @@ function createTray() {
   tray.on('click', () => togglePanel());
 }
 
+let orbHidden = false;
 function toggleOrb() {
   if (!overlay) return;
-  if (overlay.isVisible()) overlay.hide();
-  else overlay.showInactive();
+  orbHidden = !orbHidden;
+  if (orbHidden) {
+    overlay.hide();
+    if (dock && dock.isVisible()) dock.hide();
+    const key = prettyKey(config.data.hotkeys.hide);
+    // Make it obvious COre was hidden on purpose, and how to get it back.
+    if (Notification.isSupported()) {
+      new Notification({ title: 'COre is hidden', body: `Press ${key} (or use the tray icon) to bring COre back.`, silent: true }).show();
+    }
+    if (tray) tray.setToolTip(`COre (hidden — ${key} to show)`);
+  } else {
+    overlay.showInactive();
+    if (dockVisible && dock) { positionDock(); dock.showInactive(); }
+    if (tray) tray.setToolTip('COre');
+  }
 }
 
 function openConfig() {
@@ -559,7 +628,14 @@ function reloadConfig() {
 
 function overlayConfig() {
   const { orb, voice } = config.data;
-  return { orb, voice: { ...voice, tts: voice.tts !== false }, lightTheme: !nativeTheme.shouldUseDarkColors };
+  return {
+    orb,
+    voice: { ...voice, tts: voice.tts !== false },
+    lightTheme: !nativeTheme.shouldUseDarkColors,
+    view: viewSize(),
+    stage,
+    defaultHome: defaultHome(),
+  };
 }
 
 // ---------------------------------------------------------------- screen
@@ -800,6 +876,10 @@ function wireIpc() {
     orbBounds = { x: +b.x || 0, y: +b.y || 0, r: Math.max(8, +b.r || 46) };
   });
   ipcMain.on('orb:drag', (e, dragging) => { if (fromOverlay(e)) orbDragging = !!dragging; });
+  ipcMain.on('stage:need', (e, r) => {
+    if (!fromOverlay(e) || !r || ![r.x, r.y, r.w, r.h].every(Number.isFinite)) return;
+    applyStage(r);
+  });
   ipcMain.on('orb:click', (e) => { if (fromOverlay(e)) toggleDock(); });
   ipcMain.on('orb:anchor', (e, a) => {
     if (!fromOverlay(e) || !a) return;
@@ -997,7 +1077,8 @@ app.whenReady().then(async () => {
   // Resolution, scaling or primary-monitor changes: refit the overlay.
   const refit = () => {
     if (!overlay || overlay.isDestroyed()) return;
-    overlay.setBounds(primaryDisplay().bounds);
+    applyStage(stage || initialStage());
+    toOverlay('config', overlayConfig());
     if (dockVisible) positionDock();
   };
   for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(ev, refit);
