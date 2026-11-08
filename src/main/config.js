@@ -6,14 +6,23 @@ const { randomBytes } = require('crypto');
 
 const DEFAULTS = {
   brain: {
-    // 'claude-cli'    -> Claude through your Claude Code login (no API key)
-    // 'ollama'        -> free local model (https://ollama.com)
-    // 'openai-compat' -> DeepSeek / OpenRouter / LM Studio / any OpenAI-style endpoint
+    // COre tries the primary first, then each fallback in order. Brains that
+    // aren't connected (no key) are skipped.
+    //   'claude-cli'    Claude through your Claude Code login (no API key)
+    //   'gemini'        Google Gemini, free key from aistudio.google.com/apikey
+    //   'groq'          Groq, free key from console.groq.com/keys
+    //   'openrouter'    OpenRouter (free ":free" models), key from openrouter.ai/keys
+    //   'ollama'        free local model (https://ollama.com)
+    //   'openai-compat' any OpenAI-style endpoint (DeepSeek, LM Studio...)
     provider: 'claude-cli',
-    fallback: 'ollama', // tried when the primary fails before saying anything; '' to disable
+    fallbacks: ['gemini', 'groq', 'openrouter', 'openai-compat', 'ollama'],
     claude: { command: 'claude', model: 'haiku', effort: '' },
-    ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:7b', visionModel: '' },
-    openaiCompat: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: '', vision: false },
+    gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', prefer: 'flash', vision: true },
+    groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', prefer: 'versatile|70b|llama', vision: false },
+    openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', prefer: ':free$', vision: false },
+    ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:3b', visionModel: '' },
+    openaiCompat: { baseUrl: '', model: '', apiKey: '', vision: false },
+    secrets: {}, // API keys, encrypted with your OS account (set them in the chat's ⚙ → Brain)
   },
   personality: {
     tone: 'sarcastic', // 'sarcastic' | 'dramatic' | 'calm' | 'cheerful' | 'professional'
@@ -39,7 +48,7 @@ const DEFAULTS = {
     particles: 24000, // smoke style: more = denser filaments, heavier on the GPU
     renderScale: 1, // lower (0.6-0.8) on slow GPUs
     backdrop: 'auto', // 'auto' follows your Windows/macOS light or dark theme; or 'light' / 'dark'
-    hideFromCaptures: true, // keep the orb out of its own screenshots (Windows/macOS)
+    hideFromCaptures: true, // hide the orb for a moment while COre takes a screenshot
     home: null, // {x, y} remembered after you drag it
   },
   screen: {

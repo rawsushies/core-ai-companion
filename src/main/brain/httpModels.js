@@ -45,6 +45,24 @@ class OllamaBrain extends HistoryMixin {
     super(state, 'ollamaHistory');
     this.cfg = config;
     this.id = 'ollama';
+    this.name = 'Local model (Ollama)';
+  }
+
+  available() {
+    return !!this.cfg.baseUrl;
+  }
+
+  // { running, hasModel, models } — quick probe for the status panel.
+  async probe(timeoutMs = 1200) {
+    try {
+      const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok) return { running: false };
+      const models = ((await res.json()).models || []).map((m) => m.name);
+      const want = this.cfg.model.includes(':') ? this.cfg.model : `${this.cfg.model}:latest`;
+      return { running: true, models, hasModel: models.some((m) => m === this.cfg.model || m === want) };
+    } catch {
+      return { running: false };
+    }
   }
 
   get label() {
@@ -87,27 +105,67 @@ class OllamaBrain extends HistoryMixin {
 }
 
 class OpenAICompatBrain extends HistoryMixin {
-  constructor({ config, state }) {
-    super(state, 'openaiHistory');
+  // id: 'gemini' | 'groq' | 'openrouter' | 'openai-compat'; getKey() returns the API key.
+  constructor({ config, state, id = 'openai-compat', name, getKey, onModelChange }) {
+    super(state, `${id}History`);
     this.cfg = config;
-    this.id = 'openai-compat';
+    this.id = id;
+    this.name = name || id;
+    this.getKey = getKey || (() => config.apiKey || '');
+    this.onModelChange = onModelChange || (() => {});
   }
 
   get label() {
-    let host = this.cfg.baseUrl;
-    try { host = new URL(this.cfg.baseUrl).host; } catch {}
-    return `${this.cfg.model} via ${host}`;
+    return `${this.cfg.model || 'auto'} via ${this.name}`;
   }
 
-  async ask({ prompt, image, tone, signal, onDelta }) {
+  available() {
+    return !!this.cfg.baseUrl && (this.cfg.noKey === true || !!this.getKey());
+  }
+
+  _headers() {
+    const headers = { 'content-type': 'application/json' };
+    const key = this.getKey();
+    if (key) headers.authorization = `Bearer ${key}`;
+    return headers;
+  }
+
+  // Providers rename models over time. Ask the endpoint which models exist and
+  // pick the best match for this preset's preference pattern.
+  async resolveModel(signal) {
+    const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/models`, { headers: this._headers(), signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const ids = (data.data || data.models || []).map((m) => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
+    const prefer = this.cfg.prefer ? new RegExp(this.cfg.prefer, 'i') : null;
+    const avoid = /embed|tts|audio|image|vision-preview|guard|whisper|moderation/i;
+    const pick = ids.find((m) => (!prefer || prefer.test(m)) && !avoid.test(m)) || ids.find((m) => !avoid.test(m));
+    if (pick && pick !== this.cfg.model) {
+      this.cfg.model = pick;
+      this.onModelChange(this.id, pick);
+    }
+    return pick || null;
+  }
+
+  async ask(args) {
+    if (!this.cfg.model) await this.resolveModel(args.signal);
+    try {
+      return await this._ask(args);
+    } catch (err) {
+      if (err.modelProblem && !args._retried && (await this.resolveModel(args.signal))) {
+        return this._ask({ ...args, _retried: true });
+      }
+      throw err;
+    }
+  }
+
+  async _ask({ prompt, image, tone, signal, onDelta }) {
     const content = image && this.cfg.vision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:image/png;base64,${image.base64}` } }]
       : prompt;
-    const headers = { 'content-type': 'application/json' };
-    if (this.cfg.apiKey) headers.authorization = `Bearer ${this.cfg.apiKey}`;
     const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
-      headers,
+      headers: this._headers(),
       signal,
       body: JSON.stringify({
         model: this.cfg.model,
@@ -121,7 +179,11 @@ class OpenAICompatBrain extends HistoryMixin {
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
-      throw new Error(res.status === 401 ? `${this.label} rejected the API key.` : `${this.label} error ${res.status}: ${t.slice(0, 200)}`);
+      if (res.status === 401 || res.status === 403) throw new Error(`${this.name} rejected the API key.`);
+      if (res.status === 429) throw new Error(`${this.name} is rate limited right now (free tier limit).`);
+      const err = new Error(`${this.name} error ${res.status}: ${t.slice(0, 200)}`);
+      err.modelProblem = res.status === 404 || /model/i.test(t);
+      throw err;
     }
     let text = '';
     for await (const line of readLines(res.body)) {

@@ -8,8 +8,16 @@
 </head>
 <body>
   <div id="shell" class="shell">
+    <div id="brain-banner" class="banner" hidden>
+      <span id="banner-text">No brain is connected yet.</span>
+      <button type="button" id="banner-login" class="primary-sm">Log in to Claude</button>
+      <button type="button" id="banner-more" class="ghost">Other options</button>
+    </div>
     <div id="log" class="log" aria-live="polite"></div>
     <div id="settings" class="settings" hidden>
+      <div class="section-title">Brain <span class="hint">tried in this order</span></div>
+      <div id="brain-list" class="brain-list"></div>
+      <div class="section-title">Voice &amp; personality</div>
       <label>Tone
         <select id="tone">
           <option value="sarcastic">Sarcastic</option>

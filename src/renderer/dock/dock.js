@@ -121,6 +121,71 @@
     showVals();
   }
 
+  // ---------------------------------------------------------- brain
+  const brainList = document.getElementById('brain-list');
+  const banner = document.getElementById('brain-banner');
+  const STATE_TEXT = {
+    connected: 'connected', login: 'needs login', missing: 'not installed', checking: 'checking…',
+    'no-key': 'add a free key', 'no-model': 'model not downloaded', 'not-installed': 'Ollama not installed',
+  };
+  const KEY_HELP = { gemini: 'Get a free key', groq: 'Get a free key', openrouter: 'Get a key' };
+
+  function button(label, cls, fn) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function renderBrain(list) {
+    if (!Array.isArray(list)) return;
+    brainList.textContent = '';
+    for (const p of list) {
+      const row = document.createElement('div');
+      row.className = 'brain-row';
+      const nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = p.model && p.state === 'connected' ? `${p.name} · ${p.model}` : p.name;
+      const st = document.createElement('div');
+      st.className = `st ${p.state}`;
+      st.textContent = STATE_TEXT[p.state] || p.state;
+      row.append(nm, st);
+      if (p.id === 'claude-cli' && p.state !== 'connected') {
+        const r = document.createElement('div');
+        r.className = 'keyrow';
+        r.append(button('Log in to Claude', 'primary-sm', () => api.loginClaude()));
+        row.append(r);
+      } else if (p.id === 'ollama' && p.state !== 'connected') {
+        const r = document.createElement('div');
+        r.className = 'keyrow';
+        r.append(button(p.state === 'not-installed' ? 'Install Ollama' : 'Download model', 'ghost', () => api.setupLocal()));
+        row.append(r);
+      } else if (p.keyable) {
+        const r = document.createElement('div');
+        r.className = 'keyrow';
+        const inp = document.createElement('input');
+        inp.type = 'password';
+        inp.placeholder = p.state === 'connected' ? 'key saved — paste to replace' : 'paste API key';
+        inp.setAttribute('aria-label', `${p.name} API key`);
+        inp.autocomplete = 'off';
+        r.append(inp, button('Save', 'ghost', () => { api.setKey(p.id, inp.value); inp.value = ''; }));
+        if (p.state === 'connected') r.append(button('Remove', 'ghost', () => api.setKey(p.id, '')));
+        else r.append(button(KEY_HELP[p.id] || 'Get key', 'linkbtn', () => api.openLink(p.id)));
+        row.append(r);
+      }
+      brainList.append(row);
+    }
+    const anyConnected = list.some((p) => p.state === 'connected');
+    banner.hidden = anyConnected;
+    reportSize();
+  }
+  document.getElementById('banner-login').addEventListener('click', () => api.loginClaude());
+  document.getElementById('banner-more').addEventListener('click', () => { settings.hidden = false; reportSize(); });
+  api.onBrain(renderBrain);
+  document.getElementById('gear').addEventListener('click', () => { if (!settings.hidden) api.brainStatus().then(renderBrain); });
+
   api.onMessage(({ role, text }) => {
     if (role === 'core-start') { startStream(); return; }
     add(role, text);
@@ -147,6 +212,7 @@
 
   api.init().then((d) => {
     if (!d) return;
+    api.brainStatus().then(renderBrain);
     applySettings(d.settings);
     for (const m of d.recent) add(m.role, m.text);
     log.scrollTop = log.scrollHeight;

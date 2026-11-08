@@ -24,6 +24,9 @@ falls back to a **free local model** (Ollama) or any OpenAI-compatible endpoint 
 
 ## Install on Windows (easiest)
 
+> If the screen ever goes dark behind the orb, press `Ctrl+Alt+H` to hide COre and tell us your Windows version
+> and GPU.
+
 1. Unzip the folder somewhere permanent, for example `C:\Users\<you>\COre`.
 2. Double-click **Install COre.bat**. It installs Node.js (via winget) and Claude Code if they are missing,
    installs COre, puts a **COre** shortcut on your Desktop, helps you log in to Claude once, and starts COre.
@@ -72,6 +75,21 @@ speech-recognition model (Whisper base, ~80 MB) that then runs locally.
 - Phrases like "look at this", "what's on my screen", "where is the…" also share a screenshot automatically
   (turn off with `screen.autoShareOnDeixis`).
 - Tray icon: talk, new conversation, settings, quit.
+
+## Brains
+
+COre tries brains in order and skips the ones that aren't connected. Open ⚙ in the chat block → **Brain**:
+
+- **Claude** (default, no API key): uses Claude Code on your PC. Signing in to the Claude desktop app does not
+  sign in Claude Code; press **Log in to Claude** once and finish the login in your browser.
+- **Google Gemini** — free API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Can see screenshots.
+- **Groq** — free API key from [console.groq.com/keys](https://console.groq.com/keys). Very fast.
+- **OpenRouter** — key from [openrouter.ai/keys](https://openrouter.ai/keys); COre picks a free (`:free`) model.
+- **Local model (Ollama)** — fully offline and free: **Install Ollama**, then **Download model**.
+- **Custom endpoint** — any OpenAI-compatible API (DeepSeek, LM Studio…) via `brain.openaiCompat` in config.json.
+
+Keys are encrypted with your Windows account (DPAPI) before they're saved. If a provider renames its models,
+COre asks it for its model list and switches automatically.
 
 ## Voice and personality
 

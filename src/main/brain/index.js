@@ -5,12 +5,37 @@ const { ClaudeCliBrain } = require('./claudeCli');
 const { OllamaBrain, OpenAICompatBrain } = require('./httpModels');
 const { SpeechPlanner } = require('./speech');
 
-function makeProvider(id, { config, workDir, state }) {
+const NAMES = {
+  gemini: 'Google Gemini',
+  groq: 'Groq',
+  openrouter: 'OpenRouter',
+  'openai-compat': 'Custom endpoint',
+};
+
+function makeProvider(id, { config, workDir, state, getKey, onModelChange }) {
   const b = config.brain;
   if (id === 'claude-cli') return new ClaudeCliBrain({ config: b.claude, workDir, state });
   if (id === 'ollama') return new OllamaBrain({ config: b.ollama, state });
-  if (id === 'openai-compat') return new OpenAICompatBrain({ config: b.openaiCompat, state });
+  if (NAMES[id] && b[id === 'openai-compat' ? 'openaiCompat' : id]) {
+    const cfg = b[id === 'openai-compat' ? 'openaiCompat' : id];
+    return new OpenAICompatBrain({
+      config: cfg,
+      state,
+      id,
+      name: NAMES[id],
+      getKey: () => (getKey && getKey(id)) || cfg.apiKey || '',
+      onModelChange,
+    });
+  }
   return null;
+}
+
+// The order COre tries brains in: the primary, then the fallbacks.
+function chainIds(brainCfg) {
+  const fallbacks = Array.isArray(brainCfg.fallbacks)
+    ? brainCfg.fallbacks
+    : (brainCfg.fallback ? [brainCfg.fallback] : []);
+  return [brainCfg.provider, ...fallbacks].filter((id, i, all) => id && all.indexOf(id) === i);
 }
 
 function buildPrompt(provider, text, shot) {
@@ -19,33 +44,43 @@ function buildPrompt(provider, text, shot) {
     const rel = path.relative(provider.workDir, shot.path).split(path.sep).join('/');
     return `${text}\n\n(A screenshot of my screen is saved at ./${rel}, ${shot.width}x${shot.height} pixels. Read it before answering.)`;
   }
-  const canSee = (provider.id === 'ollama' && provider.cfg.visionModel) || (provider.id === 'openai-compat' && provider.cfg.vision);
+  const canSee = (provider.id === 'ollama' && provider.cfg.visionModel) || (provider.id !== 'ollama' && provider.cfg.vision);
   return canSee
     ? `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.)`
     : `${text}\n\n(I shared my screen, but the model you are running on cannot see images. Say so briefly if it matters.)`;
 }
 
 class Brain {
-  constructor({ config, workDir, state }) {
-    this.ctx = { config, workDir, state };
+  // getKey(id) returns a stored API key; onModelChange(id, model) persists an
+  // automatically chosen model.
+  constructor({ config, workDir, state, getKey, onModelChange }) {
+    this.ctx = { config, workDir, state, getKey, onModelChange };
     this.reload(config);
   }
 
   reload(config) {
     this.ctx.config = config;
-    this.primary = makeProvider(config.brain.provider, this.ctx);
-    const fb = config.brain.fallback;
-    this.fallback = fb && fb !== config.brain.provider ? makeProvider(fb, this.ctx) : null;
-    if (!this.primary) throw new Error(`Unknown brain provider: ${config.brain.provider}`);
+    this.chain = chainIds(config.brain).map((id) => makeProvider(id, this.ctx)).filter(Boolean);
+    if (!this.chain.length) throw new Error(`Unknown brain provider: ${config.brain.provider}`);
+  }
+
+  get primary() { return this.chain[0]; }
+  get fallback() { return this.chain[1] || null; }
+
+  provider(id) {
+    return this.chain.find((p) => p.id === id) || null;
   }
 
   describe() {
-    return { primary: this.primary.label, fallback: this.fallback ? this.fallback.label : null };
+    const usable = this.chain.filter((p) => !p.available || p.available());
+    return {
+      primary: this.primary.label,
+      fallback: usable.slice(1).map((p) => p.name || p.label).join(', ') || null,
+    };
   }
 
   resetConversation() {
-    this.primary.resetConversation();
-    if (this.fallback) this.fallback.resetConversation();
+    for (const p of this.chain) p.resetConversation();
   }
 
   // onItem receives {type:'say'|'gesture'|'end', ...}; onStatus receives
@@ -53,7 +88,9 @@ class Brain {
   // typed: the message came from the chat box (normal-chat answer, only the
   // opening is spoken). onText receives the reply text as it streams.
   async ask({ text, shot, typed = false, signal, onItem, onText, onStatus = () => {} }) {
-    const providers = [this.primary, this.fallback].filter(Boolean);
+    // Providers without a key are skipped quietly instead of failing loudly.
+    const providers = this.chain.filter((p) => !p.available || p.available());
+    const failures = [];
     const tone = (this.ctx.config.personality && this.ctx.config.personality.tone) || 'sarcastic';
     let lastErr;
     for (let i = 0; i < providers.length; i++) {
@@ -75,15 +112,24 @@ class Brain {
       } catch (err) {
         if (err.aborted) throw err;
         lastErr = err;
-        if (streamed || i === providers.length - 1) {
+        failures.push(`${p.name || p.label}: ${err.message}`);
+        if (streamed) {
           planner.finish();
           throw err;
         }
-        onStatus({ kind: 'fallback', from: p.label, to: providers[i + 1].label, reason: err.message });
+        if (i === providers.length - 1) {
+          planner.finish();
+          const e = new Error(failures.length > 1
+            ? `No brain could answer. ${failures.join(' | ')} — connect one in ⚙ → Brain.`
+            : `${failures[0]} — connect another brain in ⚙ → Brain.`);
+          e.failures = failures;
+          throw e;
+        }
+        onStatus({ kind: 'fallback', from: p.name || p.label, to: providers[i + 1].name || providers[i + 1].label, reason: err.message });
       }
     }
-    throw lastErr;
+    throw lastErr || new Error('No brain is connected. Open ⚙ → Brain in the chat to connect one.');
   }
 }
 
-module.exports = { Brain, buildPrompt };
+module.exports = { Brain, buildPrompt, chainIds, NAMES };

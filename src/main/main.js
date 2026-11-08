@@ -4,8 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const {
   app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen,
-  desktopCapturer, shell, nativeImage, session, dialog, nativeTheme,
+  desktopCapturer, shell, nativeImage, session, dialog, nativeTheme, safeStorage,
 } = require('electron');
+const { spawn } = require('child_process');
 
 const { loadConfig, loadState } = require('./config');
 const { Brain } = require('./brain');
@@ -98,6 +99,181 @@ function brainStatus() {
   }
 }
 
+// ---------------------------------------------------------------- secrets
+
+// API keys are encrypted with the OS account (Windows DPAPI, macOS Keychain,
+// libsecret on Linux) before they are written to config.json.
+function getSecret(id) {
+  const v = (config.data.brain.secrets || {})[id];
+  if (!v) return '';
+  try {
+    if (v.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(v.slice(4), 'base64'));
+    if (v.startsWith('plain:')) return v.slice(6);
+  } catch (err) {
+    console.error(`[core] could not decrypt ${id} key: ${err.message}`);
+  }
+  return '';
+}
+
+function setSecret(id, value) {
+  config.data.brain.secrets = config.data.brain.secrets || {};
+  const key = String(value || '').trim();
+  if (!key) delete config.data.brain.secrets[id];
+  else if (safeStorage.isEncryptionAvailable()) config.data.brain.secrets[id] = `enc:${safeStorage.encryptString(key).toString('base64')}`;
+  else config.data.brain.secrets[id] = `plain:${key}`;
+  config.save();
+}
+
+function makeBrain() {
+  return new Brain({
+    config: config.data,
+    workDir,
+    state,
+    getKey: getSecret,
+    onModelChange: (id, model) => {
+      const k = id === 'openai-compat' ? 'openaiCompat' : id;
+      if (config.data.brain[k]) { config.data.brain[k].model = model; config.save(); }
+    },
+  });
+}
+
+// ---------------------------------------------------------------- brain status & login
+
+const NAMES_FOR_UI = { gemini: 'Gemini', groq: 'Groq', openrouter: 'OpenRouter' };
+const KEY_LINKS = {
+  gemini: 'https://aistudio.google.com/apikey',
+  groq: 'https://console.groq.com/keys',
+  openrouter: 'https://openrouter.ai/keys',
+  ollama: 'https://ollama.com/download',
+};
+
+async function brainStatusList() {
+  if (!brain) return [];
+  const out = [];
+  for (const p of brain.chain) {
+    if (p.id === 'claude-cli') {
+      let st = 'checking';
+      let detail = '';
+      try {
+        await p.detect();
+        st = 'connected';
+      } catch (err) {
+        st = err.notLoggedIn ? 'login' : 'missing';
+        detail = err.message;
+      }
+      out.push({ id: p.id, name: 'Claude', state: st, detail, model: p.cfg.model });
+    } else if (p.id === 'ollama') {
+      const pr = await p.probe();
+      out.push({ id: p.id, name: 'Local model (Ollama)', state: !pr.running ? 'not-installed' : pr.hasModel ? 'connected' : 'no-model', model: p.cfg.model });
+    } else if (p.id === 'openai-compat' && !p.cfg.baseUrl) {
+      continue; // custom endpoint: only listed once it is configured in config.json
+    } else {
+      out.push({ id: p.id, name: p.name, state: p.available() ? 'connected' : 'no-key', model: p.cfg.model, keyable: p.id !== 'openai-compat' });
+    }
+  }
+  return out;
+}
+
+let brainStatusCache = [];
+async function refreshBrainStatus() {
+  try {
+    brainStatusCache = await brainStatusList();
+  } catch (err) {
+    console.error('[core] brain status failed:', err.message);
+  }
+  toDock('dock:brain', brainStatusCache);
+  toPanel('status', { kind: 'brain', ...brainStatus() });
+  return brainStatusCache;
+}
+
+function claudeCommand() {
+  return (config.data.brain.claude && config.data.brain.claude.command) || 'claude';
+}
+
+// Open the official Claude Code sign-in (browser) in a terminal window, then
+// watch for the login to complete.
+let loginWatch = null;
+function loginClaude() {
+  const cmd = claudeCommand();
+  try {
+    if (process.platform === 'win32') {
+      spawn('cmd.exe', ['/d', '/s', '/c', `start "Claude login" cmd /k ${cmd.includes(' ') ? `"${cmd}"` : cmd} auth login`], {
+        windowsVerbatimArguments: true, detached: true, stdio: 'ignore',
+      }).unref();
+    } else if (process.platform === 'darwin') {
+      spawn('osascript', ['-e', `tell application "Terminal" to do script "${cmd} auth login"`, '-e', 'tell application "Terminal" to activate'], { detached: true, stdio: 'ignore' }).unref();
+    } else {
+      const term = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xterm'];
+      let launched = false;
+      for (const t of term) {
+        try {
+          const args = t === 'gnome-terminal' ? ['--', cmd, 'auth', 'login'] : ['-e', `${cmd} auth login`];
+          const child = spawn(t, args, { detached: true, stdio: 'ignore' });
+          child.on('error', () => {});
+          child.unref();
+          launched = true;
+          break;
+        } catch {}
+      }
+      if (!launched) spawn(cmd, ['auth', 'login'], { detached: true, stdio: 'ignore' }).unref();
+    }
+  } catch (err) {
+    addTranscript('system', `Could not open the Claude login: ${err.message}. Open a terminal and run: claude auth login`);
+    return;
+  }
+  addTranscript('system', 'A Claude sign-in window opened. Finish the login in your browser; I will connect automatically.');
+  const claude = brain && brain.provider('claude-cli');
+  if (!claude) return;
+  clearInterval(loginWatch);
+  const started = Date.now();
+  loginWatch = setInterval(async () => {
+    if (Date.now() - started > 8 * 60_000) { clearInterval(loginWatch); return; }
+    const st = await claude.authStatus().catch(() => ({ known: false }));
+    if (st.known && st.loggedIn) {
+      clearInterval(loginWatch);
+      claude.flags = null;
+      addTranscript('system', 'Claude is connected.');
+      toOverlay('attention', { level: 'success', title: 'Claude connected' });
+      refreshBrainStatus();
+    }
+  }, 3000);
+}
+
+// Install / pull the local Ollama model in the background.
+async function setupLocalModel() {
+  const o = brain && brain.provider('ollama');
+  if (!o) return;
+  const pr = await o.probe();
+  if (!pr.running) {
+    shell.openExternal(KEY_LINKS.ollama);
+    addTranscript('system', 'Install Ollama from the page that just opened (free), start it, then press "Set up" again.');
+    return;
+  }
+  addTranscript('system', `Downloading the local model ${o.cfg.model}… this can take a few minutes.`);
+  try {
+    const res = await fetch(`${o.cfg.baseUrl.replace(/\/$/, '')}/api/pull`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: o.cfg.model, stream: true }),
+    });
+    let lastPct = -10;
+    const { readLines } = require('./brain/httpModels');
+    for await (const line of readLines(res.body)) {
+      let ev;
+      try { ev = JSON.parse(line); } catch { continue; }
+      if (ev.error) throw new Error(ev.error);
+      if (ev.total && ev.completed) {
+        const pct = Math.floor((ev.completed / ev.total) * 100);
+        if (pct >= lastPct + 10) { lastPct = pct; toPanel('status', { kind: 'download', file: o.cfg.model, pct }); }
+      }
+    }
+    addTranscript('system', `Local model ${o.cfg.model} is ready.`);
+  } catch (err) {
+    addTranscript('system', `Local model download failed: ${err.message}`);
+  }
+  refreshBrainStatus();
+}
+
 // ---------------------------------------------------------------- windows
 
 function createOverlay() {
@@ -131,7 +307,8 @@ function createOverlay() {
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlay.setIgnoreMouseEvents(true, { forward: true });
-  if (config.data.orb.hideFromCaptures && !IS_LINUX) overlay.setContentProtection(true);
+  // No setContentProtection here: on some Windows/GPU combinations it makes a
+  // transparent window render opaque black. Screenshots hide the orb instead.
   overlay.loadFile(path.join(RENDERER, 'overlay', 'index.html'));
   overlay.once('ready-to-show', () => overlay.showInactive());
   overlay.on('closed', () => { overlay = null; });
@@ -344,6 +521,7 @@ function createTray() {
     { label: 'New conversation', click: resetConversation },
     { label: 'Settings (config.json)', click: openConfig },
     { label: 'Check for updates', click: () => checkForUpdates(false) },
+    { label: 'Log in to Claude', click: loginClaude },
     { type: 'separator' },
     { label: 'Quit COre', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
@@ -366,7 +544,7 @@ function reloadConfig() {
   config.reload();
   try {
     if (brain) brain.reload(config.data);
-    else brain = new Brain({ config: config.data, workDir, state });
+    else brain = makeBrain();
   } catch (err) {
     addTranscript('system', err.message);
   }
@@ -392,17 +570,15 @@ async function captureScreen() {
   const scale = Math.min(1, 1568 / Math.max(width, height));
   const thumbnailSize = { width: Math.round(width * scale), height: Math.round(height * scale) };
 
-  // Linux can't exclude a window from capture, so hide the orb for a moment.
-  const hide = IS_LINUX && overlay && overlay.isVisible();
-  if (hide) {
-    overlay.hide();
-    await new Promise((r) => setTimeout(r, 140));
-  }
+  // Hide COre's own windows for a moment so they aren't in the screenshot.
+  const toHide = config.data.orb.hideFromCaptures === false ? [] : [overlay, dock].filter((w) => w && !w.isDestroyed() && w.isVisible());
+  for (const w of toHide) w.hide();
+  if (toHide.length) await new Promise((r) => setTimeout(r, 160));
   let sources;
   try {
     sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize });
   } finally {
-    if (hide) overlay.showInactive();
+    for (const w of toHide) w.showInactive();
   }
   const src = sources.find((s) => s.display_id === String(d.id)) || sources[0];
   if (!src) throw new Error('No screen available to capture.');
@@ -651,6 +827,16 @@ function wireIpc() {
   });
   ipcMain.on('dock:setting', (e, { key, value } = {}) => { if (fromDock(e)) applySetting(key, value); });
   ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
+  ipcMain.handle('dock:brainStatus', (e) => (fromDock(e) ? refreshBrainStatus() : null));
+  ipcMain.on('dock:loginClaude', (e) => { if (fromDock(e)) loginClaude(); });
+  ipcMain.on('dock:setupLocal', (e) => { if (fromDock(e)) setupLocalModel(); });
+  ipcMain.on('dock:setKey', (e, { id, key } = {}) => {
+    if (!fromDock(e) || !['gemini', 'groq', 'openrouter'].includes(id)) return;
+    setSecret(id, key);
+    addTranscript('system', key ? `${NAMES_FOR_UI[id]} key saved (encrypted).` : `${NAMES_FOR_UI[id]} key removed.`);
+    refreshBrainStatus();
+  });
+  ipcMain.on('dock:openLink', (e, id) => { if (fromDock(e) && KEY_LINKS[id]) shell.openExternal(KEY_LINKS[id]); });
   ipcMain.on('orb:home', (e, home) => {
     if (!fromOverlay(e) || !home) return;
     config.data.orb.home = { x: Math.round(home.x), y: Math.round(home.y) };
@@ -764,7 +950,7 @@ app.whenReady().then(async () => {
   transcript.push(...(state.get('transcript') || []));
 
   try {
-    brain = new Brain({ config: config.data, workDir, state });
+    brain = makeBrain();
   } catch (err) {
     dialog.showErrorBox('COre', err.message);
   }
@@ -830,12 +1016,14 @@ app.whenReady().then(async () => {
     addTranscript('system', `Hi, I'm COre. Press ${prettyKey(hk.listen)} to talk, ${prettyKey(hk.listenWithScreen)} to talk about your screen, or type in the chat under me. Brain: ${brainStatus().primary}.`);
   }
 
-  if (brain && brain.primary.detect) {
-    brain.primary.detect().catch((err) => {
-      addTranscript('system', `${err.message}${brain.fallback ? ` I will use ${brain.fallback.label} until then.` : ''}`);
-      toOverlay('attention', { level: 'warn', title: 'Claude Code needs setup' });
-    });
-  }
+  refreshBrainStatus().then((list) => {
+    const claude = list.find((p) => p.id === 'claude-cli');
+    const others = list.filter((p) => p.id !== 'claude-cli' && p.state === 'connected');
+    if (claude && claude.state !== 'connected') {
+      addTranscript('system', `${claude.detail}${others.length ? ` Until then I will use ${others.map((p) => p.name).join(', ')}.` : ' Press "Log in to Claude" in the chat, or connect a free alternative in ⚙ → Brain.'}`);
+      toOverlay('attention', { level: 'warn', title: 'Connect a brain' });
+    }
+  });
 });
 
 app.on('will-quit', () => {

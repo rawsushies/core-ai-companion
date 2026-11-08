@@ -121,8 +121,39 @@ class ClaudeCliBrain {
     for (const need of ['--print', '--output-format', '--resume', '--session-id']) {
       if (!flags.has(need)) throw new Error(`Your Claude Code is too old (missing ${need}). Update it with: claude update`);
     }
+    this.hasAuthCommand = /^\s+auth\b/m.test(stdout);
     this.flags = flags;
+    if (!this.loggedIn) {
+      const st = await this.authStatus();
+      if (st.known && !st.loggedIn) {
+        const e = new Error('Claude Code is installed but not logged in (the Claude desktop app login does not carry over).');
+        e.notLoggedIn = true;
+        this.flags = null; // re-check next time
+        throw e;
+      }
+    }
     return flags;
+  }
+
+  // { known, loggedIn } from `claude auth status --json` (older CLIs: unknown).
+  async authStatus() {
+    if (!this.cmd) this.cmd = await resolveCommand(this.cfg.command || 'claude');
+    const { stdout } = await run(this.cmd.file, ['auth', 'status', '--json'], { shell: this.cmd.shell });
+    try {
+      const j = JSON.parse(stdout.slice(stdout.indexOf('{')));
+      this.loggedIn = !!j.loggedIn;
+      return { known: true, loggedIn: this.loggedIn };
+    } catch {
+      return { known: false, loggedIn: false };
+    }
+  }
+
+  available() {
+    return true;
+  }
+
+  get name() {
+    return 'Claude';
   }
 
   resetConversation() {

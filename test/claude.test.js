@@ -96,3 +96,13 @@ test('ClaudeCliBrain can be aborted mid-turn', { skip: process.platform === 'win
   ac.abort();
   await assert.rejects(brain.ask({ prompt: 'hi', signal: ac.signal, onDelta: () => {} }), (e) => e.aborted === true);
 });
+
+test('a logged-out Claude Code is detected before any request is sent', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
+  process.env.FAKE_CLAUDE_MODE = 'loggedout';
+  const brain = new ClaudeCliBrain({ config: { command: FAKE }, workDir: dir, state: memState() });
+  await assert.rejects(brain.ask({ prompt: 'hi', onDelta: () => {} }), (e) => e.notLoggedIn === true && /not logged in/.test(e.message));
+  assert.deepEqual(await brain.authStatus(), { known: true, loggedIn: false });
+  delete process.env.FAKE_CLAUDE_MODE;
+  assert.deepEqual(await brain.authStatus(), { known: true, loggedIn: true });
+});

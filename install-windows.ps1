@@ -62,14 +62,19 @@ $lnk.Description = 'COre desktop companion'
 $lnk.Save()
 Write-Host "Shortcut 'COre' added to your Desktop."
 
-# 5. Claude login (only needed once)
+# 5. Claude login (only needed once; the Claude desktop app login does not carry over)
 Step "Claude login"
 if (Have claude) {
-  $answer = Read-Host "Have you already logged in to Claude Code on this PC? (y/n)"
-  if ($answer -notmatch '^[yY]') {
-    Write-Host "A Claude Code window will open. Type /login, finish the login in your browser, then close that window."
-    Start-Process -FilePath 'cmd.exe' -ArgumentList '/k', 'claude'
-    Read-Host "Press Enter here when you have logged in"
+  $loggedIn = $false
+  try { $loggedIn = [bool]((claude auth status --json | Out-String | ConvertFrom-Json).loggedIn) } catch {}
+  if ($loggedIn) {
+    Write-Host "Claude Code is already logged in."
+  } else {
+    Write-Host "Opening the Claude sign-in in your browser. Log in with your Claude account."
+    claude auth login
+    try { $loggedIn = [bool]((claude auth status --json | Out-String | ConvertFrom-Json).loggedIn) } catch {}
+    if ($loggedIn) { Write-Host "Claude Code is logged in." -ForegroundColor Green }
+    else { Write-Host "Not logged in yet. You can do it later from COre: chat settings > Brain > Log in to Claude." -ForegroundColor Yellow }
   }
 }
 
