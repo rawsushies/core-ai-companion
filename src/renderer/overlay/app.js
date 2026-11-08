@@ -44,7 +44,8 @@
   const voice = new window.Voice(cfg.voice, {
     onSay: (text) => showCaption(text),
     onSpeakStart: () => setMode('speaking'),
-    onIdle: () => { if (mode === 'speaking') setMode('idle'); },
+    // Any finished turn returns to idle, including silent or empty replies.
+    onIdle: () => { if (mode === 'speaking' || mode === 'thinking') setMode('idle'); },
   });
 
   const listener = new window.Listener({
@@ -65,6 +66,8 @@
     if (!MODES[m]) return;
     mode = m;
   }
+  // Read-only peek used by the end-to-end tests.
+  window.__coreMode = () => mode;
 
   function setAttention(a) {
     attention = a && ATTENTION[a.level] ? { level: a.level, since: performance.now() } : null;
@@ -128,7 +131,7 @@
     pointing = null;
     explainUntil = 0;
     body.arms.forEach((a) => { a.goal = 0; });
-    if (mode === 'speaking') setMode('idle');
+    if (mode === 'speaking' || mode === 'thinking') setMode('idle');
   }
 
   // ------------------------------------------------------------ behaviour
@@ -325,7 +328,18 @@
     }
     placeHome();
     body = M.createBody({ x: home.x, y: home.y, r: cfg.orb.radius || 60 });
-    addEventListener('resize', () => { renderer.resize(); placeHome(); });
+    addEventListener('resize', () => {
+      renderer.resize();
+      placeHome();
+      if (bridge) bridge.orbAnchor({ x: home.x, y: home.y, r: body.r });
+    });
+    // A GPU reset (sleep/wake, driver update) loses the WebGL context; reload
+    // the overlay so COre comes back instead of staying invisible.
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      if (bridge) bridge.log('WebGL context lost, reloading overlay');
+      setTimeout(() => location.reload(), 1000);
+    });
     setupPointer();
 
     if (bridge) {

@@ -59,6 +59,44 @@ function cleanForSpeech(text) {
     .trim();
 }
 
+// Removes fenced code blocks from a text stream (fences may arrive split
+// across chunks), so code shown in the chat is never read aloud.
+class FenceFilter {
+  constructor() {
+    this.inFence = false;
+    this.hold = '';
+  }
+
+  feed(text) {
+    let s = this.hold + text;
+    this.hold = '';
+    const tail = /`{1,2}$/.exec(s);
+    if (tail) {
+      this.hold = tail[0];
+      s = s.slice(0, -tail[0].length);
+    }
+    let out = '';
+    let i = 0;
+    for (;;) {
+      const j = s.indexOf('```', i);
+      if (j === -1) {
+        if (!this.inFence) out += s.slice(i);
+        break;
+      }
+      if (!this.inFence) out += s.slice(i, j);
+      this.inFence = !this.inFence;
+      i = j + 3;
+    }
+    return out;
+  }
+
+  flush() {
+    const rest = this.inFence ? '' : this.hold;
+    this.hold = '';
+    return rest;
+  }
+}
+
 class SpeechPlanner {
   // emit(item): ordered say / gesture / end items for the orb.
   // opts.onText(text): every tag-free text fragment, for live chat display.
@@ -69,6 +107,7 @@ class SpeechPlanner {
     this.maxSpoken = opts.maxSpoken || Infinity;
     this.spoken = 0;
     this.tags = new TagStreamParser();
+    this.fence = new FenceFilter();
     this.chunker = new SentenceChunker();
     this.fullText = '';
   }
@@ -79,6 +118,7 @@ class SpeechPlanner {
 
   finish() {
     for (const seg of this.tags.flush()) this._segment(seg);
+    for (const s of this.chunker.feed(this.fence.flush())) this._say(s);
     for (const s of this.chunker.flush()) this._say(s);
     this.emit({ type: 'end' });
     return this.fullText.trim();
@@ -88,7 +128,7 @@ class SpeechPlanner {
     if (seg.type === 'text') {
       this.fullText += seg.text;
       this.onText(seg.text);
-      for (const s of this.chunker.feed(seg.text)) this._say(s);
+      for (const s of this.chunker.feed(this.fence.feed(seg.text))) this._say(s);
     } else {
       // Release text written before the tag first, so the gesture lands at
       // the moment in speech where the model placed it.
@@ -106,4 +146,4 @@ class SpeechPlanner {
   }
 }
 
-module.exports = { SentenceChunker, SpeechPlanner, cleanForSpeech };
+module.exports = { SentenceChunker, SpeechPlanner, FenceFilter, cleanForSpeech };

@@ -165,17 +165,20 @@ class Updater {
       }
 
       const newPkg = JSON.parse(fs.readFileSync(path.join(this.appRoot, 'package.json'), 'utf8'));
-      if (depsChanged(oldPkg, newPkg)) {
-        this.log('Installing updated packages…');
-        const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-        await run(npm, ['install', '--no-audit', '--no-fund'], { cwd: this.appRoot, shell: process.platform === 'win32' });
-      }
+      // Packages are installed after the restart, before any model loads:
+      // on Windows the running app keeps native modules locked (EBUSY).
+      const needsInstall = depsChanged(oldPkg, newPkg);
       this.log(`COre updated to v${newPkg.version}. Restarting…`);
-      if (onUpdated) onUpdated(newPkg.version);
-      return { status: 'updated', version: newPkg.version };
+      if (onUpdated) onUpdated(newPkg.version, needsInstall);
+      return { status: 'updated', version: newPkg.version, needsInstall };
     } finally {
       this.busy = false;
     }
+  }
+
+  async installDependencies() {
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    await run(npm, ['install', '--no-audit', '--no-fund'], { cwd: this.appRoot, shell: process.platform === 'win32' });
   }
 
   async _applyZip(src) {

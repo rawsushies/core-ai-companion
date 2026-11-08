@@ -33,6 +33,13 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
+// COre's windows only ever show their own local pages: no navigation, no popups.
+app.on('web-contents-created', (_e, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.on('will-navigate', (e, url) => { if (url !== contents.getURL()) e.preventDefault(); });
+  contents.on('will-attach-webview', (e) => e.preventDefault());
+});
+
 let config; // JsonFile
 let state;
 let brain;
@@ -212,12 +219,12 @@ function setDockVisible(v, focus = false) {
   state.set('dockVisible', v);
   if (!dock) return;
   if (v) {
-    positionDock();
+    positionDock(); // also tells the overlay which side the dock is on
     if (focus) { dock.show(); dock.focus(); toDock('dock:focus'); } else dock.showInactive();
   } else {
     dock.hide();
+    toOverlay('dock:visible', false);
   }
-  toOverlay('dock:visible', v);
 }
 
 function toggleDock() {
@@ -367,6 +374,7 @@ function reloadConfig() {
   stt = makeStt();
   registerHotkeys();
   toOverlay('config', overlayConfig());
+  toDock('dock:settings', dockSettings());
   toPanel('status', { kind: 'brain', ...brainStatus() });
   addTranscript('system', 'Settings reloaded.');
 }
@@ -445,7 +453,10 @@ function abortCurrent() {
 
 function makeVoicePipeline({ speak }) {
   const v = config.data.voice;
-  const useKokoro = speak && v.tts !== false && v.engine !== 'system' && !tts.failed;
+  // Until the voice model has loaded (first run downloads ~90 MB), speak with
+  // the system voice instead of making every reply wait.
+  const useKokoro = speak && v.tts !== false && v.engine !== 'system' && !tts.failed && tts.ready;
+  if (speak && v.engine !== 'system' && !tts.ready && !tts.failed) tts.warm();
   return new OrderedVoicePipeline({
     synth: useKokoro ? (text) => tts.synth(text, { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed }) : null,
     forward: (item) => {
@@ -469,6 +480,14 @@ function resetConversation() {
   toPanel('transcript:reset');
   toDock('dock:reset');
   addTranscript('system', 'Started a new conversation.');
+}
+
+// Say one line outside a conversation turn (errors, notifications, updates),
+// with the same voice as normal replies.
+function speakLine(text) {
+  const p = makeVoicePipeline({ speak: true });
+  p.push({ type: 'say', text });
+  p.push({ type: 'end' });
 }
 
 async function handleUserText(text, { withScreen = false, typed = false } = {}) {
@@ -531,8 +550,7 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
     if (err.aborted) return;
     addTranscript('system', err.message);
     toOverlay('attention', { level: 'urgent', title: 'COre could not answer' });
-    toOverlay('speak:item', { type: 'say', text: "I can't reach my brain right now. The chat panel says why." });
-    toOverlay('speak:item', { type: 'end' });
+    speakLine("I can't reach my brain right now. The chat says why.");
   } finally {
     if (current === ac) {
       current = null;
@@ -553,17 +571,30 @@ function startListening(withScreen) {
   toOverlay('listen:start', { withScreen });
 }
 
+let sttNoticeShown = false;
 function makeStt() {
   const v = config.data.voice;
   return new SpeechToText({
     model: v.sttModel,
     language: v.sttLanguage,
     cacheDir: path.join(app.getPath('userData'), 'models'),
-    onProgress: (p) => toPanel('status', { kind: 'download', file: p.file, pct: p.pct }),
+    onProgress: (p) => {
+      toPanel('status', { kind: 'download', file: p.file, pct: p.pct });
+      // transformers.js reports progress even when reading its cache: only
+      // announce a download when the model really isn't on disk yet.
+      if (!sttNoticeShown && !fs.existsSync(path.join(app.getPath('userData'), 'models', ...v.sttModel.split('/')))) {
+        sttNoticeShown = true;
+        addTranscript('system', 'Downloading speech recognition (one time, about 80 MB). Your first request may take a minute.');
+      }
+    },
   });
 }
 
 // ---------------------------------------------------------------- hotkeys
+
+function prettyKey(accel) {
+  return String(accel || '').replace(/CommandOrControl|CmdOrCtrl/g, process.platform === 'darwin' ? '⌘' : 'Ctrl');
+}
 
 function registerHotkeys() {
   globalShortcut.unregisterAll();
@@ -571,9 +602,9 @@ function registerHotkeys() {
   const bind = (accel, fn, name) => {
     if (!accel) return;
     try {
-      if (!globalShortcut.register(accel, fn)) addTranscript('system', `Hotkey ${accel} (${name}) is taken by another app.`);
+      if (!globalShortcut.register(accel, fn)) addTranscript('system', `Hotkey ${prettyKey(accel)} (${name}) is taken by another app.`);
     } catch (err) {
-      addTranscript('system', `Invalid hotkey ${accel}: ${err.message}`);
+      addTranscript('system', `Invalid hotkey ${prettyKey(accel)}: ${err.message}`);
     }
   };
   bind(hk.listen, () => startListening(false), 'talk');
@@ -657,7 +688,7 @@ function wireIpc() {
     return {
       transcript: transcript.slice(-100),
       brain: brainStatus(),
-      hotkeys: hk,
+      hotkeys: { listen: prettyKey(hk.listen), listenWithScreen: prettyKey(hk.listenWithScreen), panel: prettyKey(hk.panel) },
       notify: { port: config.data.notify.port, enabled: config.data.notify.enabled },
     };
   });
@@ -690,10 +721,7 @@ async function startNotify() {
       onNotify: (note) => {
         toOverlay('attention', { level: note.level, title: note.title });
         addTranscript('notice', note.body ? `${note.title} — ${note.body}` : note.title);
-        if (note.speak || n.speak) {
-          toOverlay('speak:item', { type: 'say', text: note.title });
-          toOverlay('speak:item', { type: 'end' });
-        }
+        if (note.speak || n.speak) speakLine(note.title);
       },
     });
   } catch (err) {
@@ -703,10 +731,11 @@ async function startNotify() {
 
 // ---------------------------------------------------------------- updates
 
-function relaunchAfterUpdate(version) {
+function relaunchAfterUpdate(version, needsInstall) {
+  if (needsInstall) state.set('pendingInstall', true);
+  state.flush();
   toOverlay('attention', { level: 'info', title: 'COre updated' });
-  toOverlay('speak:item', { type: 'say', text: `Upgrade complete. Version ${version}. Try to contain your excitement.` });
-  toOverlay('speak:item', { type: 'end' });
+  speakLine(`Upgrade complete. Version ${version}. Try to contain your excitement.`);
   setTimeout(() => {
     app.isQuitting = true;
     app.relaunch();
@@ -724,7 +753,7 @@ async function checkForUpdates(quiet) {
 
 // ---------------------------------------------------------------- app
 
-app.on('second-instance', () => togglePanel(true));
+app.on('second-instance', () => setDockVisible(true, true));
 
 app.whenReady().then(async () => {
   const userData = app.getPath('userData');
@@ -739,18 +768,35 @@ app.whenReady().then(async () => {
   } catch (err) {
     dialog.showErrorBox('COre', err.message);
   }
-  stt = makeStt();
-  tts = new TextToSpeech({
-    cacheDir: path.join(userData, 'models'),
-    onProgress: (p) => toPanel('status', { kind: 'download', file: `voice ${p.file}`, pct: p.pct }),
-  });
-  if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
-  dockVisible = state.get('dockVisible') !== false;
   updater = new Updater({
     appRoot: ROOT,
     getConfig: () => config.data.update,
     log: (msg) => addTranscript('system', msg),
   });
+  if (state.get('pendingInstall')) {
+    // Finish an update that changed packages, before anything native loads.
+    try {
+      await updater.installDependencies();
+    } catch (err) {
+      console.error('[core] post-update npm install failed:', err.message);
+    }
+    state.set('pendingInstall', false);
+  }
+
+  stt = makeStt();
+  let voiceNoticeShown = false;
+  tts = new TextToSpeech({
+    cacheDir: path.join(userData, 'models'),
+    onProgress: (p) => {
+      toPanel('status', { kind: 'download', file: `voice ${p.file}`, pct: p.pct });
+      if (!voiceNoticeShown && !fs.existsSync(path.join(userData, 'models', 'onnx-community', 'Kokoro-82M-v1.0-ONNX'))) {
+        voiceNoticeShown = true;
+        addTranscript('system', 'Downloading my voice (one time, about 90 MB). I will use your system voice until it is ready.');
+      }
+    },
+  });
+  if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
+  dockVisible = state.get('dockVisible') !== false;
 
   // Only COre's own overlay may use the microphone.
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
@@ -762,6 +808,13 @@ app.whenReady().then(async () => {
 
   wireIpc();
   nativeTheme.on('updated', () => toOverlay('config', overlayConfig()));
+  // Resolution, scaling or primary-monitor changes: refit the overlay.
+  const refit = () => {
+    if (!overlay || overlay.isDestroyed()) return;
+    overlay.setBounds(primaryDisplay().bounds);
+    if (dockVisible) positionDock();
+  };
+  for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(ev, refit);
   // Linux compositors sometimes need a beat before a transparent window is created.
   if (IS_LINUX) await new Promise((r) => setTimeout(r, 300));
   createOverlay();
@@ -774,7 +827,7 @@ app.whenReady().then(async () => {
 
   const hk = config.data.hotkeys;
   if (!transcript.length) {
-    addTranscript('system', `Hi, I'm COre. Press ${hk.listen} to talk, ${hk.listenWithScreen} to talk about your screen, or ${hk.panel} to type. Brain: ${brainStatus().primary}.`);
+    addTranscript('system', `Hi, I'm COre. Press ${prettyKey(hk.listen)} to talk, ${prettyKey(hk.listenWithScreen)} to talk about your screen, or type in the chat under me. Brain: ${brainStatus().primary}.`);
   }
 
   if (brain && brain.primary.detect) {

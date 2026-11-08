@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { SentenceChunker, SpeechPlanner, cleanForSpeech } = require('../src/main/brain/speech');
+const { SentenceChunker, SpeechPlanner, FenceFilter, cleanForSpeech } = require('../src/main/brain/speech');
 
 test('chunker waits for whitespace after a period (decimals survive streaming)', () => {
   const c = new SentenceChunker(1);
@@ -36,4 +36,20 @@ test('cleanForSpeech strips markdown', () => {
 test('cleanForSpeech drops list markers so the voice never says "dash"', () => {
   assert.equal(cleanForSpeech('- Name things well.'), 'Name things well.');
   assert.equal(cleanForSpeech('1. First\n2) Second'), 'First Second');
+});
+
+test('code blocks are never spoken, even when the fences arrive split across chunks', () => {
+  const said = [];
+  let shown = '';
+  const p = new SpeechPlanner((i) => { if (i.type === 'say') said.push(i.text); }, { onText: (t) => { shown += t; } });
+  for (const d of ['Here is the fix, nothing fancy at all. `', '``js\nconst answer = 42;\nconsole.log(answer);\n`', '``\nThat prints the answer for you. ']) p.feed(d);
+  p.finish();
+  assert.ok(!said.join(' ').includes('const'), said.join(' | '));
+  assert.ok(said.join(' ').includes('That prints the answer'));
+  assert.ok(shown.includes('const answer = 42;'), 'the chat still shows the code');
+});
+
+test('FenceFilter keeps inline backticks outside fences', () => {
+  const f = new FenceFilter();
+  assert.equal(f.feed('use `x` here') + f.flush(), 'use `x` here');
 });

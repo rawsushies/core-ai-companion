@@ -18,6 +18,7 @@ class TextToSpeech {
     this.nextId = 1;
     this.pending = new Map();
     this.failed = null; // message once loading failed, so callers fall back fast
+    this.ready = false; // model loaded; until then COre uses the system voice
   }
 
   _ensure() {
@@ -25,7 +26,7 @@ class TextToSpeech {
     const w = new Worker(path.join(__dirname, 'worker.mjs'), { workerData: { cacheDir: this.cacheDir } });
     w.on('message', (m) => {
       if (m.type === 'progress') return this.onProgress(m);
-      if (m.type === 'ready') { this.failed = null; return; }
+      if (m.type === 'ready') { this.failed = null; this.ready = true; return; }
       if (m.type === 'error' && m.id === null) {
         this.failed = m.message;
         for (const q of this.pending.values()) q.reject(new Error(m.message));
@@ -35,7 +36,7 @@ class TextToSpeech {
       const p = this.pending.get(m.id);
       if (!p) return;
       this.pending.delete(m.id);
-      if (m.type === 'audio') p.resolve({ audio: m.audio, sampleRate: m.sampleRate });
+      if (m.type === 'audio') { this.ready = true; p.resolve({ audio: m.audio, sampleRate: m.sampleRate }); }
       else p.reject(new Error(m.message));
     });
     w.on('error', (err) => {
@@ -44,7 +45,7 @@ class TextToSpeech {
       this.pending.clear();
       this.worker = null;
     });
-    w.on('exit', () => { this.worker = null; });
+    w.on('exit', () => { this.worker = null; this.ready = false; });
     this.worker = w;
     return w;
   }

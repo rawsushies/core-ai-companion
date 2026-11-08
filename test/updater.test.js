@@ -73,10 +73,12 @@ test('updater downloads, applies a newer version and reports it', { skip: proces
   };
   const logs = [];
   let updatedTo = null;
+  let install = null;
   const u = new Updater({ appRoot: app, getConfig: () => ({ source: 'someone/core', branch: 'main' }), fetchImpl: fakeFetch, log: (m) => logs.push(m) });
-  const r = await u.check({ onUpdated: (v) => { updatedTo = v; } });
+  const r = await u.check({ onUpdated: (v, needsInstall) => { updatedTo = v; install = needsInstall; } });
   assert.equal(r.status, 'updated');
   assert.equal(updatedTo, '0.2.0');
+  assert.equal(install, false, 'same dependencies: no reinstall after restart');
   assert.equal(fs.readFileSync(path.join(app, 'src', 'main.js'), 'utf8'), 'new');
   assert.deepEqual(calls, [
     'https://raw.githubusercontent.com/someone/core/main/package.json',

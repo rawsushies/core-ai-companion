@@ -93,7 +93,7 @@
     baseStatus();
     d.transcript.forEach(add);
     const hk = d.hotkeys;
-    hints.textContent = `${hk.listen} talk  ·  ${hk.listenWithScreen} talk about screen  ·  ${hk.panel} this panel`;
+    hints.textContent = `${hk.listen} talk  ·  ${hk.listenWithScreen} talk about screen  ·  ${hk.panel} chat under the orb`;
     log.scrollTop = log.scrollHeight;
   });
 })();
