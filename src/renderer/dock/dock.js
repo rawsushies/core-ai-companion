@@ -90,6 +90,10 @@
   document.getElementById('open-panel').addEventListener('click', () => api.openPanel());
   document.getElementById('updates').addEventListener('click', () => api.checkUpdates());
   document.getElementById('new-chat').addEventListener('click', () => api.newChat());
+  const graphics = document.getElementById('graphics');
+  api.graphicsMode().then((g) => { if (g) graphics.value = g.mode; });
+  graphics.addEventListener('change', () => api.setGraphics(graphics.value)); // restarts COre
+  document.getElementById('diag').addEventListener('click', () => api.diagnostics());
 
   // Settings controls write straight to config.
   const tone = document.getElementById('tone');

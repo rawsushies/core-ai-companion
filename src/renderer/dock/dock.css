@@ -70,6 +70,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-
 .settings select { background: #0d1411; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; font: inherit; }
 .settings input[type="range"] { accent-color: var(--accent); }
 .settings .row { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
+.settings .row.bottom { grid-column: auto; align-items: end; }
 .ghost { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 12px; }
 .ghost:hover { background: rgba(77, 255, 154, 0.07); }
 textarea.scroll { overflow-y: auto; }

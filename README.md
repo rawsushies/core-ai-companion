@@ -24,8 +24,10 @@ falls back to a **free local model** (Ollama) or any OpenAI-compatible endpoint 
 
 ## Install on Windows (easiest)
 
-> If the screen ever goes dark behind the orb, press `Ctrl+Alt+H` to hide COre and tell us your Windows version
-> and GPU.
+> **Black box behind the orb or chat?** Some graphics drivers can't do transparent windows on the GPU. COre detects
+> this and restarts itself in *safe graphics mode* automatically; you can also pick it yourself in the chat's
+> ⚙ → Display → Graphics (or the tray icon → Graphics). ⚙ → **Copy diagnostics** copies your GPU details for
+> troubleshooting.
 
 1. Unzip the folder somewhere permanent, for example `C:\Users\<you>\COre`.
 2. Double-click **Install COre.bat**. It installs Node.js (via winget) and Claude Code if they are missing,

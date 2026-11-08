@@ -46,6 +46,15 @@
         <input id="robot" type="range" min="0" max="1" step="0.05">
       </label>
       <label class="check"><input id="speak-typed" type="checkbox"> Read typed replies aloud</label>
+      <div class="section-title">Display</div>
+      <label>Graphics
+        <select id="graphics">
+          <option value="auto">Automatic</option>
+          <option value="software">Safe mode (fixes black box)</option>
+          <option value="gpu">Force GPU</option>
+        </select>
+      </label>
+      <div class="row bottom"><button type="button" id="diag" class="ghost">Copy diagnostics</button></div>
       <div class="row">
         <button type="button" id="new-chat" class="ghost">New chat</button>
         <button type="button" id="open-panel" class="ghost">History</button>

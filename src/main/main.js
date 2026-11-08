@@ -20,10 +20,30 @@ const ROOT = path.join(__dirname, '..', '..');
 const RENDERER = path.join(ROOT, 'src', 'renderer');
 const PRELOAD = path.join(ROOT, 'src', 'preload');
 
-// The orb is a WebGL2 shader. Some GPUs/VMs are blocklisted by Chromium,
-// which would leave COre invisible; fall back to software GL instead.
-app.commandLine.appendSwitch('ignore-gpu-blocklist');
-app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+// ---------------------------------------------------------------- graphics mode
+// Transparent windows on Windows need working GPU compositing. If Chromium's
+// GPU process crashes (or a driver is forced past Chromium's blocklist),
+// Electron falls back to software compositing and transparent windows turn
+// opaque black. So:
+//   'auto' (default): normal GPU; if the GPU process crashes or compositing
+//                     isn't available, restart once in safe graphics mode.
+//   'software':       safe mode: software rendering from the start (keeps
+//                     transparency), WebGL via SwiftShader, lighter orb.
+//   'gpu':            force the GPU even on blocklisted drivers.
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
+const EARLY_DIR = app.getPath('userData');
+const earlyConfig = readJson(path.join(EARLY_DIR, 'config.json'));
+const earlyState = readJson(path.join(EARLY_DIR, 'state.json'));
+const GRAPHICS = (earlyConfig.orb && earlyConfig.orb.graphics) || 'auto';
+const SAFE_GRAPHICS = GRAPHICS === 'software' || (GRAPHICS === 'auto' && earlyState.safeGraphics === true);
+if (SAFE_GRAPHICS) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+} else if (GRAPHICS === 'gpu') {
+  app.commandLine.appendSwitch('ignore-gpu-blocklist');
+}
 
 // Transparent windows on Linux need these to composite correctly.
 if (IS_LINUX) {
@@ -63,6 +83,7 @@ let orbDragging = false;
 let overlayInteractive = false;
 let cursorTimer = null;
 let workDir;
+const APP_STARTED = Date.now();
 let lastShot = null;
 
 const transcript = [];
@@ -577,6 +598,15 @@ function createTray() {
     { label: 'Settings (config.json)', click: openConfig },
     { label: 'Check for updates', click: () => checkForUpdates(false) },
     { label: 'Log in to Claude', click: loginClaude },
+    {
+      label: 'Graphics',
+      submenu: [
+        { label: 'Automatic (recommended)', type: 'radio', checked: GRAPHICS === 'auto', click: () => setGraphicsMode('auto') },
+        { label: 'Safe mode (fixes black boxes)', type: 'radio', checked: GRAPHICS === 'software', click: () => setGraphicsMode('software') },
+        { label: 'Force GPU', type: 'radio', checked: GRAPHICS === 'gpu', click: () => setGraphicsMode('gpu') },
+      ],
+    },
+    { label: 'Copy diagnostics', click: copyDiagnostics },
     { type: 'separator' },
     { label: 'Quit COre', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
@@ -628,8 +658,11 @@ function reloadConfig() {
 
 function overlayConfig() {
   const { orb, voice } = config.data;
+  const orbCfg = SAFE_GRAPHICS
+    ? { ...orb, particles: Math.min(orb.particles || 24000, 9000), renderScale: Math.min(orb.renderScale || 1, 0.8), idleFps: Math.min(orb.idleFps || 30, 24) }
+    : orb;
   return {
-    orb,
+    orb: orbCfg,
     voice: { ...voice, tts: voice.tts !== false },
     lightTheme: !nativeTheme.shouldUseDarkColors,
     view: viewSize(),
@@ -890,7 +923,12 @@ function wireIpc() {
   const fromDock = (e) => dock && e.sender === dock.webContents;
   ipcMain.handle('dock:init', (e) => (fromDock(e) ? {
     settings: dockSettings(),
-    recent: transcript.slice(-8).filter((m) => m.role !== 'system').map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text })),
+    // Recent conversation, plus notices from this session (the dock may load
+    // after startup notices like "log in to Claude" were raised).
+    recent: transcript.slice(-12)
+      .filter((m) => m.role !== 'system' || m.ts >= APP_STARTED)
+      .slice(-8)
+      .map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text })),
   } : null));
   ipcMain.on('dock:ask', (e, text) => { if (fromDock(e)) handleUserText(text, { typed: true }); });
   ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); } });
@@ -917,6 +955,9 @@ function wireIpc() {
     refreshBrainStatus();
   });
   ipcMain.on('dock:openLink', (e, id) => { if (fromDock(e) && KEY_LINKS[id]) shell.openExternal(KEY_LINKS[id]); });
+  ipcMain.on('dock:diagnostics', (e) => { if (fromDock(e)) copyDiagnostics(); });
+  ipcMain.on('dock:graphics', (e, mode) => { if (fromDock(e) && ['auto', 'software', 'gpu'].includes(mode)) setGraphicsMode(mode); });
+  ipcMain.handle('dock:graphicsMode', (e) => (fromDock(e) ? { mode: GRAPHICS, safe: SAFE_GRAPHICS } : null));
   ipcMain.on('orb:home', (e, home) => {
     if (!fromOverlay(e) || !home) return;
     config.data.orb.home = { x: Math.round(home.x), y: Math.round(home.y) };
@@ -946,6 +987,12 @@ function wireIpc() {
     if (reason && reason !== 'silence') addTranscript('system', `Microphone: ${reason}`);
   });
   ipcMain.on('overlay:log', (e, msg) => { if (fromOverlay(e)) console.log('[overlay]', msg); });
+  ipcMain.on('overlay:rendererFailed', (e, msg) => {
+    if (!fromOverlay(e)) return;
+    console.warn('[overlay] renderer failed:', msg);
+    if (SAFE_GRAPHICS) addTranscript('system', `I can't draw my orb on this PC (${msg}). Try ⚙ → Display → Force GPU, or copy diagnostics and send them over.`);
+    else switchToSafeGraphics(`WebGL unavailable: ${msg}`);
+  });
 
   ipcMain.handle('overlay:init', (e) => (fromOverlay(e) ? overlayConfig() : null));
   ipcMain.handle('panel:init', (e) => {
@@ -993,6 +1040,64 @@ async function startNotify() {
   } catch (err) {
     addTranscript('system', `Notification endpoint could not start on port ${n.port}: ${err.message}`);
   }
+}
+
+// ---------------------------------------------------------------- graphics watchdog
+
+function switchToSafeGraphics(reason) {
+  if (SAFE_GRAPHICS || GRAPHICS !== 'auto' || state.get('safeGraphics')) return;
+  console.warn(`[core] switching to safe graphics: ${reason}`);
+  state.set('safeGraphics', true);
+  state.set('safeGraphicsReason', reason);
+  state.flush();
+  app.isQuitting = true;
+  app.relaunch();
+  app.exit(0);
+}
+
+function watchGraphics() {
+  app.on('child-process-gone', (_e, d) => {
+    if (d.type === 'GPU' && d.reason !== 'clean-exit') switchToSafeGraphics(`GPU process ${d.reason}`);
+  });
+  if (process.platform !== 'win32' || SAFE_GRAPHICS) return;
+  setTimeout(() => {
+    const st = app.getGPUFeatureStatus();
+    const comp = String(st.gpu_compositing || '');
+    if (comp && !comp.startsWith('enabled')) switchToSafeGraphics(`gpu_compositing=${comp}`);
+  }, 4000);
+}
+
+async function diagnostics() {
+  let gpu = null;
+  try { gpu = await app.getGPUInfo('basic'); } catch {}
+  return {
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    platform: `${process.platform} ${require('os').release()}`,
+    graphicsMode: SAFE_GRAPHICS ? 'safe (software)' : GRAPHICS,
+    safeGraphicsReason: state.get('safeGraphicsReason') || null,
+    gpuFeatureStatus: app.getGPUFeatureStatus(),
+    gpuDevices: gpu && gpu.gpuDevice ? gpu.gpuDevice.map((g) => ({ vendorId: g.vendorId, deviceId: g.deviceId, active: g.active, driver: g.driverVersion })) : null,
+    displays: screen.getAllDisplays().map((d) => ({ size: d.size, scale: d.scaleFactor, primary: d.id === primaryDisplay().id })),
+    stage,
+    brain: brainStatusCache.map((b) => `${b.name}: ${b.state}`),
+  };
+}
+
+async function copyDiagnostics() {
+  const d = await diagnostics();
+  require('electron').clipboard.writeText(JSON.stringify(d, null, 2));
+  addTranscript('system', 'Diagnostics copied to the clipboard. Paste them to whoever is helping you.');
+}
+
+function setGraphicsMode(mode) {
+  config.data.orb.graphics = mode;
+  config.save();
+  state.set('safeGraphics', false);
+  state.flush();
+  app.isQuitting = true;
+  app.relaunch();
+  app.exit(0);
 }
 
 // ---------------------------------------------------------------- updates
@@ -1073,6 +1178,7 @@ app.whenReady().then(async () => {
   ));
 
   wireIpc();
+  watchGraphics();
   nativeTheme.on('updated', () => toOverlay('config', overlayConfig()));
   // Resolution, scaling or primary-monitor changes: refit the overlay.
   const refit = () => {
@@ -1093,6 +1199,10 @@ app.whenReady().then(async () => {
   updater.start(relaunchAfterUpdate);
 
   const hk = config.data.hotkeys;
+  if (SAFE_GRAPHICS && GRAPHICS === 'auto' && !state.get('safeGraphicsAnnounced')) {
+    state.set('safeGraphicsAnnounced', true);
+    addTranscript('system', `Your graphics driver had trouble with transparent windows (${state.get('safeGraphicsReason') || 'GPU problem'}), so I switched to safe graphics mode. It keeps me transparent; the smoke is a little lighter.`);
+  }
   if (!transcript.length) {
     addTranscript('system', `Hi, I'm COre. Press ${prettyKey(hk.listen)} to talk, ${prettyKey(hk.listenWithScreen)} to talk about your screen, or type in the chat under me. Brain: ${brainStatus().primary}.`);
   }

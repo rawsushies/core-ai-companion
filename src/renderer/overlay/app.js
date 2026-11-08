@@ -380,7 +380,9 @@
         ? new window.LiquidOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1 })
         : new window.SmokeOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1, particles: cfg.orb.particles || 24000 });
     } catch (err) {
-      if (bridge) bridge.log(`renderer failed: ${err.message}`);
+      // No WebGL2 (blocklisted or missing GPU): main restarts in safe graphics
+      // mode, which renders WebGL in software.
+      if (bridge) bridge.rendererFailed(err.message);
       document.body.dataset.error = err.message;
       return;
     }
