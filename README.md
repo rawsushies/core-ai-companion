@@ -20,7 +20,14 @@ falls back to a **free local model** (Ollama) or any OpenAI-compatible endpoint 
 | Moving | the cloud lags behind its centre like smoke |
 | Notification | colour change and pulsing halo: blue info, lime success, amber warning, red urgent |
 
-## Install
+## Install on Windows (easiest)
+
+1. Unzip the folder somewhere permanent, for example `C:\Users\<you>\COre`.
+2. Double-click **Install COre.bat**. It installs Node.js (via winget) and Claude Code if they are missing,
+   installs COre, puts a **COre** shortcut on your Desktop, helps you log in to Claude once, and starts COre.
+3. Next time, double-click **COre** on the Desktop (or **Start COre.bat**).
+
+## Install manually
 
 You need **Node.js 20+** and, for the Claude brain, **Claude Code** logged in once.
 
