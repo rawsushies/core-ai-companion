@@ -1,5 +1,7 @@
 # COre
 
+![COre states](assets/states.png)
+
 A desktop companion that lives on your screen as a **glossy black liquid orb**.
 It talks, listens, looks at your screen when you ask, reaches out a **liquid hand to point** at things,
 vibrates while it speaks, moves like liquid, and **changes colour** when something needs your attention.
