@@ -63,3 +63,25 @@ test('typed chat: full text streams to the chat, only the opening is spoken', ()
   assert.equal(said.length, 2);
   assert.ok(shown.includes('- item two'));
 });
+
+test('TextToSpeech renders sentences one at a time, in order', async () => {
+  const { TextToSpeech } = require('../src/main/tts');
+  const t = new TextToSpeech({ cacheDir: '/tmp' });
+  const order = [];
+  let active = 0;
+  let maxActive = 0;
+  t._ensure = () => ({
+    postMessage: (m) => {
+      active++; maxActive = Math.max(maxActive, active);
+      setTimeout(() => {
+        active--; order.push(m.text);
+        t.pending.get(m.id).resolve({ audio: new Float32Array(1), sampleRate: 24000 });
+        t.pending.delete(m.id);
+      }, m.text === 'one' ? 40 : 5);
+    },
+  });
+  const r = await Promise.all(['one', 'two', 'three'].map((x) => t.synth(x, { voice: 'am_onyx', semitones: -3 })));
+  assert.deepEqual(order, ['one', 'two', 'three']);
+  assert.equal(maxActive, 1);
+  assert.ok(r[0].rate < 1);
+});

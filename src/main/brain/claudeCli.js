@@ -92,9 +92,12 @@ function friendlyError(text) {
   if (/login|log in|authenticat|api key|unauthori[sz]ed|401/i.test(t)) {
     return 'Claude Code is not logged in. Open a terminal, run `claude`, and type /login.';
   }
-  if (/rate.?limit|usage limit|429|overloaded/i.test(t)) {
-    return 'Claude is at its usage limit right now.';
+  if (/hit your [\w -]*limit|rate.?limit|usage limit|429/i.test(t)) {
+    const reset = /\b(resets? [^\n.·]+)/i.exec(t);
+    const when = reset ? ` (${reset[1].trim()})` : '';
+    return `Claude's usage limit is reached${when}. Add a free Gemini or Groq key in ⚙ → Brain to keep talking meanwhile.`;
   }
+  if (/overloaded|529/i.test(t)) return 'Claude is overloaded right now. Try again in a minute.';
   return t.split('\n').map((s) => s.trim()).filter(Boolean).slice(-3).join(' ') || 'Claude Code failed.';
 }
 
@@ -158,9 +161,15 @@ class ClaudeCliBrain {
 
   resetConversation() {
     this.state.set('claudeSessionId', null);
+    this._killProc();
   }
 
-  _args({ sessionId, resume, tone }) {
+  dispose() {
+    this.disposed = true;
+    this._killProc();
+  }
+
+  _args({ sessionId, resume, tone, persistent }) {
     const f = this.flags;
     const system = persona({ canReadFiles: true, tone });
     const args = [
@@ -171,11 +180,13 @@ class ClaudeCliBrain {
       '--allowedTools', 'Read',
       '--system-prompt', this.cmd.shell ? forWindowsShell(system) : system,
     ];
+    if (persistent) args.push('--input-format', 'stream-json');
     if (f.has('--include-partial-messages')) args.push('--include-partial-messages');
     if (f.has('--restricted')) args.push('--restricted');
     if (f.has('--strict-mcp-config')) args.push('--strict-mcp-config');
     if (f.has('--permission-prompts')) args.push('--permission-prompts', 'none');
-    // Re-read the system prompt every turn so a tone change applies mid-conversation.
+    // On --resume, use the current system prompt (tone) rather than the one
+    // recorded when the conversation started.
     if (f.has('--system-prompt-snapshot')) args.push('--system-prompt-snapshot', 'off');
     if (this.cfg.model) args.push('--model', this.cfg.model);
     if (this.cfg.effort && f.has('--effort')) args.push('--effort', this.cfg.effort);
@@ -184,24 +195,168 @@ class ClaudeCliBrain {
     return args;
   }
 
+  get persistent() {
+    return !!(this.flags && this.flags.has('--input-format'));
+  }
+
+  // ------------------------------------------------------------ persistent session
+  // One long-running `claude -p --input-format stream-json` process: each turn
+  // is a JSON line on stdin. Skipping process start-up per message makes the
+  // first word arrive ~1.5 s sooner. The process is restarted (with --resume,
+  // so the conversation is kept) when the tone changes, after Stop, or if it dies.
+
+  _procKey(tone) {
+    return `${tone}|${this.cfg.model}|${this.cfg.effort}`;
+  }
+
+  _killProc() {
+    const p = this.proc;
+    this.proc = null;
+    if (p) {
+      p.dead = true;
+      killTree(p.child);
+    }
+  }
+
+  _ensureProc(tone) {
+    if (this.proc && !this.proc.dead && this.proc.key === this._procKey(tone)) return this.proc;
+    this._killProc();
+    const existing = this.state.get('claudeSessionId');
+    const sessionId = existing || randomUUID();
+    const resume = !!existing;
+    const args = this._args({ sessionId, resume, tone, persistent: true });
+    const child = spawn(this.cmd.file, this.cmd.shell ? args.map(quoteForCmd) : args, {
+      cwd: this.workDir,
+      shell: this.cmd.shell,
+      windowsHide: true,
+      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'core-companion' },
+    });
+    const proc = { child, key: this._procKey(tone), sessionId, resume, dead: false, turn: null, stderr: '', buf: '' };
+    this.proc = proc;
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      proc.buf += chunk;
+      let nl;
+      while ((nl = proc.buf.indexOf('\n')) !== -1) {
+        const line = proc.buf.slice(0, nl).trim();
+        proc.buf = proc.buf.slice(nl + 1);
+        if (line) this._onLine(proc, line);
+      }
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (c) => {
+      proc.stderr += c;
+      if (proc.stderr.length > 8000) proc.stderr = proc.stderr.slice(-8000);
+    });
+    child.stdin.on('error', () => {});
+    const onGone = (detail) => {
+      if (this.proc === proc) this.proc = null;
+      const wasDead = proc.dead;
+      proc.dead = true;
+      const t = proc.turn;
+      proc.turn = null;
+      if (t && !wasDead) {
+        const msg = proc.stderr || detail;
+        const err = new Error(friendlyError(msg));
+        err.retryable = proc.resume && /no conversation found|session/i.test(msg);
+        err.streamedAnything = t.streamed.length > 0;
+        t.finish(t.reject, err);
+      }
+    };
+    child.on('error', (err) => onGone(err.message));
+    child.on('close', (code) => onGone(`claude exited with code ${code}`));
+    return proc;
+  }
+
+  _onLine(proc, line) {
+    const ev = parseClaudeLine(line);
+    const t = proc.turn;
+    if (!ev || !t) return;
+    if (ev.kind === 'delta' && ev.text) {
+      t.streamed += ev.text;
+      t.onDelta(ev.text);
+    } else if (ev.kind === 'tool' && t.onTool) {
+      t.onTool(ev.name);
+    } else if (ev.kind === 'result') {
+      proc.turn = null;
+      if (ev.ok) {
+        proc.resume = true; // the session now exists on disk
+        this.state.set('claudeSessionId', ev.sessionId || proc.sessionId);
+        if (!t.streamed && ev.text) t.onDelta(ev.text);
+        t.finish(t.resolve, { text: t.streamed || ev.text });
+      } else {
+        const err = new Error(friendlyError(ev.error));
+        err.retryable = proc.resume && /no conversation found|session/i.test(String(ev.error));
+        err.streamedAnything = t.streamed.length > 0;
+        t.finish(t.reject, err);
+      }
+    }
+  }
+
+  // Start the process ahead of time so the first message is fast too.
+  async warm(tone) {
+    if (this.disposed) return;
+    try {
+      await this.detect();
+      if (this.persistent && !this.disposed) this._ensureProc(tone || 'sarcastic');
+    } catch {}
+  }
+
+  _persistentTurn({ prompt, tone, signal, onDelta, onTool }) {
+    return new Promise((resolve, reject) => {
+      const proc = this._ensureProc(tone);
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        fn(value);
+      };
+      const onAbort = () => {
+        // A turn can't be cancelled inside the process: restart it (warm).
+        if (proc.turn) proc.turn = null;
+        if (this.proc === proc) this._killProc();
+        const e = new Error('aborted');
+        e.aborted = true;
+        finish(reject, e);
+        setTimeout(() => this.warm(tone), 300);
+      };
+      const timer = setTimeout(() => {
+        if (this.proc === proc) this._killProc();
+        finish(reject, new Error('Claude took too long to answer.'));
+      }, TURN_TIMEOUT_MS);
+      if (signal) {
+        if (signal.aborted) return onAbort();
+        signal.addEventListener('abort', onAbort);
+      }
+      proc.turn = { onDelta, onTool, resolve, reject, finish, streamed: '' };
+      proc.child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })}\n`);
+    });
+  }
+
   async ask({ prompt, tone, signal, onDelta, onTool }) {
     await this.detect();
     const existing = this.state.get('claudeSessionId');
+    const turn = (args) => (this.persistent ? this._persistentTurn(args) : this._turn({
+      ...args, sessionId: this.state.get('claudeSessionId') || randomUUID(), resume: !!this.state.get('claudeSessionId'),
+    }));
     try {
-      return await this._turn({ prompt, tone, signal, onDelta, onTool, sessionId: existing || randomUUID(), resume: !!existing });
+      return await turn({ prompt, tone, signal, onDelta, onTool });
     } catch (err) {
       // A stale session id (deleted history, other machine): start fresh once.
-      if (existing && err.retryable) {
+      if (existing && err.retryable && !err.streamedAnything) {
         this.resetConversation();
-        return this._turn({ prompt, tone, signal, onDelta, onTool, sessionId: randomUUID(), resume: false });
+        return turn({ prompt, tone, signal, onDelta, onTool });
       }
       throw err;
     }
   }
 
+  // One process per message (older Claude Code without --input-format).
   _turn({ prompt, tone, signal, onDelta, onTool, sessionId, resume }) {
     return new Promise((resolve, reject) => {
-      const args = this._args({ sessionId, resume, tone });
+      const args = this._args({ sessionId, resume, tone, persistent: false });
       const child = spawn(this.cmd.file, this.cmd.shell ? args.map(quoteForCmd) : args, {
         cwd: this.workDir,
         shell: this.cmd.shell,
@@ -266,7 +421,6 @@ class ClaudeCliBrain {
       child.on('close', (code) => {
         if (result && result.ok) {
           this.state.set('claudeSessionId', result.sessionId || sessionId);
-          // Without --include-partial-messages nothing was streamed: speak the final text.
           if (!streamed && result.text) onDelta(result.text);
           return finish(resolve, { text: streamed || result.text });
         }

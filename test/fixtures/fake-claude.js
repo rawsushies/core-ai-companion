@@ -1,34 +1,63 @@
 #!/usr/bin/env node
 // Stand-in for the Claude Code CLI used by tests. Mimics `claude -p
-// --output-format stream-json --include-partial-messages`.
+// --output-format stream-json --include-partial-messages`, both one prompt on
+// stdin and the persistent `--input-format stream-json` mode.
 const fs = require('fs');
 const args = process.argv.slice(2);
+const MODE = process.env.FAKE_CLAUDE_MODE || '';
 if (args[0] === 'auth' && args[1] === 'status') {
-  process.stdout.write(JSON.stringify({ loggedIn: process.env.FAKE_CLAUDE_MODE !== 'loggedout' }) + '\n');
+  process.stdout.write(JSON.stringify({ loggedIn: MODE !== 'loggedout' }) + '\n');
   process.exit(0);
 }
 if (args.includes('--help')) {
-  process.stdout.write('Usage: claude [options]\nCommands:\n  auth   Manage authentication\n --print --output-format --include-partial-messages --resume --session-id --restricted --strict-mcp-config --tools --allowedTools --model --system-prompt --system-prompt-snapshot\n');
+  const extra = process.env.FAKE_CLAUDE_NO_STREAM_INPUT ? '' : ' --input-format';
+  process.stdout.write(`Usage: claude [options]\nCommands:\n  auth   Manage authentication\n --print --output-format --include-partial-messages --resume --session-id --restricted --strict-mcp-config --tools --allowedTools --model --system-prompt --system-prompt-snapshot${extra}\n`);
   process.exit(0);
 }
 if (process.env.FAKE_CLAUDE_ARGS) fs.appendFileSync(process.env.FAKE_CLAUDE_ARGS, JSON.stringify(args) + '\n');
-let input = '';
-process.stdin.on('data', (c) => { input += c; });
-process.stdin.on('end', () => {
-  const sid = args[args.indexOf('--session-id') + 1] || args[args.indexOf('--resume') + 1];
-  const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
-  if (process.env.FAKE_CLAUDE_MODE === 'stale' && args.includes('--resume')) {
-    out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: `No conversation found with session ID: ${sid}`, session_id: sid });
-    return;
-  }
-  if (process.env.FAKE_CLAUDE_MODE === 'auth') {
-    process.stderr.write('Invalid API key · Please run /login\n');
-    process.exit(1);
-  }
+const flagValue = (f) => (args.includes(f) ? args[args.indexOf(f) + 1] : undefined);
+const sid = flagValue('--session-id') || flagValue('--resume');
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+if (MODE === 'stale' && args.includes('--resume')) {
+  process.stderr.write(`No conversation found with session ID: ${sid}\n`);
+  process.exit(1);
+}
+if (MODE === 'auth') {
+  process.stderr.write('Invalid API key · Please run /login\n');
+  process.exit(1);
+}
+let turns = 0;
+function reply(text) {
+  turns++;
   out({ type: 'system', subtype: 'init', session_id: sid, model: 'fake' });
-  const reply = `You said: ${input.trim()}. [[explain]] Done.`;
-  for (const piece of reply.match(/.{1,7}/g)) {
-    out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: piece } }, session_id: sid });
-  }
-  out({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: sid });
-});
+  const r = `You said: ${text.trim()}. [[explain]] Done.`;
+  const pieces = r.match(/.{1,7}/g);
+  const delay = Number(process.env.FAKE_CLAUDE_DELAY || 0);
+  let i = 0;
+  const next = () => {
+    if (i < pieces.length) {
+      out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: pieces[i++] } }, session_id: sid });
+      return delay ? setTimeout(next, delay) : next();
+    }
+    out({ type: 'result', subtype: 'success', is_error: false, result: r, session_id: sid, num_turns: turns });
+  };
+  next();
+}
+if (args.includes('--input-format')) {
+  let buf = '';
+  process.stdin.on('data', (c) => {
+    buf += c;
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+      if (!line.trim()) continue;
+      const msg = JSON.parse(line);
+      reply(msg.message.content);
+    }
+  });
+  process.stdin.on('end', () => process.exit(0));
+} else {
+  let input = '';
+  process.stdin.on('data', (c) => { input += c; });
+  process.stdin.on('end', () => reply(input));
+}

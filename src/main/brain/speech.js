@@ -13,8 +13,12 @@ const SENTENCE_END = /[.!?]+["')\]]*\s+|[。！？]+|\n+/;
 const MIN_CHUNK = 24;
 
 class SentenceChunker {
-  constructor(minChars = MIN_CHUNK) {
+  // The first chunk goes out as soon as one sentence is complete (so the voice
+  // starts quickly); later sentences are merged up to minChars.
+  constructor(minChars = MIN_CHUNK, firstMin = 1) {
     this.minChars = minChars;
+    this.firstMin = firstMin;
+    this.released = 0;
     this.buffer = '';
     this.pending = '';
   }
@@ -29,9 +33,10 @@ class SentenceChunker {
       this.buffer = this.buffer.slice(end);
       if (!sentence) continue;
       this.pending = this.pending ? `${this.pending} ${sentence}` : sentence;
-      if (this.pending.length >= this.minChars) {
+      if (this.pending.length >= (this.released ? this.minChars : this.firstMin)) {
         ready.push(this.pending);
         this.pending = '';
+        this.released++;
       }
     }
     return ready;

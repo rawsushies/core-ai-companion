@@ -9,8 +9,9 @@ test('chunker waits for whitespace after a period (decimals survive streaming)',
   assert.deepEqual(c.flush(), ['Next']);
 });
 
-test('chunker merges short sentences up to the minimum size', () => {
+test('chunker releases the first sentence at once, then merges short ones', () => {
   const c = new SentenceChunker(24);
+  assert.deepEqual(c.feed('Fine. '), ['Fine.'], 'first sentence goes out immediately');
   assert.deepEqual(c.feed('Hi. Yes. '), []);
   assert.deepEqual(c.feed('That works well for me. '), ['Hi. Yes. That works well for me.']);
 });

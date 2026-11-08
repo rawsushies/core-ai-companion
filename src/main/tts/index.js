@@ -19,6 +19,7 @@ class TextToSpeech {
     this.pending = new Map();
     this.failed = null; // message once loading failed, so callers fall back fast
     this.ready = false; // model loaded; until then COre uses the system voice
+    this.chain = Promise.resolve(); // one sentence at a time, in order
   }
 
   _ensure() {
@@ -54,18 +55,25 @@ class TextToSpeech {
     this._ensure().postMessage({ type: 'warm' });
   }
 
+  // Sentences render one at a time so the first one gets the whole CPU (in
+  // parallel they'd all finish late).
   synth(text, { voice, semitones, speed }) {
-    const id = this.nextId++;
     const rate = pitchRate(semitones);
-    return new Promise((resolve, reject) => {
+    const job = () => new Promise((resolve, reject) => {
+      const id = this.nextId++;
       this.pending.set(id, { resolve: (r) => resolve({ ...r, rate }), reject });
       this._ensure().postMessage({ type: 'speak', id, text, voice, speed: Math.min(2, Math.max(0.5, (speed || 1) / rate)) });
     });
+    const result = this.chain.then(job, job);
+    this.chain = result.catch(() => {});
+    return result;
   }
 
+  // Resolves once the worker thread has fully stopped.
   dispose() {
-    if (this.worker) this.worker.terminate();
+    const w = this.worker;
     this.worker = null;
+    return w ? w.terminate().catch(() => {}) : Promise.resolve();
   }
 }
 

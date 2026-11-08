@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('core', {
   listenCancelled: (reason) => ipcRenderer.send('listen:cancelled', reason),
   log: (msg) => ipcRenderer.send('overlay:log', String(msg)),
   rendererFailed: (msg) => ipcRenderer.send('overlay:rendererFailed', String(msg)),
+  ready: () => ipcRenderer.send('overlay:ready'),
   onSpeakItem: on('speak:item'),
   onState: on('state'),
   onAttention: on('attention'),

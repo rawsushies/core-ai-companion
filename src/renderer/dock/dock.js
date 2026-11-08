@@ -86,7 +86,11 @@
   input.addEventListener('input', autosize);
   document.getElementById('mic').addEventListener('click', () => api.listen());
   document.getElementById('hide').addEventListener('click', () => api.hide());
-  document.getElementById('gear').addEventListener('click', () => { settings.hidden = !settings.hidden; reportSize(); });
+  document.getElementById('gear').addEventListener('click', () => {
+    settings.hidden = !settings.hidden;
+    shell.classList.toggle('settings-open', !settings.hidden);
+    reportSize();
+  });
   document.getElementById('open-panel').addEventListener('click', () => api.openPanel());
   document.getElementById('updates').addEventListener('click', () => api.checkUpdates());
   document.getElementById('new-chat').addEventListener('click', () => api.newChat());
@@ -186,7 +190,7 @@
     reportSize();
   }
   document.getElementById('banner-login').addEventListener('click', () => api.loginClaude());
-  document.getElementById('banner-more').addEventListener('click', () => { settings.hidden = false; reportSize(); });
+  document.getElementById('banner-more').addEventListener('click', () => { settings.hidden = false; shell.classList.add('settings-open'); reportSize(); });
   api.onBrain(renderBrain);
   document.getElementById('gear').addEventListener('click', () => { if (!settings.hidden) api.brainStatus().then(renderBrain); });
 

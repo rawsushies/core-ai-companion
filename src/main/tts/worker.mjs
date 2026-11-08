@@ -3,6 +3,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 
 let loading = null;
+let primed = false;
 
 function load() {
   if (!loading) {
@@ -35,7 +36,12 @@ function explain(err) {
 
 parentPort.on('message', async (msg) => {
   if (msg.type === 'warm') {
-    try { await load(); parentPort.postMessage({ type: 'ready' }); }
+    try {
+      const tts = await load();
+      // The first inference is slow (ONNX warm-up): do it now, not on a reply.
+      if (!primed) { primed = true; await tts.generate('Ready.', { voice: 'am_onyx' }).catch(() => {}); }
+      parentPort.postMessage({ type: 'ready' });
+    }
     catch (err) { parentPort.postMessage({ type: 'error', id: null, message: explain(err) }); }
     return;
   }

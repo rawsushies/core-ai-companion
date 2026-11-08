@@ -52,9 +52,11 @@ class SpeechToText {
     });
   }
 
+  // Resolves once the worker thread has fully stopped.
   dispose() {
-    if (this.worker) this.worker.terminate();
+    const w = this.worker;
     this.worker = null;
+    return w ? w.terminate().catch(() => {}) : Promise.resolve();
   }
 }
 

@@ -80,6 +80,9 @@ speech-recognition model (Whisper base, ~80 MB) that then runs locally.
 
 ## Brains
 
+With Claude, COre keeps one Claude Code session running in the background, so replies start in about a second
+(no start-up per message). It keeps the conversation across restarts; ⚙ → New chat starts fresh.
+
 COre tries brains in order and skips the ones that aren't connected. Open ⚙ in the chat block → **Brain**:
 
 - **Claude** (default, no API key): uses Claude Code on your PC. Signing in to the Claude desktop app does not

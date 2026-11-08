@@ -50,8 +50,9 @@ if (IS_LINUX) {
   app.commandLine.appendSwitch('enable-transparent-visuals');
 }
 
+// Only one COre at a time; a second launch just brings the first one forward.
 if (!app.requestSingleInstanceLock()) {
-  app.quit();
+  app.exit(0);
 }
 
 // COre's windows only ever show their own local pages: no navigation, no popups.
@@ -207,6 +208,12 @@ async function refreshBrainStatus() {
   return brainStatusCache;
 }
 
+// Keep a Claude Code process ready so the next message skips start-up time.
+function warmClaude() {
+  const c = brain && brain.provider('claude-cli');
+  if (c && c.warm) c.warm((config.data.personality && config.data.personality.tone) || 'sarcastic');
+}
+
 function claudeCommand() {
   return (config.data.brain.claude && config.data.brain.claude.command) || 'claude';
 }
@@ -253,6 +260,7 @@ function loginClaude() {
     if (st.known && st.loggedIn) {
       clearInterval(loginWatch);
       claude.flags = null;
+      warmClaude();
       addTranscript('system', 'Claude is connected.');
       toOverlay('attention', { level: 'success', title: 'Claude connected' });
       refreshBrainStatus();
@@ -352,6 +360,12 @@ function applyStage(next) {
 function createOverlay() {
   const d = primaryDisplay();
   stage = initialStage();
+  // Until the overlay reports, assume the orb sits at its home spot (so the
+  // chat doesn't flash in the top-left corner on start).
+  const r0 = config.data.orb.radius || 60;
+  const h0 = homeNow();
+  dockAnchor = { x: h0.x, y: h0.y, r: r0 };
+  orbBounds = { x: h0.x, y: h0.y, r: r0 };
   overlay = new BrowserWindow({
     x: d.bounds.x + stage.x,
     y: d.bounds.y + stage.y,
@@ -395,7 +409,7 @@ function createOverlay() {
 }
 
 function updateHitTest() {
-  if (!overlay || overlay.isDestroyed()) return;
+  if (!overlay || overlay.isDestroyed() || !overlay.isVisible()) return;
   const p = screen.getCursorScreenPoint();
   const b = primaryDisplay().bounds; // orbBounds are display coordinates
   const dx = p.x - b.x - orbBounds.x;
@@ -468,6 +482,7 @@ function positionDock() {
 }
 
 function setDockVisible(v, focus = false) {
+  if (v && orbHidden) toggleOrb();
   dockVisible = v;
   state.set('dockVisible', v);
   if (!dock) return;
@@ -524,6 +539,7 @@ function applySetting(key, value) {
   config.save();
   toOverlay('config', overlayConfig());
   toDock('dock:settings', dockSettings());
+  if (key === 'personality.tone' && !current) warmClaude();
 }
 
 function createPanel() {
@@ -611,7 +627,8 @@ function createTray() {
     { label: 'Quit COre', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
-  tray.on('click', () => togglePanel());
+  // Clicking the tray icon brings COre back if hidden, otherwise opens the chat.
+  tray.on('click', () => { if (orbHidden) toggleOrb(); else setDockVisible(true, true); });
 }
 
 let orbHidden = false;
@@ -642,6 +659,7 @@ function openConfig() {
 function reloadConfig() {
   config.reload();
   try {
+    if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
     if (brain) brain.reload(config.data);
     else brain = makeBrain();
   } catch (err) {
@@ -653,6 +671,7 @@ function reloadConfig() {
   toOverlay('config', overlayConfig());
   toDock('dock:settings', dockSettings());
   toPanel('status', { kind: 'brain', ...brainStatus() });
+  refreshBrainStatus().then(() => warmClaude());
   addTranscript('system', 'Settings reloaded.');
 }
 
@@ -765,6 +784,7 @@ function resetConversation() {
   toPanel('transcript:reset');
   toDock('dock:reset');
   addTranscript('system', 'Started a new conversation.');
+  warmClaude();
 }
 
 // Say one line outside a conversation turn (errors, notifications, updates),
@@ -835,7 +855,9 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
     if (err.aborted) return;
     addTranscript('system', err.message);
     toOverlay('attention', { level: 'urgent', title: 'COre could not answer' });
-    speakLine("I can't reach my brain right now. The chat says why.");
+    speakLine(/usage limit/i.test(err.message)
+      ? "I've hit my Claude usage limit. Give me a free backup brain in the settings and I'll keep talking."
+      : "I can't reach my brain right now. The chat says why.");
   } finally {
     if (current === ac) {
       current = null;
@@ -959,7 +981,7 @@ function wireIpc() {
   ipcMain.on('dock:graphics', (e, mode) => { if (fromDock(e) && ['auto', 'software', 'gpu'].includes(mode)) setGraphicsMode(mode); });
   ipcMain.handle('dock:graphicsMode', (e) => (fromDock(e) ? { mode: GRAPHICS, safe: SAFE_GRAPHICS } : null));
   ipcMain.on('orb:home', (e, home) => {
-    if (!fromOverlay(e) || !home) return;
+    if (!fromOverlay(e) || !home || !Number.isFinite(home.x) || !Number.isFinite(home.y)) return;
     config.data.orb.home = { x: Math.round(home.x), y: Math.round(home.y) };
     config.save();
   });
@@ -987,6 +1009,12 @@ function wireIpc() {
     if (reason && reason !== 'silence') addTranscript('system', `Microphone: ${reason}`);
   });
   ipcMain.on('overlay:log', (e, msg) => { if (fromOverlay(e)) console.log('[overlay]', msg); });
+  // The orb drew its first frame: graphics are fine, so now load the voice
+  // (loading it earlier could collide with a safe-graphics restart).
+  ipcMain.once('overlay:ready', (e) => {
+    if (!fromOverlay(e)) return;
+    if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
+  });
   ipcMain.on('overlay:rendererFailed', (e, msg) => {
     if (!fromOverlay(e)) return;
     console.warn('[overlay] renderer failed:', msg);
@@ -1044,20 +1072,42 @@ async function startNotify() {
 
 // ---------------------------------------------------------------- graphics watchdog
 
+// Restart COre cleanly: stop the model threads and the Claude process first.
+// Exiting while a native ONNX model is loading aborts the whole process.
+let restarting = false;
+async function restartApp() {
+  if (restarting) return;
+  restarting = true;
+  app.isQuitting = true;
+  try {
+    if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
+    await Promise.race([
+      Promise.all([stt && stt.dispose(), tts && tts.dispose()]),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+  } catch {}
+  if (state) state.flush();
+  app.relaunch();
+  app.exit(0);
+}
+
 function switchToSafeGraphics(reason) {
   if (SAFE_GRAPHICS || GRAPHICS !== 'auto' || state.get('safeGraphics')) return;
   console.warn(`[core] switching to safe graphics: ${reason}`);
   state.set('safeGraphics', true);
   state.set('safeGraphicsReason', reason);
-  state.flush();
-  app.isQuitting = true;
-  app.relaunch();
-  app.exit(0);
+  restartApp();
 }
 
 function watchGraphics() {
+  // Chromium restarts its GPU process after transient crashes (sleep/wake,
+  // driver updates). Only switch modes if compositing is really gone after.
   app.on('child-process-gone', (_e, d) => {
-    if (d.type === 'GPU' && d.reason !== 'clean-exit') switchToSafeGraphics(`GPU process ${d.reason}`);
+    if (d.type !== 'GPU' || d.reason === 'clean-exit') return;
+    setTimeout(() => {
+      const comp = String(app.getGPUFeatureStatus().gpu_compositing || '');
+      if (process.platform === 'win32' && comp && !comp.startsWith('enabled')) switchToSafeGraphics(`GPU process ${d.reason}, compositing ${comp}`);
+    }, 3000);
   });
   if (process.platform !== 'win32' || SAFE_GRAPHICS) return;
   setTimeout(() => {
@@ -1094,10 +1144,7 @@ function setGraphicsMode(mode) {
   config.data.orb.graphics = mode;
   config.save();
   state.set('safeGraphics', false);
-  state.flush();
-  app.isQuitting = true;
-  app.relaunch();
-  app.exit(0);
+  restartApp();
 }
 
 // ---------------------------------------------------------------- updates
@@ -1105,13 +1152,18 @@ function setGraphicsMode(mode) {
 function relaunchAfterUpdate(version, needsInstall) {
   if (needsInstall) state.set('pendingInstall', true);
   state.flush();
-  toOverlay('attention', { level: 'info', title: 'COre updated' });
-  speakLine(`Upgrade complete. Version ${version}. Try to contain your excitement.`);
-  setTimeout(() => {
-    app.isQuitting = true;
-    app.relaunch();
-    app.exit(0);
-  }, 4500);
+  // Don't cut COre off mid-answer: wait (up to 3 minutes) until it's idle.
+  const started = Date.now();
+  const tryRestart = () => {
+    if ((current || listening) && Date.now() - started < 180_000) {
+      setTimeout(tryRestart, 2000);
+      return;
+    }
+    toOverlay('attention', { level: 'info', title: 'COre updated' });
+    speakLine(`Upgrade complete. Version ${version}. Try to contain your excitement.`);
+    setTimeout(restartApp, 4500);
+  };
+  tryRestart();
 }
 
 async function checkForUpdates(quiet) {
@@ -1166,7 +1218,6 @@ app.whenReady().then(async () => {
       }
     },
   });
-  if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
   dockVisible = state.get('dockVisible') !== false;
 
   // Only COre's own overlay may use the microphone.
@@ -1209,6 +1260,7 @@ app.whenReady().then(async () => {
 
   refreshBrainStatus().then((list) => {
     const claude = list.find((p) => p.id === 'claude-cli');
+    if (claude && claude.state === 'connected') warmClaude();
     const others = list.filter((p) => p.id !== 'claude-cli' && p.state === 'connected');
     if (claude && claude.state !== 'connected') {
       addTranscript('system', `${claude.detail}${others.length ? ` Until then I will use ${others.map((p) => p.name).join(', ')}.` : ' Press "Log in to Claude" in the chat, or connect a free alternative in ⚙ → Brain.'}`);
@@ -1220,9 +1272,12 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
-  if (stt) stt.dispose();
-  if (tts) tts.dispose();
+  if (!restarting) {
+    if (stt) stt.dispose();
+    if (tts) tts.dispose();
+  }
   if (updater) updater.stop();
+  if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
   if (state) state.flush();
 });
 

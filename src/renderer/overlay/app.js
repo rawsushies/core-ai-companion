@@ -362,7 +362,10 @@
     if (c.stage) stage = { ...c.stage };
     if (body) {
       body.r = cfg.orb.radius || 60;
-      if (c.view) placeHome();
+      if (c.view) {
+        placeHome();
+        if (bridge) bridge.orbAnchor({ x: home.x, y: home.y, r: body.r });
+      }
     }
   }
 
@@ -415,7 +418,10 @@
     } else {
       demo();
     }
-    requestAnimationFrame(frame);
+    requestAnimationFrame((now) => {
+      frame(now);
+      if (bridge) bridge.ready(); // first frame drawn
+    });
   }
 
   // ------------------------------------------------------------ demo
