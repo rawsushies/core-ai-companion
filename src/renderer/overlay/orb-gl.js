@@ -1,4 +1,4 @@
-// COre's body: a raymarched black liquid orb.
+// COre's body, "liquid" style (orb.style = "liquid"): a raymarched black liquid orb.
 //
 // Technique: signed distance fields + smooth union, after Inigo Quilez's
 // articles (iquilezles.org/articles/distfunctions, /smin). The body is a
@@ -293,5 +293,5 @@
     }
   }
 
-  root.OrbRenderer = OrbRenderer;
+  root.LiquidOrbRenderer = OrbRenderer;
 })(window);

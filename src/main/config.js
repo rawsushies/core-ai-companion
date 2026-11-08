@@ -25,7 +25,9 @@ const DEFAULTS = {
     sttLanguage: '', // '' = auto-detect, or e.g. 'english', 'indonesian'
   },
   orb: {
-    radius: 46, // px
+    style: 'smoke', // 'smoke' (glowing particle sphere) or 'liquid' (black glossy blob)
+    radius: 60, // px
+    particles: 24000, // smoke style: more = denser filaments, heavier on the GPU
     renderScale: 1, // lower (0.6-0.8) on slow GPUs
     hideFromCaptures: true, // keep the orb out of its own screenshots (Windows/macOS)
     home: null, // {x, y} remembered after you drag it

@@ -2,21 +2,23 @@
 
 ![COre states](assets/states.png)
 
-A desktop companion that lives on your screen as a **glossy black liquid orb**.
-It talks, listens, looks at your screen when you ask, reaches out a **liquid hand to point** at things,
-vibrates while it speaks, moves like liquid, and **changes colour** when something needs your attention.
+A desktop companion that lives on your screen as a **sphere of glowing green smoke**: thousands of particles
+flowing over a shell, gathering into drifting filaments and resonating together.
+It talks, listens, looks at your screen when you ask, reaches out **smoke tendrils to point** at things,
+resonates while it speaks, trails smoke when it moves, and **changes colour** when something needs your attention.
 
 Its brain is **Claude through your own Claude Code login** — no API key. If Claude is unavailable it
 falls back to a **free local model** (Ollama) or any OpenAI-compatible endpoint (DeepSeek, OpenRouter, LM Studio).
 
 | State | Look |
 |---|---|
-| Idle | black obsidian, faint violet rim, slowly drifting and breathing |
-| Listening | cyan rim, ripples with your voice |
-| Thinking | violet swirl |
-| Speaking | surface vibrates with the words, cool inner light |
-| Explaining / pointing | one or two liquid arms grow out of the body |
-| Notification | coloured pulsing halo — blue info, green success, amber warning, red urgent |
+| Idle | green smoke strands drifting over a hollow sphere, slowly turning |
+| Listening | cyan, ripples with your voice |
+| Thinking | violet, faster swirl |
+| Speaking | the shell resonates in waves with the words, flow speeds up and brightens |
+| Explaining / pointing | particles peel off and stream along twisting smoke tendrils to the target |
+| Moving | the cloud lags behind its centre like smoke |
+| Notification | colour change and pulsing halo: blue info, lime success, amber warning, red urgent |
 
 ## Install
 
@@ -74,14 +76,16 @@ Panel menu → **Open settings file** edits `config.json`, then **Reload setting
     "openaiCompat": { "baseUrl": "https://api.deepseek.com/v1", "model": "deepseek-chat", "apiKey": "" }
   },
   "voice": { "voiceName": "", "lang": "", "rate": 1.05, "pitch": 0.85, "sttLanguage": "" },
-  "orb": { "radius": 46, "renderScale": 1 }
+  "orb": { "style": "smoke", "radius": 60, "particles": 24000, "renderScale": 1 }
 }
 ```
 
 - **Free local brain:** install [Ollama](https://ollama.com), run `ollama pull qwen2.5:7b`, and it is used automatically as the fallback (or set it as `provider`).
 - **Voice:** COre speaks with your operating system's voices. On Windows, extra/natural voices come from Settings → Time & language → Speech. Set `voice.voiceName` to part of a voice name (e.g. `"Aria"`, `"Indonesia"`). If no voice exists it shows captions silently.
 - **Language:** COre replies in the language you speak. Set `voice.sttLanguage` (e.g. `"indonesian"`) if auto-detect mishears you; `voice.sttModel: "onnx-community/whisper-small"` is more accurate but slower.
-- **Slow GPU:** lower `orb.renderScale` to `0.7`.
+- **Look:** `orb.style` is `"smoke"` (default) or `"liquid"` (the older glossy black blob). `orb.particles`
+  controls density (12000 for slow GPUs, 50000+ for a thicker cloud); `orb.radius` its size.
+- **Slow GPU:** lower `orb.renderScale` to `0.7` and `orb.particles` to `12000`.
 
 ## Notifications from anything
 
@@ -123,16 +127,19 @@ hook the tools you care about into this endpoint.
                      └─ notify server 127.0.0.1:47321
                                 │ IPC
  overlay window (transparent, always on top, click-through except over the orb)
-   ├─ motion.js   springs: body, lagging tail (liquid), two arms
-   ├─ orb-gl.js   WebGL2 raymarched SDF: displaced sphere + smooth-union tail + tapered round-cone arms
+   ├─ motion.js     springs: body, lagging tail, two arms
+   ├─ orb-smoke.js  WebGL2 GPU particles (transform feedback): flow on a sphere + pull to noise
+   │                zero-lines = filaments; arm streams; fading trail buffer; mip bloom
+   ├─ orb-gl.js     "liquid" style: raymarched SDF blob
    ├─ voice.js    OS text-to-speech queue ► amplitude envelope ► vibration
    └─ listen.js   mic + energy VAD ► 16 kHz PCM
 ```
 
 The model controls the body with silent tags: `[[point X,Y]]` (screenshot pixels) and `[[explain]]`.
 
-The orb shader uses signed-distance-field techniques from Inigo Quilez's articles
-(smooth minimum, exact round cone).
+The smoke orb uses simplex noise with analytic gradients by Ian McEwan and Stefan Gustavson
+(ashima/webgl-noise, MIT). The liquid style uses signed-distance-field techniques from
+Inigo Quilez's articles (smooth minimum, exact round cone).
 
 ## Develop
 
@@ -146,4 +153,5 @@ npm run check
 
 Open `src/renderer/overlay/index.html` in Chrome to play with the orb without Electron
 (keys: P point at cursor, E explain, T talk, L listen, K think, N notification colours, drag it).
-Append `?pose=point` / `explain` / `speaking` / `attention&level=urgent` / `move` for fixed poses.
+Append `?pose=point` / `explain` / `speaking` / `attention&level=urgent` / `move` for fixed poses,
+`&r=120` for size, `&bg=light` for a light wallpaper, `&style=liquid` for the old look.

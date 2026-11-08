@@ -8,21 +8,21 @@
   const bridge = window.core || null;
   const params = new URLSearchParams(location.search);
 
-  // State colours (linear-ish RGB) and rim glow.
+  // State colours (linear-ish RGB) and glow. COre's own colour is green.
   const MODES = {
-    idle:      { tint: [0.46, 0.40, 0.90], glow: 0.14 },
-    listening: { tint: [0.20, 0.82, 1.00], glow: 0.62 },
-    thinking:  { tint: [0.56, 0.34, 1.00], glow: 0.42 },
-    speaking:  { tint: [0.50, 0.68, 1.00], glow: 0.24 },
+    idle:      { tint: [0.24, 1.00, 0.52], glow: 0.10 },
+    listening: { tint: [0.20, 0.85, 1.00], glow: 0.55 },
+    thinking:  { tint: [0.62, 0.42, 1.00], glow: 0.40 },
+    speaking:  { tint: [0.40, 1.00, 0.66], glow: 0.30 },
   };
   const ATTENTION = {
     info:    [0.28, 0.58, 1.00],
-    success: [0.25, 1.00, 0.55],
+    success: [0.80, 1.00, 0.30],
     warn:    [1.00, 0.62, 0.12],
     urgent:  [1.00, 0.16, 0.22],
   };
 
-  let cfg = { orb: { radius: 46, renderScale: 1, home: null }, voice: { tts: true } };
+  let cfg = { orb: { style: 'smoke', radius: 60, particles: 24000, renderScale: 1, home: null }, voice: { tts: true } };
   let renderer;
   let body;
   let home;
@@ -291,26 +291,29 @@
     if (!c) return;
     cfg = { ...cfg, ...c };
     voice.setConfig(cfg.voice);
-    if (body) body.r = cfg.orb.radius || 46;
+    if (body) body.r = cfg.orb.radius || 60;
   }
 
   function placeHome() {
-    const r = cfg.orb.radius || 46;
+    const r = cfg.orb.radius || 60;
     const h = cfg.orb.home;
     home = h && h.x > 0 && h.x < innerWidth && h.y > 0 && h.y < innerHeight ? { ...h } : M.defaultHome(innerWidth, innerHeight, r);
   }
 
   async function boot() {
     if (bridge) applyConfig(await bridge.init());
+    const style = params.get('style') || cfg.orb.style || 'smoke';
     try {
-      renderer = new window.OrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1 });
+      renderer = style === 'liquid'
+        ? new window.LiquidOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1 })
+        : new window.SmokeOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1, particles: cfg.orb.particles || 24000 });
     } catch (err) {
       if (bridge) bridge.log(`renderer failed: ${err.message}`);
       document.body.dataset.error = err.message;
       return;
     }
     placeHome();
-    body = M.createBody({ x: home.x, y: home.y, r: cfg.orb.radius || 46 });
+    body = M.createBody({ x: home.x, y: home.y, r: cfg.orb.radius || 60 });
     addEventListener('resize', () => { renderer.resize(); placeHome(); });
     setupPointer();
 
@@ -333,6 +336,7 @@
 
   function demo() {
     document.body.classList.add('demo');
+    if (params.get('bg') === 'light') document.body.style.background = '#eef0f4';
     window.__coreDebug = () => ({ body, pointing, home, mode, inner: [innerWidth, innerHeight] });
     const help = document.getElementById('demo-help');
     if (help) help.hidden = false;
@@ -352,6 +356,8 @@
     });
 
     // Deterministic poses for screenshots: ?pose=idle|speaking|point|explain|attention|move
+    const rq = Number(params.get('r'));
+    if (rq > 8) body.r = rq;
     const pose = params.get('pose');
     if (pose) {
       voice.cfg.tts = false;
