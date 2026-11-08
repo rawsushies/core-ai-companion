@@ -3,7 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseClaudeLine, friendlyError, ClaudeCliBrain } = require('../src/main/brain/claudeCli');
+const { parseClaudeLine, friendlyError, ClaudeCliBrain: RealBrain } = require('../src/main/brain/claudeCli');
+
+// Track every brain so a failing assertion can't leave a warm process alive
+// (which would keep the test runner from exiting).
+const live = new Set();
+class ClaudeCliBrain extends RealBrain {
+  constructor(o) { super(o); live.add(this); }
+}
+test.afterEach(() => { for (const b of live) b.dispose(); live.clear(); });
 const { buildPrompt } = require('../src/main/brain');
 
 const FAKE = path.join(__dirname, 'fixtures', 'fake-claude.js');
@@ -66,7 +74,8 @@ test('ClaudeCliBrain keeps one warm process across turns and only enables Read',
   assert.equal(calls.length, 1, 'both turns used the same process');
   const a = calls[0];
   assert.equal(a[a.indexOf('--session-id') + 1], sid);
-  assert.equal(a[a.indexOf('--tools') + 1], 'Read');
+  assert.equal(a[a.indexOf('--tools') + 1], '', 'persistent sessions get screenshots inline: no tools at all');
+  assert.ok(!a.includes('Read'));
   assert.ok(a.includes('--restricted') && a.includes('--input-format'));
   assert.ok(!a.includes('--dangerously-skip-permissions'));
 
@@ -148,4 +157,18 @@ test('a logged-out Claude Code is detected before any request is sent', { skip: 
   delete process.env.FAKE_CLAUDE_MODE;
   assert.deepEqual(await brain.authStatus(), { known: true, loggedIn: true });
   brain.dispose();
+});
+
+test('a persistent session sends screenshots inline as an image block', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
+  const brain = new ClaudeCliBrain({ config: { command: FAKE }, workDir: dir, state: memState() });
+  const r = await brain.ask({ prompt: 'what is this', image: { base64: 'AAAA', mediaType: 'image/jpeg' }, onDelta: () => {} });
+  assert.match(r.text, /\[image\] what is this/);
+});
+
+test('screen context lists open windows and disables pointing on other monitors', () => {
+  const { screenContext } = require('../src/main/brain');
+  const c = screenContext({ windows: ['Chrome', 'Discord'], canPoint: false });
+  assert.match(c, /Open windows: Chrome \| Discord/);
+  assert.match(c, /do not use \[\[point\]\]/);
 });

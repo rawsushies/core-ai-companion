@@ -62,7 +62,14 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-
 .brain-row .keyrow { grid-column: 1 / -1; display: flex; gap: 4px; }
 .brain-row input[type="password"] { flex: 1; min-width: 0; background: #0d1411; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; font: inherit; font-size: 12px; }
 .linkbtn { background: none; border: 0; color: var(--accent); font-size: 11.5px; padding: 0 2px; text-decoration: underline dotted; }
-.settings { max-height: 360px; overflow-y: auto; }
+/* Settings scroll inside a fixed height, so the chat window (max 460 px)
+   always keeps the input row and the Back button visible. */
+.settings { max-height: 330px; overflow-y: auto; }
+.settings-open .banner { display: none; }
+.settings-head { grid-column: 1 / -1; position: sticky; top: -10px; z-index: 2; margin: -10px -12px 2px; padding: 8px 12px 6px; background: rgba(6, 10, 9, 0.97); border-bottom: 1px solid var(--line); }
+.back { background: none; border: 0; color: var(--accent); font-size: 12.5px; padding: 2px 0; }
+.back:hover { text-decoration: underline; }
+.settings label .hint { color: var(--muted); font-size: 11px; }
 .settings { padding: 10px 12px 4px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; border-top: 1px solid var(--line); }
 .settings[hidden] { display: none; }
 .settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }

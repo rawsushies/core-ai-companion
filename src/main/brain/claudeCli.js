@@ -171,16 +171,17 @@ class ClaudeCliBrain {
 
   _args({ sessionId, resume, tone, persistent }) {
     const f = this.flags;
-    const system = persona({ canReadFiles: true, tone });
+    // Persistent sessions receive screenshots inline, so Claude needs no tools
+    // at all. The per-message fallback still reads the screenshot file.
+    const system = persona({ canReadFiles: !persistent, tone });
     const args = [
       '-p',
       '--output-format', 'stream-json',
       '--verbose',
-      '--tools', 'Read',
-      '--allowedTools', 'Read',
       '--system-prompt', this.cmd.shell ? forWindowsShell(system) : system,
     ];
-    if (persistent) args.push('--input-format', 'stream-json');
+    if (persistent) args.push('--tools', '', '--input-format', 'stream-json');
+    else args.push('--tools', 'Read', '--allowedTools', 'Read');
     if (f.has('--include-partial-messages')) args.push('--include-partial-messages');
     if (f.has('--restricted')) args.push('--restricted');
     if (f.has('--strict-mcp-config')) args.push('--strict-mcp-config');
@@ -302,7 +303,7 @@ class ClaudeCliBrain {
     } catch {}
   }
 
-  _persistentTurn({ prompt, tone, signal, onDelta, onTool }) {
+  _persistentTurn({ prompt, image, tone, signal, onDelta, onTool }) {
     return new Promise((resolve, reject) => {
       const proc = this._ensureProc(tone);
       let settled = false;
@@ -331,23 +332,26 @@ class ClaudeCliBrain {
         signal.addEventListener('abort', onAbort);
       }
       proc.turn = { onDelta, onTool, resolve, reject, finish, streamed: '' };
-      proc.child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })}\n`);
+      const content = image
+        ? [{ type: 'image', source: { type: 'base64', media_type: image.mediaType || 'image/png', data: image.base64 } }, { type: 'text', text: prompt }]
+        : prompt;
+      proc.child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`);
     });
   }
 
-  async ask({ prompt, tone, signal, onDelta, onTool }) {
+  async ask({ prompt, image, tone, signal, onDelta, onTool }) {
     await this.detect();
     const existing = this.state.get('claudeSessionId');
     const turn = (args) => (this.persistent ? this._persistentTurn(args) : this._turn({
       ...args, sessionId: this.state.get('claudeSessionId') || randomUUID(), resume: !!this.state.get('claudeSessionId'),
     }));
     try {
-      return await turn({ prompt, tone, signal, onDelta, onTool });
+      return await turn({ prompt, image, tone, signal, onDelta, onTool });
     } catch (err) {
       // A stale session id (deleted history, other machine): start fresh once.
       if (existing && err.retryable && !err.streamedAnything) {
         this.resetConversation();
-        return turn({ prompt, tone, signal, onDelta, onTool });
+        return turn({ prompt, image, tone, signal, onDelta, onTool });
       }
       throw err;
     }

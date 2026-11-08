@@ -15,6 +15,9 @@
     </div>
     <div id="log" class="log" aria-live="polite"></div>
     <div id="settings" class="settings" hidden>
+      <div class="settings-head">
+        <button type="button" id="settings-back" class="back" aria-label="Back to chat">← Back to chat</button>
+      </div>
       <div class="section-title">Brain <span class="hint">tried in this order</span></div>
       <div id="brain-list" class="brain-list"></div>
       <div class="section-title">Voice &amp; personality</div>
@@ -47,7 +50,7 @@
       </label>
       <label class="check"><input id="speak-typed" type="checkbox"> Read typed replies aloud</label>
       <div class="section-title">Display</div>
-      <label>Graphics
+      <label>Graphics <span class="hint">(restarts COre)</span>
         <select id="graphics">
           <option value="auto">Automatic</option>
           <option value="software">Safe mode (fixes black box)</option>

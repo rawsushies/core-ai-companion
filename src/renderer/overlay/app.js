@@ -44,16 +44,23 @@
   let pointing = null; // { x, y, park, startedAt, until, arm }
   let explainUntil = 0;
   let lastGestureAt = 0;
-  const vis = { tint: MODES.idle.tint.slice(), glow: 0.14, think: 0, halo: 0, listen: 0 };
+  const vis = { tint: MODES.idle.tint.slice(), glow: 0.14, think: 0, halo: 0, listen: 0, aura: 0.78 };
+  let auraC = null; // display coordinates; trails the body like the smoke does
 
   const canvas = document.getElementById('orb');
   const caption = document.getElementById('caption');
 
   const voice = new window.Voice(cfg.voice, {
-    onSay: (text) => showCaption(text),
+    onSay: (text) => {
+      showCaption(text);
+      if (text && bridge) bridge.spoken(text); // keeps the chat text in step with the voice
+    },
     onSpeakStart: () => setMode('speaking'),
     // Any finished turn returns to idle, including silent or empty replies.
-    onIdle: () => { if (mode === 'speaking' || mode === 'thinking') setMode('idle'); },
+    onIdle: () => {
+      if (mode === 'speaking' || mode === 'thinking') setMode('idle');
+      if (bridge) bridge.speechIdle();
+    },
   });
 
   const listener = new window.Listener({
@@ -240,6 +247,16 @@
     const arms = body.arms.map((a) => (a.mode === 'off' && a.extend < 0.02 ? null : M.armGeometry(shown, a, t)));
     const tailGap = Math.hypot(body.tail.x - body.pos.x, body.tail.y - body.pos.y);
 
+    // The dark backing trails the smoke and fades out while moving fast, so it
+    // never jumps ahead of the cloud (e.g. when dragging).
+    if (!auraC) auraC = { x: body.pos.x, y: body.pos.y };
+    const ak = 1 - Math.exp(-dt * 5);
+    auraC.x += (body.pos.x - auraC.x) * ak;
+    auraC.y += (body.pos.y - auraC.y) * ak;
+    const speed = Math.hypot(body.vel.x, body.vel.y);
+    const auraTarget = body.dragging ? 0 : 0.78 * (1 - Math.min(1, Math.max(0, (speed - body.r * 2) / (body.r * 8))));
+    vis.aura += (auraTarget - vis.aura) * Math.min(1, dt * (auraTarget < vis.aura ? 10 : 2.5));
+
     updateStage(now, pos, arms);
     const ox = stage.x;
     const oy = stage.y;
@@ -261,6 +278,8 @@
       halo: vis.halo,
       light,
       arms: localArms,
+      auraCenter: local(auraC),
+      aura: vis.aura,
     });
 
     placeCaption(local(pos));
@@ -279,7 +298,9 @@
 
   // Grow the window when COre needs more room, shrink it when it's settled.
   function updateStage(now, pos, arms) {
-    if (!bridge || now - lastStageReq < 80) return;
+    // While dragging, check often and leave lots of room ahead of the orb so
+    // the smoke is never clipped at the window edge.
+    if (!bridge || now - lastStageReq < (body.dragging ? 30 : 80)) return;
     const capShown = caption.classList.contains('show');
     const need = S.neededRect({
       pos,
@@ -292,7 +313,7 @@
     });
     const settled = !pointing && !explainUntil && !body.dragging && Math.hypot(body.vel.x, body.vel.y) < 20
       && body.arms.every((a) => a.extend < 0.02);
-    const next = S.decide({ stage, need, view, r: body.r, now, settled, state: stageState });
+    const next = S.decide({ stage, need, view, r: body.r, now, settled, state: stageState, margin: body.dragging ? body.r * 4 : 0 });
     if (next) {
       lastStageReq = now;
       bridge.stageNeed(next);
@@ -320,7 +341,7 @@
     canvas.addEventListener('pointerdown', (e) => {
       const p = toView(e);
       const d = Math.hypot(p.x - body.pos.x, p.y - body.pos.y);
-      if (d > body.r * 1.2) return;
+      if (d > body.r * 1.45) return;
       down = { x: p.x, y: p.y, moved: false };
       canvas.setPointerCapture(e.pointerId);
     });

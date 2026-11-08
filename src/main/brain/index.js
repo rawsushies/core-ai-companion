@@ -38,16 +38,28 @@ function chainIds(brainCfg) {
   return [brainCfg.provider, ...fallbacks].filter((id, i, all) => id && all.indexOf(id) === i);
 }
 
+// What COre knows about the screen beyond the picture: every open window
+// (including minimised ones and other monitors), and whether pointing works.
+function screenContext(shot) {
+  const lines = [];
+  if (shot.windows && shot.windows.length) lines.push(`Open windows: ${shot.windows.join(' | ')}.`);
+  if (shot.canPoint === false) lines.push('This screenshot is from another monitor, so do not use [[point]].');
+  return lines.length ? ` ${lines.join(' ')}` : '';
+}
+
 function buildPrompt(provider, text, shot) {
   if (!shot) return text;
+  const ctx = screenContext(shot);
   if (provider.id === 'claude-cli') {
+    // Persistent Claude sessions get the image inline (no file-reading step).
+    if (provider.persistent) return `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.${ctx})`;
     const rel = path.relative(provider.workDir, shot.path).split(path.sep).join('/');
-    return `${text}\n\n(A screenshot of my screen is saved at ./${rel}, ${shot.width}x${shot.height} pixels. Read it before answering.)`;
+    return `${text}\n\n(A screenshot of my screen is saved at ./${rel}, ${shot.width}x${shot.height} pixels. Read it before answering.${ctx})`;
   }
   const canSee = (provider.id === 'ollama' && provider.cfg.visionModel) || (provider.id !== 'ollama' && provider.cfg.vision);
   return canSee
-    ? `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.)`
-    : `${text}\n\n(I shared my screen, but the model you are running on cannot see images. Say so briefly if it matters.)`;
+    ? `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.${ctx})`
+    : `${text}\n\n(I shared my screen, but the model you are running on cannot see images. Say so briefly if it matters.${ctx})`;
 }
 
 class Brain {
@@ -99,10 +111,11 @@ class Brain {
       let streamed = false;
       onStatus({ kind: 'provider', label: p.label });
       try {
+        if (p.detect && shot) await p.detect().catch(() => {}); // know whether images can go inline
         await p.ask({
           prompt: buildPrompt(p, typed ? `[typed] ${text}` : text, shot),
           tone,
-          image: shot && shot.base64 ? { base64: shot.base64 } : null,
+          image: shot && shot.base64 ? { base64: shot.base64, mediaType: shot.mediaType || 'image/png' } : null,
           signal,
           onDelta: (d) => { streamed = true; planner.feed(d); },
           onTool: (name) => onStatus({ kind: 'tool', name }),
@@ -132,4 +145,4 @@ class Brain {
   }
 }
 
-module.exports = { Brain, buildPrompt, chainIds, NAMES };
+module.exports = { Brain, buildPrompt, screenContext, chainIds, NAMES };

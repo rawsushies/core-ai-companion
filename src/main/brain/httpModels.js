@@ -161,7 +161,7 @@ class OpenAICompatBrain extends HistoryMixin {
 
   async _ask({ prompt, image, tone, signal, onDelta }) {
     const content = image && this.cfg.vision
-      ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:image/png;base64,${image.base64}` } }]
+      ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:${image.mediaType || 'image/png'};base64,${image.base64}` } }]
       : prompt;
     const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',

@@ -196,7 +196,7 @@
     float pulse = 0.72 + 0.28 * sin(uTime * 5.0);
     float halo = uHalo * pulse * exp(-max(minD, 0.0) / (R * 0.42));
     vec2 sc = (f - vec2(uOrb.x, uOrb.y - R * 1.18)) / vec2(R * 1.0, R * 0.22);
-    float shadow = 0.2 * exp(-dot(sc, sc) * 1.5);
+    float shadow = 0.2 * exp(-dot(sc, sc) * 1.5) * (1.0 - clamp(length(uVel) / (R * 8.0), 0.0, 1.0));
     vec3 rgb = uTint * halo * 0.9 + (vec3(0.02) + uTint * uGlow * 0.35) * edge;
     float a = clamp(halo * 0.85 + shadow + edge, 0.0, 1.0);
     outColor = vec4(rgb, a);

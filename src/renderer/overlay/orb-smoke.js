@@ -608,11 +608,12 @@
       const cu = this.comp.u;
       gl.useProgram(this.comp.p);
       gl.uniform1i(cu.uTex, 0);
-      gl.uniform2f(cu.uCenterPx, s.pos.x * sc, H - s.pos.y * sc);
+      const ac = s.auraCenter || s.pos; // trails the smoke instead of snapping to the body
+      gl.uniform2f(cu.uCenterPx, ac.x * sc, H - ac.y * sc);
       gl.uniform1f(cu.uRPx, s.r * sc);
       gl.uniform3f(cu.uTint, s.tint[0], s.tint[1], s.tint[2]);
       gl.uniform1f(cu.uHalo, s.halo);
-      gl.uniform1f(cu.uAura, 0.78);
+      gl.uniform1f(cu.uAura, s.aura === undefined ? 0.78 : s.aura);
       gl.uniform1f(cu.uLight, s.light || 0);
       gl.uniform1f(cu.uTime, s.t);
       gl.bindVertexArray(this.quadVao);

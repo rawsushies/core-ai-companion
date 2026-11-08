@@ -74,6 +74,8 @@ speech-recognition model (Whisper base, ~80 MB) that then runs locally.
   in the same conversation as your voice chats. Only the opening of typed replies is read aloud (toggle in ⚙).
 - **Drag** the orb anywhere; it remembers the spot and the chat follows. **Click** it to show or hide the chat.
 - **Hover** or click acknowledges a notification colour.
+- When COre looks at your screen it captures the monitor your mouse is on and also gets the list of every open
+  window (minimised ones too), so it knows what's running even when it isn't visible.
 - Phrases like "look at this", "what's on my screen", "where is the…" also share a screenshot automatically
   (turn off with `screen.autoShareOnDeixis`).
 - Tray icon: talk, new conversation, settings, quit.

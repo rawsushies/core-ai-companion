@@ -63,8 +63,8 @@
   //   shrink: the window has been much bigger than needed for a while (and
   //           nothing is in motion) -> fit it again.
   // state carries { bigSince } between calls.
-  function decide({ stage, need, view, r, now, settled, state }) {
-    const margin = r * 1.2;
+  function decide({ stage, need, view, r, now, settled, state, margin: m }) {
+    const margin = m || r * 1.2;
     if (!contains(stage, need)) {
       state.bigSince = 0;
       return clampTo(pad(need, margin), view);

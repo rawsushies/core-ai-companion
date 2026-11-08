@@ -7,7 +7,7 @@
   const CHUNK_MS = 100;
   const CALIB_CHUNKS = 3;
   const START_CHUNKS = 2;
-  const SILENCE_CHUNKS = 9; // 900 ms of quiet ends the utterance
+  const SILENCE_CHUNKS = 6; // 600 ms of quiet ends the utterance
   const PREROLL_CHUNKS = 3;
   const NO_SPEECH_MS = 7000;
   const MAX_MS = 25000;

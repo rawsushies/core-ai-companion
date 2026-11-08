@@ -54,3 +54,10 @@ test('FenceFilter keeps inline backticks outside fences', () => {
   const f = new FenceFilter();
   assert.equal(f.feed('use `x` here') + f.flush(), 'use `x` here');
 });
+
+test('a long opening clause is spoken before the sentence ends', () => {
+  const c = new SentenceChunker(24);
+  assert.deepEqual(c.feed('Honestly, if you want my opinion, that really depends on what you mean'), ['Honestly, if you want my opinion,']);
+  assert.deepEqual(c.feed(' by fast. And more. '), ['that really depends on what you mean by fast.']);
+  assert.deepEqual(c.flush(), ['And more.']);
+});

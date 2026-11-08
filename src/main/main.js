@@ -75,6 +75,9 @@ let dockAnchor = null; // { x, y, r } orb resting spot, overlay coordinates
 let dockVisible = true;
 let dockHeight = 60;
 let currentPipeline = null;
+// Spoken questions: the chat reveals each sentence as it is spoken, then the
+// full formatted answer once COre stops talking. { spokenAny, finished, reply }
+let syncTurn = null;
 let ttsWarned = false;
 let tray = null;
 let current = null; // AbortController of the running turn
@@ -414,7 +417,7 @@ function updateHitTest() {
   const b = primaryDisplay().bounds; // orbBounds are display coordinates
   const dx = p.x - b.x - orbBounds.x;
   const dy = p.y - b.y - orbBounds.y;
-  const over = orbDragging || Math.hypot(dx, dy) < orbBounds.r * 1.15;
+  const over = orbDragging || Math.hypot(dx, dy) < orbBounds.r * 1.45; // the visible smoke, not just the core
   if (over !== overlayInteractive) {
     overlayInteractive = over;
     overlay.setIgnoreMouseEvents(!over, { forward: true });
@@ -692,8 +695,26 @@ function overlayConfig() {
 
 // ---------------------------------------------------------------- screen
 
+// Titles of every open window (minimised ones and other monitors included),
+// so COre knows what's running even when it isn't visible in the picture.
+async function openWindowTitles() {
+  try {
+    const wins = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false });
+    const seen = new Set();
+    return wins.map((w) => String(w.name || '').trim())
+      .filter((n) => n && !/^COre( chat)?$/.test(n) && !seen.has(n) && seen.add(n))
+      .slice(0, 40)
+      .map((n) => (n.length > 80 ? `${n.slice(0, 77)}…` : n));
+  } catch {
+    return [];
+  }
+}
+
 async function captureScreen() {
-  const d = primaryDisplay();
+  // Capture the monitor the mouse is on (where you're looking). COre can only
+  // point on the monitor it lives on.
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const canPoint = d.id === primaryDisplay().id;
   const { width, height } = d.size;
   const scale = Math.min(1, 1568 / Math.max(width, height));
   const thumbnailSize = { width: Math.round(width * scale), height: Math.round(height * scale) };
@@ -713,12 +734,14 @@ async function captureScreen() {
   const img = src.thumbnail;
   const size = img.getSize();
   if (!size.width) throw new Error('Screen capture returned an empty image (check screen recording permission).');
-  const png = img.toPNG();
+  // JPEG is several times smaller than PNG: faster to send, same for reading UI.
+  const data = img.toJPEG(85);
+  const windows = await openWindowTitles();
 
   const dir = path.join(workDir, 'shots');
   fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `shot-${Date.now()}.png`);
-  fs.writeFileSync(file, png);
+  const file = path.join(dir, `shot-${Date.now()}.jpg`);
+  fs.writeFileSync(file, data);
   // keep only the latest few screenshots
   const old = fs.readdirSync(dir).filter((f) => f.startsWith('shot-')).sort().slice(0, -5);
   for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
@@ -727,9 +750,12 @@ async function captureScreen() {
     path: file,
     width: size.width,
     height: size.height,
-    base64: png.toString('base64'),
+    base64: data.toString('base64'),
+    mediaType: 'image/jpeg',
     displayWidth: width,
     displayHeight: height,
+    canPoint,
+    windows,
   };
 }
 
@@ -751,6 +777,7 @@ function abortCurrent() {
     currentPipeline.cancel();
     currentPipeline = null;
   }
+  syncTurn = null;
   toDock('dock:done', {});
   toDock('dock:busy', false);
 }
@@ -825,6 +852,9 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
   const speak = !typed || config.data.voice.speakTyped !== false;
   const pipeline = makeVoicePipeline({ speak });
   currentPipeline = pipeline;
+  const synced = speak && !typed && config.data.voice.tts !== false;
+  const turnSync = synced ? { spokenAny: false, finished: false, reply: '' } : null;
+  syncTurn = turnSync;
   toDock('dock:busy', true);
   toDock('dock:message', { role: 'core-start' });
   try {
@@ -833,11 +863,11 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
       shot,
       typed,
       signal: ac.signal,
-      onText: (t) => { if (!ac.signal.aborted) toDock('dock:delta', t); },
+      onText: (t) => { if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t); },
       onItem: (item) => {
         if (ac.signal.aborted) return;
         if (item.type === 'gesture' && item.name === 'point') {
-          if (!shot) return; // no screenshot: nothing real to point at
+          if (!shot || !shot.canPoint) return; // nothing real to point at on this monitor
           pipeline.push({ ...item, ...mapPoint(shot, item.x, item.y) });
           return;
         }
@@ -849,7 +879,19 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
       },
     });
     if (reply) addTranscript('core', reply);
-    toDock('dock:done', { text: reply });
+    if (turnSync && syncTurn === turnSync) {
+      // Show the full answer when the voice finishes (or soon, if it never starts).
+      turnSync.finished = true;
+      turnSync.reply = reply;
+      setTimeout(() => {
+        if (syncTurn === turnSync && !turnSync.spokenAny) { toDock('dock:done', { text: reply }); syncTurn = null; }
+      }, 4000);
+      setTimeout(() => {
+        if (syncTurn === turnSync) { toDock('dock:done', { text: reply }); syncTurn = null; }
+      }, 90_000);
+    } else {
+      toDock('dock:done', { text: reply });
+    }
   } catch (err) {
     toDock('dock:done', {});
     if (err.aborted) return;
@@ -1009,11 +1051,25 @@ function wireIpc() {
     if (reason && reason !== 'silence') addTranscript('system', `Microphone: ${reason}`);
   });
   ipcMain.on('overlay:log', (e, msg) => { if (fromOverlay(e)) console.log('[overlay]', msg); });
+  ipcMain.on('voice:spoken', (e, text) => {
+    if (!fromOverlay(e) || !syncTurn) return;
+    toDock('dock:delta', `${syncTurn.spokenAny ? ' ' : ''}${text}`);
+    syncTurn.spokenAny = true;
+  });
+  ipcMain.on('voice:idle', (e) => {
+    if (!fromOverlay(e) || !syncTurn || !syncTurn.finished) return;
+    toDock('dock:done', { text: syncTurn.reply });
+    syncTurn = null;
+  });
   // The orb drew its first frame: graphics are fine, so now load the voice
   // (loading it earlier could collide with a safe-graphics restart).
   ipcMain.once('overlay:ready', (e) => {
     if (!fromOverlay(e)) return;
-    if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
+    // Spread start-up work out: loading the voice model uses every CPU core
+    // for a moment, so do it a few seconds after COre has appeared.
+    setTimeout(() => {
+      if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
+    }, 6000);
   });
   ipcMain.on('overlay:rendererFailed', (e, msg) => {
     if (!fromOverlay(e)) return;
@@ -1258,9 +1314,10 @@ app.whenReady().then(async () => {
     addTranscript('system', `Hi, I'm COre. Press ${prettyKey(hk.listen)} to talk, ${prettyKey(hk.listenWithScreen)} to talk about your screen, or type in the chat under me. Brain: ${brainStatus().primary}.`);
   }
 
+  await new Promise((r) => setTimeout(r, 1500)); // let the orb appear first
   refreshBrainStatus().then((list) => {
     const claude = list.find((p) => p.id === 'claude-cli');
-    if (claude && claude.state === 'connected') warmClaude();
+    if (claude && claude.state === 'connected') setTimeout(warmClaude, 1500);
     const others = list.filter((p) => p.id !== 'claude-cli' && p.state === 'connected');
     if (claude && claude.state !== 'connected') {
       addTranscript('system', `${claude.detail}${others.length ? ` Until then I will use ${others.map((p) => p.name).join(', ')}.` : ' Press "Log in to Claude" in the chat, or connect a free alternative in ⚙ → Brain.'}`);

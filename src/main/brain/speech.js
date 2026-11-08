@@ -26,6 +26,16 @@ class SentenceChunker {
   feed(text) {
     const ready = [];
     this.buffer += text;
+    // Before anything has been spoken, a long opening clause can go out on its
+    // own ("Well, that depends, ...") so the voice starts sooner.
+    if (!this.released && !this.pending && !SENTENCE_END.test(this.buffer) && this.buffer.length >= 40) {
+      const m = /^(.{18,}?[,;:\u2014\u2013])\s/.exec(this.buffer);
+      if (m) {
+        ready.push(m[1].trim());
+        this.buffer = this.buffer.slice(m[0].length);
+        this.released++;
+      }
+    }
     let m;
     while ((m = SENTENCE_END.exec(this.buffer))) {
       const end = m.index + m[0].length;

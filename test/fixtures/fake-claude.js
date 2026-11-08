@@ -52,7 +52,8 @@ if (args.includes('--input-format')) {
       const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
       if (!line.trim()) continue;
       const msg = JSON.parse(line);
-      reply(msg.message.content);
+      const c = msg.message.content;
+      reply(Array.isArray(c) ? c.map((b) => (b.type === 'image' ? '[image]' : b.text)).join(' ') : c);
     }
   });
   process.stdin.on('end', () => process.exit(0));

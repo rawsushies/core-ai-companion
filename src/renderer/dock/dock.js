@@ -86,11 +86,18 @@
   input.addEventListener('input', autosize);
   document.getElementById('mic').addEventListener('click', () => api.listen());
   document.getElementById('hide').addEventListener('click', () => api.hide());
-  document.getElementById('gear').addEventListener('click', () => {
-    settings.hidden = !settings.hidden;
-    shell.classList.toggle('settings-open', !settings.hidden);
+  function setSettingsOpen(open) {
+    settings.hidden = !open;
+    shell.classList.toggle('settings-open', open);
+    if (open) api.brainStatus().then(renderBrain);
+    else input.focus();
     reportSize();
-  });
+  }
+  document.getElementById('gear').addEventListener('click', () => setSettingsOpen(settings.hidden));
+  document.getElementById('settings-back').addEventListener('click', () => setSettingsOpen(false));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !settings.hidden) { e.stopPropagation(); setSettingsOpen(false); }
+  }, true);
   document.getElementById('open-panel').addEventListener('click', () => api.openPanel());
   document.getElementById('updates').addEventListener('click', () => api.checkUpdates());
   document.getElementById('new-chat').addEventListener('click', () => api.newChat());
@@ -190,9 +197,8 @@
     reportSize();
   }
   document.getElementById('banner-login').addEventListener('click', () => api.loginClaude());
-  document.getElementById('banner-more').addEventListener('click', () => { settings.hidden = false; shell.classList.add('settings-open'); reportSize(); });
+  document.getElementById('banner-more').addEventListener('click', () => setSettingsOpen(true));
   api.onBrain(renderBrain);
-  document.getElementById('gear').addEventListener('click', () => { if (!settings.hidden) api.brainStatus().then(renderBrain); });
 
   api.onMessage(({ role, text }) => {
     if (role === 'core-start') { startStream(); return; }
