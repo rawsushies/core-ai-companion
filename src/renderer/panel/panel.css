@@ -1,0 +1,110 @@
+:root {
+  --bg: rgba(10, 10, 15, 0.94);
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #ecebf4;
+  --muted: #9a98ad;
+  --accent: #8f7cff;
+  --accent-2: #4fd6ff;
+  --user: #1d1b2b;
+  --core: #121219;
+  --warn: #ffb547;
+  --bad: #ff5d6c;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--text);
+  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 10px 16px;
+  -webkit-app-region: drag;
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: 0.04em; }
+.dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #5a5870 0%, #08080c 55%);
+  box-shadow: 0 0 0 1px rgba(143, 124, 255, 0.5), 0 0 10px rgba(143, 124, 255, 0.45);
+}
+.actions { display: flex; gap: 4px; -webkit-app-region: no-drag; }
+
+button { font: inherit; color: inherit; cursor: pointer; }
+.icon {
+  width: 30px; height: 30px; border-radius: 8px; border: 0; background: transparent;
+  display: grid; place-items: center; fill: var(--muted); stroke: var(--muted);
+}
+.icon:hover { background: rgba(255, 255, 255, 0.06); fill: var(--text); stroke: var(--text); }
+.icon:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.menu {
+  position: absolute; right: 12px; top: 46px; z-index: 5;
+  display: flex; flex-direction: column; min-width: 210px; padding: 6px;
+  background: #15141d; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  -webkit-app-region: no-drag;
+}
+.menu[hidden] { display: none; }
+.menu button { text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; }
+.menu button:hover { background: rgba(255, 255, 255, 0.06); }
+
+.status {
+  padding: 6px 16px; font-size: 12px; color: var(--muted);
+  border-bottom: 1px solid var(--line); min-height: 28px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.log {
+  flex: 1; overflow-y: auto; padding: 14px 14px 6px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.msg { max-width: 88%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; word-wrap: break-word; }
+.msg.user { align-self: flex-end; background: var(--user); border: 1px solid rgba(143, 124, 255, 0.25); }
+.msg.core { align-self: flex-start; background: var(--core); border: 1px solid var(--line); }
+.msg.system { align-self: center; max-width: 96%; font-size: 12px; color: var(--muted); background: transparent; text-align: center; padding: 2px 8px; }
+.msg.notice {
+  align-self: stretch; max-width: 100%; font-size: 13px;
+  background: rgba(255, 181, 71, 0.08); border: 1px solid rgba(255, 181, 71, 0.3);
+}
+.msg time { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.composer { padding: 10px 12px 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+textarea {
+  width: 100%; resize: none; max-height: 140px; min-height: 40px;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: #0e0e14; color: var(--text); font: inherit;
+}
+textarea::placeholder { color: #6e6c80; }
+.row { display: flex; align-items: center; gap: 8px; }
+.spacer { flex: 1; }
+.toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.toggle input { accent-color: var(--accent-2); }
+.primary, .ghost { padding: 7px 14px; border-radius: 10px; border: 1px solid var(--line); }
+.primary { background: var(--accent); border-color: transparent; color: #0b0a12; font-weight: 600; }
+.primary:hover { filter: brightness(1.08); }
+.ghost { background: transparent; }
+.ghost:hover { background: rgba(255, 255, 255, 0.06); }
+
+.hints { padding: 0 16px 10px; font-size: 11px; color: #6e6c80; }
+
+.log::-webkit-scrollbar { width: 8px; }
+.log::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 8px; }

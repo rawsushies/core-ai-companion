@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>COre</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="bar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span>COre</div>
+      <div class="actions">
+        <button id="menu-btn" class="icon" title="Menu" aria-label="Menu" aria-haspopup="true">
+          <svg viewBox="0 0 24 24" width="16" height="16"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </button>
+        <button id="close-btn" class="icon" title="Hide" aria-label="Hide panel">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 6l12 12M18 6L6 18" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div id="menu" class="menu" hidden>
+        <button data-act="reset">New conversation</button>
+        <button data-act="config">Open settings file</button>
+        <button data-act="reload">Reload settings</button>
+        <button data-act="token">Copy notification token</button>
+      </div>
+    </header>
+
+    <div id="status" class="status"></div>
+
+    <main id="log" class="log" aria-live="polite"></main>
+
+    <form id="composer" class="composer">
+      <textarea id="input" rows="1" placeholder="Talk to COre…" aria-label="Message"></textarea>
+      <div class="row">
+        <label class="toggle" title="Attach a screenshot so COre can see and point">
+          <input type="checkbox" id="screen">
+          <span>Show my screen</span>
+        </label>
+        <div class="spacer"></div>
+        <button type="button" id="stop" class="ghost" title="Stop talking">Stop</button>
+        <button type="submit" id="send" class="primary">Send</button>
+      </div>
+    </form>
+    <footer id="hints" class="hints"></footer>
+  </div>
+  <script src="panel.js"></script>
+</body>
+</html>

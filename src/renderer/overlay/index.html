@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob: mediastream:; worker-src 'self'">
+  <title>COre</title>
+  <link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+  <canvas id="orb"></canvas>
+  <div id="caption" aria-live="polite"></div>
+  <div id="demo-help" hidden>
+    <strong>COre demo</strong> — P point at cursor · E explain · T talk · L listen · K think · N cycle notification colour · M move home to cursor · drag the orb
+  </div>
+  <script src="motion.js"></script>
+  <script src="orb-gl.js"></script>
+  <script src="voice.js"></script>
+  <script src="listen.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

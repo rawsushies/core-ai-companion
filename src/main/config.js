@@ -1,0 +1,112 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { randomBytes } = require('crypto');
+
+const DEFAULTS = {
+  brain: {
+    // 'claude-cli'    -> Claude through your Claude Code login (no API key)
+    // 'ollama'        -> free local model (https://ollama.com)
+    // 'openai-compat' -> DeepSeek / OpenRouter / LM Studio / any OpenAI-style endpoint
+    provider: 'claude-cli',
+    fallback: 'ollama', // tried when the primary fails before saying anything; '' to disable
+    claude: { command: 'claude', model: 'haiku', effort: '' },
+    ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:7b', visionModel: '' },
+    openaiCompat: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: '', vision: false },
+  },
+  voice: {
+    tts: true, // speak replies with your OS voices
+    voiceName: '', // part of a voice name, e.g. "David" or "Indonesia"; empty = auto by language
+    lang: '', // e.g. "en-US", "id-ID"; empty = system default
+    rate: 1.05,
+    pitch: 0.85,
+    sttModel: 'onnx-community/whisper-base', // local speech recognition, downloaded once
+    sttLanguage: '', // '' = auto-detect, or e.g. 'english', 'indonesian'
+  },
+  orb: {
+    radius: 46, // px
+    renderScale: 1, // lower (0.6-0.8) on slow GPUs
+    hideFromCaptures: true, // keep the orb out of its own screenshots (Windows/macOS)
+    home: null, // {x, y} remembered after you drag it
+  },
+  screen: {
+    autoShareOnDeixis: true, // phrases like "look at this" / "what's on my screen" attach a screenshot
+  },
+  hotkeys: {
+    listen: 'CommandOrControl+Alt+Space',
+    listenWithScreen: 'CommandOrControl+Alt+S',
+    panel: 'CommandOrControl+Alt+C',
+    hide: 'CommandOrControl+Alt+H',
+  },
+  notify: {
+    enabled: true,
+    port: 47321,
+    token: '', // generated on first run
+    speak: false, // read notification titles aloud
+  },
+};
+
+function isObj(v) {
+  return v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function deepMerge(base, over) {
+  if (!isObj(over)) return base;
+  const out = { ...base };
+  for (const [k, v] of Object.entries(over)) {
+    out[k] = isObj(v) && isObj(base[k]) ? deepMerge(base[k], v) : v;
+  }
+  return out;
+}
+
+class JsonFile {
+  constructor(file, defaults) {
+    this.file = file;
+    this.defaults = defaults;
+    this.data = this._load();
+  }
+  _load() {
+    try {
+      return deepMerge(this.defaults, JSON.parse(fs.readFileSync(this.file, 'utf8')));
+    } catch (err) {
+      if (err.code !== 'ENOENT') console.error(`[core] could not read ${this.file}: ${err.message}`);
+      return deepMerge(this.defaults, {});
+    }
+  }
+  reload() {
+    this.data = this._load();
+    return this.data;
+  }
+  save() {
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
+    fs.renameSync(tmp, this.file);
+  }
+}
+
+function loadConfig(dir) {
+  const cfg = new JsonFile(path.join(dir, 'config.json'), DEFAULTS);
+  if (!cfg.data.notify.token) {
+    cfg.data.notify.token = randomBytes(18).toString('base64url');
+  }
+  cfg.save(); // writes defaults on first run so the user has a file to edit
+  return cfg;
+}
+
+function loadState(dir) {
+  const st = new JsonFile(path.join(dir, 'state.json'), {});
+  let timer = null;
+  return {
+    get: (k) => st.data[k],
+    set: (k, v) => {
+      st.data[k] = v;
+      clearTimeout(timer);
+      timer = setTimeout(() => st.save(), 300);
+    },
+    flush: () => { clearTimeout(timer); st.save(); },
+  };
+}
+
+module.exports = { loadConfig, loadState, deepMerge, DEFAULTS };

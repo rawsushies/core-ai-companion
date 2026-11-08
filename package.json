@@ -1,0 +1,24 @@
+{
+  "name": "core-companion",
+  "productName": "COre",
+  "version": "0.1.0",
+  "private": true,
+  "description": "COre: a black liquid orb desktop companion that talks through Claude Code (no API key) or a free local model.",
+  "main": "src/main/main.js",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "install-electron",
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check-syntax.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1"
+  },
+  "devDependencies": {
+    "electron": "45.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
