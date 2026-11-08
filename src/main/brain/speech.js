@@ -50,6 +50,7 @@ class SentenceChunker {
 function cleanForSpeech(text) {
   return text
     .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/(^|\n)\s*(?:[-+*]|\d+[.)])\s+/g, '$1')
     .replace(/`([^`]*)`/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/[*_#>]+/g, ' ')
@@ -59,8 +60,14 @@ function cleanForSpeech(text) {
 }
 
 class SpeechPlanner {
-  constructor(emit) {
-    this.emit = emit; // (item) => void
+  // emit(item): ordered say / gesture / end items for the orb.
+  // opts.onText(text): every tag-free text fragment, for live chat display.
+  // opts.maxSpoken: speak only the first N chunks (typed chat shows the rest as text).
+  constructor(emit, opts = {}) {
+    this.emit = emit;
+    this.onText = opts.onText || (() => {});
+    this.maxSpoken = opts.maxSpoken || Infinity;
+    this.spoken = 0;
     this.tags = new TagStreamParser();
     this.chunker = new SentenceChunker();
     this.fullText = '';
@@ -80,6 +87,7 @@ class SpeechPlanner {
   _segment(seg) {
     if (seg.type === 'text') {
       this.fullText += seg.text;
+      this.onText(seg.text);
       for (const s of this.chunker.feed(seg.text)) this._say(s);
     } else {
       // Release text written before the tag first, so the gesture lands at
@@ -90,8 +98,11 @@ class SpeechPlanner {
   }
 
   _say(text) {
+    if (this.spoken >= this.maxSpoken) return;
     const clean = cleanForSpeech(text);
-    if (clean) this.emit({ type: 'say', text: clean });
+    if (!clean) return;
+    this.spoken++;
+    this.emit({ type: 'say', text: clean });
   }
 }
 

@@ -140,6 +140,7 @@
       : [r * 0.3, r * 0.17 * thin, r * 0.13 * thin, r * 0.19]; // open palm
     return {
       on: e,
+      mode: arm.mode,
       pts: [base, at(0.36), at(0.72), tip],
       radii: radii.map((v) => v * grow),
     };

@@ -51,7 +51,7 @@ class OllamaBrain extends HistoryMixin {
     return `${this.cfg.model} via Ollama (local)`;
   }
 
-  async ask({ prompt, image, signal, onDelta }) {
+  async ask({ prompt, image, tone, signal, onDelta }) {
     const model = image && this.cfg.visionModel ? this.cfg.visionModel : this.cfg.model;
     const user = { role: 'user', content: prompt };
     if (image && this.cfg.visionModel) user.images = [image.base64];
@@ -62,7 +62,7 @@ class OllamaBrain extends HistoryMixin {
       body: JSON.stringify({
         model,
         stream: true,
-        messages: [{ role: 'system', content: persona({ canReadFiles: false }) }, ...this.history, user],
+        messages: [{ role: 'system', content: persona({ canReadFiles: false, tone }) }, ...this.history, user],
       }),
     }).catch((err) => {
       if (err.name === 'AbortError') throw Object.assign(new Error('aborted'), { aborted: true });
@@ -99,7 +99,7 @@ class OpenAICompatBrain extends HistoryMixin {
     return `${this.cfg.model} via ${host}`;
   }
 
-  async ask({ prompt, image, signal, onDelta }) {
+  async ask({ prompt, image, tone, signal, onDelta }) {
     const content = image && this.cfg.vision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:image/png;base64,${image.base64}` } }]
       : prompt;
@@ -113,7 +113,7 @@ class OpenAICompatBrain extends HistoryMixin {
         model: this.cfg.model,
         stream: true,
         temperature: 0.7,
-        messages: [{ role: 'system', content: persona({ canReadFiles: false }) }, ...this.history, { role: 'user', content }],
+        messages: [{ role: 'system', content: persona({ canReadFiles: false, tone }) }, ...this.history, { role: 'user', content }],
       }),
     }).catch((err) => {
       if (err.name === 'AbortError') throw Object.assign(new Error('aborted'), { aborted: true });

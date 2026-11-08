@@ -1,0 +1,62 @@
+:root {
+  --bg: rgba(6, 10, 9, 0.9);
+  --line: rgba(120, 255, 170, 0.14);
+  --text: #e6f3ea;
+  --muted: #8ea597;
+  --accent: #4dff9a;
+  --user: rgba(77, 255, 154, 0.1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; color: var(--text); font: 13.5px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; overflow: hidden; }
+.shell {
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.log { max-height: 240px; overflow-y: auto; padding: 10px 12px 2px; display: flex; flex-direction: column; gap: 8px; }
+.log:empty { display: none; }
+.msg { max-width: 92%; padding: 7px 11px; border-radius: 12px; word-wrap: break-word; }
+.msg.user { align-self: flex-end; background: var(--user); border: 1px solid var(--line); white-space: pre-wrap; }
+.msg.core { align-self: flex-start; background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.06); }
+.msg.system { align-self: center; color: var(--muted); font-size: 12px; text-align: center; padding: 0 6px; }
+.msg.core p { margin: 0 0 6px; } .msg.core p:last-child { margin-bottom: 0; }
+.msg.core ul, .msg.core ol { margin: 2px 0 6px; padding-left: 20px; }
+.msg.core .h { font-weight: 600; margin: 4px 0; }
+.msg.core code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; background: rgba(77, 255, 154, 0.08); padding: 1px 4px; border-radius: 4px; }
+.msg.core pre { margin: 4px 0 6px; padding: 8px 10px; background: rgba(0, 0, 0, 0.45); border-radius: 8px; overflow-x: auto; }
+.msg.core pre code { background: none; padding: 0; }
+.msg.core .link { color: var(--accent); text-decoration: underline dotted; }
+.msg.core.streaming::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.composer { display: flex; align-items: flex-end; gap: 4px; padding: 7px 7px 7px 8px; }
+.log:not(:empty) + .settings[hidden] + .composer, .log:not(:empty) ~ .composer { border-top: 1px solid var(--line); }
+textarea {
+  flex: 1; resize: none; min-height: 36px; max-height: 110px; padding: 7px 10px; overflow-y: hidden; line-height: 20px;
+  border-radius: 10px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.04);
+  color: var(--text); font: inherit;
+}
+textarea:focus { outline: none; border-color: var(--line); }
+textarea::placeholder { color: #66806f; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.icon { width: 32px; height: 34px; border: 0; border-radius: 9px; background: transparent; display: grid; place-items: center; stroke: var(--muted); }
+.icon:hover { background: rgba(77, 255, 154, 0.08); stroke: var(--text); }
+.icon.send { stroke: var(--accent); }
+.icon.busy { stroke: #ffb547; }
+button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.settings { padding: 10px 12px 4px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; border-top: 1px solid var(--line); }
+.settings[hidden] { display: none; }
+.settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.settings label span { color: var(--text); }
+.settings .check { flex-direction: row; align-items: center; grid-column: 1 / -1; }
+.settings select { background: #0d1411; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; font: inherit; }
+.settings input[type="range"] { accent-color: var(--accent); }
+.settings .row { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
+.ghost { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 12px; }
+.ghost:hover { background: rgba(77, 255, 154, 0.07); }
+textarea.scroll { overflow-y: auto; }
+textarea::-webkit-scrollbar { width: 6px; } textarea::-webkit-scrollbar-thumb { background: rgba(77, 255, 154, 0.2); border-radius: 6px; }
+textarea::-webkit-scrollbar-button { display: none; }
+.log::-webkit-scrollbar { width: 6px; } .log::-webkit-scrollbar-thumb { background: rgba(77, 255, 154, 0.15); border-radius: 6px; }

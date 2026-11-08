@@ -4,7 +4,7 @@
 const fs = require('fs');
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
-  process.stdout.write('Usage: claude [options]\n --print --output-format --include-partial-messages --resume --session-id --restricted --strict-mcp-config --tools --allowedTools --model --system-prompt\n');
+  process.stdout.write('Usage: claude [options]\n --print --output-format --include-partial-messages --resume --session-id --restricted --strict-mcp-config --tools --allowedTools --model --system-prompt --system-prompt-snapshot\n');
   process.exit(0);
 }
 if (process.env.FAKE_CLAUDE_ARGS) fs.appendFileSync(process.env.FAKE_CLAUDE_ARGS, JSON.stringify(args) + '\n');

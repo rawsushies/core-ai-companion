@@ -103,7 +103,28 @@
   uniform vec2  uArmP[8];
   uniform vec4  uArmR[2];
   uniform float uArmOn[2];
+  uniform float uArmMode[2]; // 0 = pointing (index finger out), 1 = open explaining hand
   ${NOISE}
+
+  vec2 rot2(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(v.x * c - v.y * s, v.x * s + v.y * c); }
+
+  // Finger layout: angle (radians, relative to the arm direction) and length
+  // (fraction of hand size). Thumb first.
+  void fingerSpec(int f, float mode, out float ang, out float len) {
+    if (mode > 0.5) {           // open hand
+      if (f == 0) { ang = -1.08; len = 0.55; }
+      else if (f == 1) { ang = -0.48; len = 0.86; }
+      else if (f == 2) { ang = 0.0; len = 0.96; }
+      else if (f == 3) { ang = 0.45; len = 0.86; }
+      else { ang = 0.9; len = 0.64; }
+    } else {                    // pointing: index straight, the rest curled
+      if (f == 0) { ang = -0.95; len = 0.42; }
+      else if (f == 1) { ang = 0.0; len = 1.0; }
+      else if (f == 2) { ang = 0.62; len = 0.3; }
+      else if (f == 3) { ang = 1.05; len = 0.27; }
+      else { ang = 1.45; len = 0.24; }
+    }
+  }
 
   mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
   mat3 rotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
@@ -112,7 +133,7 @@
     float life = aMeta.x - uDt;
     float seed = aMeta.y;
     float maxLife = aMeta.z;
-    float layer = aMeta.w;
+    float layer = floor(aMeta.w + 0.01);
     vec3 pos = aPos;
     vec3 vel = aVel;
     vec3 h = hash31(seed * 977.3);
@@ -133,33 +154,69 @@
     if (uArmOn[0] > 0.03 && seed < SHARE * min(uArmOn[0], 1.0)) arm = 0;
     else if (uArmOn[1] > 0.03 && seed > 1.0 - SHARE * min(uArmOn[1], 1.0)) arm = 1;
 
+    float tipFlag = 0.0;
     if (arm >= 0) {
-      // Stream from the body to the fingertip, then wrap back to the base.
-      float rate = 0.6 + 0.4 * h.x;
-      float s = fract(seed * 13.7 + uTime * rate);
-      float sPrev = fract(seed * 13.7 + (uTime - uDt) * rate);
-      float f = s * 2.999;
-      int seg = int(floor(f));
-      float u = f - float(seg);
-      vec2 a = uArmP[arm * 4 + seg];
-      vec2 b = uArmP[arm * 4 + seg + 1];
-      float ra = uArmR[arm][seg];
-      float rb = uArmR[arm][seg + 1];
-      float rad = mix(ra, rb, u) * (1.0 - 0.55 * s); // taper toward the fingertip
-      vec2 dir = normalize(b - a + vec2(1e-4));
-      vec2 perp = vec2(-dir.y, dir.x);
-      // Three thin strands twisting around the arm's centre line, like a rope
-      // of smoke, tapering with the arm and fraying a little at the edges.
-      float strandId = floor(h.y * 3.0);
-      float ang = strandId * 2.0943951 + s * 9.0 - uTime * 2.2;
-      float twist = rad * 0.55;
-      float fray = rad * 0.25 * (h.z - 0.5) * (1.0 + 1.5 * s);
-      vec2 jitter = vec2(hash31(seed * 57.1).xy - 0.5) * rad * 0.18;
-      vec3 target = vec3(mix(a, b, u) + perp * (cos(ang) * twist + fray) + jitter,
-                         sin(ang) * twist);
-      if (s < sPrev) { pos = target; vel = vec3(0.0); }
-      vel += (target - pos) * 70.0 * uDt;
-      vel *= exp(-uDt * 10.0);
+      float mode = uArmMode[arm];
+      float side = arm == 0 ? -1.0 : 1.0;
+      float grow = clamp(uArmOn[arm], 0.0, 1.0);
+      float hs = uR * 0.5 * grow;                       // hand size
+      vec2 tip = uArmP[arm * 4 + 3];
+      vec2 adir = normalize(tip - uArmP[arm * 4 + 2] + vec2(1e-4));
+      // Pointing: the index fingertip lands on the target, so the palm sits
+      // one finger-length back along the arm. Open hand: palm at the tip.
+      vec2 palm = mode > 0.5 ? tip : tip - adir * hs * 1.25;
+      vec3 h2 = hash31(seed * 71.3);
+      vec3 target;
+      bool wrapped = false;
+
+      if (h2.x < 0.5) {
+        // Forearm: three thin strands twisting from the body to the palm.
+        float rate = 0.6 + 0.4 * h.x;
+        float s = fract(seed * 13.7 + uTime * rate);
+        wrapped = s < fract(seed * 13.7 + (uTime - uDt) * rate);
+        float f = s * 2.999;
+        int seg = int(floor(f));
+        float u = f - float(seg);
+        vec2 a = uArmP[arm * 4 + seg];
+        vec2 b = seg == 2 ? palm : uArmP[arm * 4 + seg + 1];
+        float rad = mix(uArmR[arm][seg], uArmR[arm][min(seg + 1, 3)], u) * (1.0 - 0.5 * s);
+        vec2 dir = normalize(b - a + vec2(1e-4));
+        vec2 perp = vec2(-dir.y, dir.x);
+        float strandId = floor(h.y * 3.0);
+        float ang = strandId * 2.0943951 + s * 9.0 - uTime * 2.2;
+        float twist = rad * 0.55;
+        vec2 jitter = vec2(hash31(seed * 57.1).xy - 0.5) * rad * 0.18;
+        target = vec3(mix(a, b, u) + perp * cos(ang) * twist + jitter, sin(ang) * twist);
+      } else if (h2.x < 0.66) {
+        // Palm: a small swirling cloud, flattened across the arm.
+        float a = h2.y * 6.2831853 + uTime * (0.25 + 0.3 * h2.z);
+        float rr = sqrt(h2.z) * (0.7 + 0.3 * sin(uTime * 1.7 + h2.y * 20.0));
+        vec2 local = vec2(cos(a) * hs * 0.26, sin(a) * hs * 0.36) * rr;
+        target = vec3(palm + rot2(local, atan(adir.y, adir.x)), sin(a * 2.0) * hs * 0.12);
+      } else {
+        // Fingers: smoke flows from the knuckle to the fingertip.
+        int fi = int(floor(h2.y * 4.999));
+        float fang, flen;
+        fingerSpec(fi, mode, fang, flen);
+        float flex = mode > 0.5 ? sin(uTime * 2.6 + float(fi) * 1.3) * 0.12 : sin(uTime * 3.0) * 0.03;
+        vec2 fdir = rot2(adir, side * (fang + flex));
+        vec2 fperp = vec2(-fdir.y, fdir.x);
+        float rate = 0.9 + 0.6 * h2.z;
+        float t = fract(seed * 29.1 + uTime * rate);
+        wrapped = t < fract(seed * 29.1 + (uTime - uDt) * rate);
+        vec2 knuckle = palm + fdir * hs * 0.3;
+        float L = flen * hs;
+        float curl = (mode > 0.5 ? 0.12 : (fi == 1 ? 0.02 : 0.35)) * L;
+        float width = hs * 0.055 * (1.0 - 0.55 * t);
+        vec2 jit = (hash31(seed * 91.7).xy - 0.5) * width * 2.0;
+        target = vec3(knuckle + fdir * L * t + fperp * side * curl * sin(t * 3.14159) + jit,
+                      (h2.z - 0.5) * width * 2.0);
+        tipFlag = t > 0.86 ? 0.5 : 0.0;
+      }
+
+      if (wrapped) { pos = target; vel = vec3(0.0); }
+      vel += (target - pos) * 80.0 * uDt;
+      vel *= exp(-uDt * 11.0);
       pos += vel * uDt;
       life = max(life, 0.6);
     } else {
@@ -197,13 +254,16 @@
       vec3 desired = flow * speed * (layer > 0.5 ? 0.35 : 1.0)
                    + n * (targetR - r) * 5.0
                    + vec3(uCenterVel, 0.0);
-      vel = mix(vel, desired, 1.0 - exp(-uDt * 3.5)); // the lag is the smoke trail
+      // Each particle catches up at its own pace, so a moving orb trails a
+      // diffuse smoke tail instead of a stack of coherent shell outlines.
+      float respond = mix(2.2, 7.5, fract(seed * 517.3));
+      vel = mix(vel, desired, 1.0 - exp(-uDt * respond));
       pos += vel * uDt;
     }
 
     oPos = pos;
     oVel = vel;
-    oMeta = vec4(life, seed, maxLife, layer);
+    oMeta = vec4(life, seed, maxLife, layer + tipFlag);
   }`;
 
   const SIM_FS = `#version 300 es
@@ -232,11 +292,12 @@
     float fade = smoothstep(0.0, 0.9, life) * smoothstep(0.0, 0.6, maxL - life);
     float front = 0.45 + 0.55 * smoothstep(-1.0, 1.0, aPos.z / uR);
     float spark = step(0.990, fract(seed * 7919.37));
-    float dust = aMeta.w;
+    float dust = floor(aMeta.w + 0.01);
+    float tipGlow = step(0.25, fract(aMeta.w + 0.01));
     float twinkle = 0.55 + 0.45 * sin(uTime * (2.0 + 6.0 * fract(seed * 53.1)) + seed * 91.0);
     gl_PointSize = max(1.0, uSize * uPx * (0.5 + 0.8 * fract(seed * 311.7)) * (1.0 + 0.6 * spark));
     vec3 col = mix(uTint, vec3(1.0), 0.3 * spark + 0.1 * uAmp);
-    float a = fade * front * (0.022 * (1.0 - 0.5 * dust) + 0.22 * spark * twinkle) * (1.0 + 1.1 * uAmp + 0.6 * uGlow) * uBright;
+    float a = fade * front * (0.022 * (1.0 - 0.5 * dust) * (1.0 + 4.0 * tipGlow) + 0.22 * spark * twinkle) * (1.0 + 1.1 * uAmp + 0.6 * uGlow) * uBright;
     vCol = vec4(col * a, a);
   }`;
 
@@ -263,7 +324,15 @@
   uniform sampler2D uPrev;
   uniform float uKeep;
   uniform float uFloor;
-  void main() { o = max(texture(uPrev, vUv) * uKeep - uFloor, 0.0); }`;
+  uniform vec2 uShift;   // how far the orb moved since last frame, in uv
+  // Trails live in the orb's own frame: last frame's smoke moves with COre,
+  // so dragging or flying it never stamps ghost copies across the screen.
+  void main() {
+    vec2 uv = vUv - uShift;
+    // Outside the texture there is no old smoke (clamping would smear the edge).
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { o = vec4(0.0); return; }
+    o = max(texture(uPrev, uv) * uKeep - uFloor, 0.0);
+  }`;
 
   const COMP_FS = `#version 300 es
   precision highp float;
@@ -276,6 +345,7 @@
   uniform float uHalo;
   uniform float uAura;
   uniform float uTime;
+  uniform float uLight;      // 0 dark wallpaper look, 1 light wallpaper look
   void main() {
     vec3 c = texture(uTex, vUv).rgb;
     vec3 bloom = textureLod(uTex, vUv, 1.5).rgb * 0.35 + textureLod(uTex, vUv, 3.0).rgb * 0.3;
@@ -288,7 +358,15 @@
     float smoke = clamp(dot(bloom, vec3(0.6)) * 2.2, 0.0, 0.55);
     float halo = uHalo * exp(-pow((d - 1.3) / 0.32, 2.0)) * (0.65 + 0.35 * sin(uTime * 5.0));
     vec3 rgb = glow + uTint * halo * 0.55;
-    float a = clamp(max(max(rgb.r, rgb.g), rgb.b) + max(aura, smoke), 0.0, 1.0);
+    float lum = max(max(rgb.r, rgb.g), rgb.b);
+    float aDark = clamp(lum + max(aura, smoke), 0.0, 1.0);
+    // Light wallpaper: no cast shadow, just faint dark glass inside the shell,
+    // and strands drawn more opaque and a touch deeper so the green reads.
+    float glass = 0.22 * smoothstep(1.02, 0.6, d);
+    vec3 rgbLight = rgb * 0.8;
+    float aLight = clamp(lum * 1.9 + glass + uTint.g * halo * 0.2, 0.0, 0.95);
+    rgb = mix(rgb, rgbLight, uLight);
+    float a = mix(aDark, aLight, uLight);
     o = vec4(min(rgb, vec3(a)), a);
   }`;
 
@@ -393,6 +471,7 @@
       this.armP = new Float32Array(16);
       this.armR = new Float32Array(8);
       this.armOn = new Float32Array(2);
+      this.armMode = new Float32Array(2);
       this.lastT = null;
       this.trails = null;
       this.resize();
@@ -440,6 +519,7 @@
       for (let i = 0; i < 2; i++) {
         const g = s.arms[i];
         this.armOn[i] = g ? g.on : 0;
+        this.armMode[i] = g && g.mode === 'explain' ? 1 : 0;
         for (let k = 0; k < 4; k++) {
           this.armP[i * 8 + k * 2] = g ? g.pts[k].x : 0;
           this.armP[i * 8 + k * 2 + 1] = g ? g.pts[k].y : 0;
@@ -462,6 +542,7 @@
       gl.uniform2fv(su.uArmP, this.armP);
       gl.uniform4fv(su.uArmR, this.armR);
       gl.uniform1fv(su.uArmOn, this.armOn);
+      gl.uniform1fv(su.uArmMode, this.armMode);
       const write = 1 - this.read;
       gl.bindVertexArray(this.simVao[this.read]);
       gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.tf);
@@ -486,10 +567,14 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, src.tex);
       gl.uniform1i(this.fade.u.uPrev, 0);
-      // Long smoky trails when calm; short ones while moving fast, otherwise
-      // the whole sphere would leave a stack of ghost copies behind it.
+      const prev = this.prevCenter || s.pos;
+      let sx = (s.pos.x - prev.x) / window.innerWidth;
+      let sy = -(s.pos.y - prev.y) / window.innerHeight;
+      if (Math.abs(sx) > 0.25 || Math.abs(sy) > 0.25) { sx = 0; sy = 0; } // teleport: don't smear
+      this.prevCenter = { x: s.pos.x, y: s.pos.y };
+      gl.uniform2f(this.fade.u.uShift, sx, sy);
       const speed = Math.hypot(s.vel.x, s.vel.y);
-      const keep = 0.86 + (0.5 - 0.86) * Math.min(1, speed / (s.r * 10));
+      const keep = 0.86 - 0.18 * Math.min(1, speed / (s.r * 12));
       gl.uniform1f(this.fade.u.uKeep, Math.pow(keep, dt * 60));
       gl.uniform1f(this.fade.u.uFloor, this.float ? 0.0005 : 1 / 255);
       gl.bindVertexArray(this.quadVao);
@@ -528,6 +613,7 @@
       gl.uniform3f(cu.uTint, s.tint[0], s.tint[1], s.tint[2]);
       gl.uniform1f(cu.uHalo, s.halo);
       gl.uniform1f(cu.uAura, 0.78);
+      gl.uniform1f(cu.uLight, s.light || 0);
       gl.uniform1f(cu.uTime, s.t);
       gl.bindVertexArray(this.quadVao);
       gl.drawArrays(gl.TRIANGLES, 0, 3);

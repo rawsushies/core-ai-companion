@@ -15,12 +15,21 @@ const DEFAULTS = {
     ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:7b', visionModel: '' },
     openaiCompat: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: '', vision: false },
   },
+  personality: {
+    tone: 'sarcastic', // 'sarcastic' | 'dramatic' | 'calm' | 'cheerful' | 'professional'
+  },
   voice: {
-    tts: true, // speak replies with your OS voices
+    tts: true, // speak replies
+    engine: 'kokoro', // 'kokoro' = local neural voice with robot effects; 'system' = OS voices
+    kokoroVoice: 'am_onyx', // deep male; also am_fenrir, am_michael, bm_george, bm_lewis...
+    semitones: -3, // voice pitch shift (negative = deeper)
+    robot: 0.45, // 0 = clean voice, 1 = full machine
+    speed: 1.0,
+    speakTyped: true, // read the opening of typed-chat replies aloud
     voiceName: '', // part of a voice name, e.g. "David" or "Indonesia"; empty = auto by language
     lang: '', // e.g. "en-US", "id-ID"; empty = system default
-    rate: 1.05,
-    pitch: 0.85,
+    rate: 1.05, // system voice only
+    pitch: 0.85, // system voice only
     sttModel: 'onnx-community/whisper-base', // local speech recognition, downloaded once
     sttLanguage: '', // '' = auto-detect, or e.g. 'english', 'indonesian'
   },
@@ -29,6 +38,7 @@ const DEFAULTS = {
     radius: 60, // px
     particles: 24000, // smoke style: more = denser filaments, heavier on the GPU
     renderScale: 1, // lower (0.6-0.8) on slow GPUs
+    backdrop: 'auto', // 'auto' follows your Windows/macOS light or dark theme; or 'light' / 'dark'
     hideFromCaptures: true, // keep the orb out of its own screenshots (Windows/macOS)
     home: null, // {x, y} remembered after you drag it
   },
@@ -40,6 +50,12 @@ const DEFAULTS = {
     listenWithScreen: 'CommandOrControl+Alt+S',
     panel: 'CommandOrControl+Alt+C',
     hide: 'CommandOrControl+Alt+H',
+  },
+  update: {
+    enabled: true,
+    source: 'rawsushies/core-ai-companion', // GitHub "owner/repo" that hosts COre; '' = updates off
+    branch: 'main',
+    checkHours: 6,
   },
   notify: {
     enabled: true,

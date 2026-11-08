@@ -4,13 +4,15 @@ const fs = require('fs');
 const path = require('path');
 const {
   app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen,
-  desktopCapturer, shell, nativeImage, session, dialog,
+  desktopCapturer, shell, nativeImage, session, dialog, nativeTheme,
 } = require('electron');
 
 const { loadConfig, loadState } = require('./config');
 const { Brain } = require('./brain');
 const { SpeechToText } = require('./stt');
+const { TextToSpeech, OrderedVoicePipeline } = require('./tts');
 const { startNotifyServer } = require('./notifyServer');
+const { Updater } = require('./updater');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -35,8 +37,16 @@ let config; // JsonFile
 let state;
 let brain;
 let stt;
+let tts;
+let updater;
 let overlay = null;
 let panel = null;
+let dock = null;
+let dockAnchor = null; // { x, y, r } orb resting spot, overlay coordinates
+let dockVisible = true;
+let dockHeight = 60;
+let currentPipeline = null;
+let ttsWarned = false;
 let tray = null;
 let current = null; // AbortController of the running turn
 let listening = null; // { withScreen }
@@ -57,6 +67,7 @@ const send = (win, channel, payload) => {
 };
 const toOverlay = (c, p) => send(overlay, c, p);
 const toPanel = (c, p) => send(panel, c, p);
+const toDock = (c, p) => send(dock, c, p);
 
 function addTranscript(role, text) {
   const entry = { role, text, ts: Date.now() };
@@ -64,6 +75,8 @@ function addTranscript(role, text) {
   if (transcript.length > 200) transcript.shift();
   state.set('transcript', transcript.slice(-100));
   toPanel('transcript:add', entry);
+  // COre's own replies reach the dock as a live stream instead.
+  if (role !== 'core') toDock('dock:message', { role: role === 'notice' ? 'system' : role, text });
 }
 
 function primaryDisplay() {
@@ -105,6 +118,7 @@ function createOverlay() {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -132,6 +146,124 @@ function updateHitTest() {
     overlay.setIgnoreMouseEvents(!over, { forward: true });
     toOverlay('hover', over);
   }
+}
+
+// ---------------------------------------------------------------- chat dock
+
+const DOCK_WIDTH = 400;
+
+function createDock() {
+  dock = new BrowserWindow({
+    width: DOCK_WIDTH,
+    height: dockHeight,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    title: 'COre chat',
+    webPreferences: {
+      preload: path.join(PRELOAD, 'dock.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  dock.setAlwaysOnTop(true, 'screen-saver');
+  dock.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  dock.loadFile(path.join(RENDERER, 'dock', 'index.html'));
+  dock.once('ready-to-show', () => { if (dockVisible) { positionDock(); dock.showInactive(); } });
+  dock.on('close', (e) => {
+    if (!app.isQuitting) { e.preventDefault(); setDockVisible(false); }
+  });
+}
+
+// Hang the dock centred under the orb's resting spot; flip above it when
+// there's no room below.
+function positionDock() {
+  if (!dock || dock.isDestroyed()) return;
+  const d = primaryDisplay();
+  const wa = d.workArea;
+  const a = dockAnchor || { x: orbBounds.x, y: orbBounds.y, r: orbBounds.r };
+  const ax = d.bounds.x + a.x;
+  const ay = d.bounds.y + a.y;
+  const gap = a.r * 1.45 + 8;
+  let x = Math.round(ax - DOCK_WIDTH / 2);
+  let y = Math.round(ay + gap);
+  let side = 'below';
+  if (y + dockHeight > wa.y + wa.height - 6) {
+    y = Math.round(ay - gap - dockHeight);
+    side = 'above';
+  }
+  x = Math.min(Math.max(x, wa.x + 6), wa.x + wa.width - DOCK_WIDTH - 6);
+  y = Math.min(Math.max(y, wa.y + 6), wa.y + wa.height - dockHeight - 6);
+  dock.setBounds({ x, y, width: DOCK_WIDTH, height: dockHeight });
+  toOverlay('dock:visible', dockVisible && side === 'below');
+}
+
+function setDockVisible(v, focus = false) {
+  dockVisible = v;
+  state.set('dockVisible', v);
+  if (!dock) return;
+  if (v) {
+    positionDock();
+    if (focus) { dock.show(); dock.focus(); toDock('dock:focus'); } else dock.showInactive();
+  } else {
+    dock.hide();
+  }
+  toOverlay('dock:visible', v);
+}
+
+function toggleDock() {
+  if (!dock) return;
+  if (dockVisible && dock.isVisible()) setDockVisible(false);
+  else setDockVisible(true, true);
+}
+
+function dockSettings() {
+  const v = config.data.voice;
+  return {
+    tone: (config.data.personality && config.data.personality.tone) || 'sarcastic',
+    engine: v.engine,
+    kokoroVoice: v.kokoroVoice,
+    semitones: v.semitones,
+    robot: v.robot,
+    speakTyped: v.speakTyped !== false,
+  };
+}
+
+// Settings the dock may change. Each validator returns the cleaned value, or
+// undefined to reject it (0 and false are valid values).
+const SETTINGS_KEYS = {
+  'personality.tone': (v) => (['sarcastic', 'calm', 'cheerful', 'dramatic', 'professional'].includes(v) ? v : undefined),
+  'voice.kokoroVoice': (v) => (/^[a-z]{2}_[a-z]+$|^system$/.test(String(v)) ? String(v) : undefined),
+  'voice.semitones': (v) => (Number.isFinite(+v) ? Math.min(6, Math.max(-12, +v)) : undefined),
+  'voice.robot': (v) => (Number.isFinite(+v) ? Math.min(1, Math.max(0, +v)) : undefined),
+  'voice.speakTyped': (v) => !!v,
+};
+
+function applySetting(key, value) {
+  const check = SETTINGS_KEYS[key];
+  if (!check) return;
+  const v = check(value);
+  if (v === undefined) return;
+  if (key === 'voice.kokoroVoice') {
+    if (v === 'system') config.data.voice.engine = 'system';
+    else { config.data.voice.engine = 'kokoro'; config.data.voice.kokoroVoice = v; tts.warm(); }
+  } else {
+    const [group, name] = key.split('.');
+    config.data[group] = config.data[group] || {};
+    config.data[group][name] = v;
+  }
+  config.save();
+  toOverlay('config', overlayConfig());
+  toDock('dock:settings', dockSettings());
 }
 
 function createPanel() {
@@ -198,11 +330,13 @@ function createTray() {
   const menu = Menu.buildFromTemplate([
     { label: 'Talk to COre', click: () => startListening(false) },
     { label: 'Talk about my screen', click: () => startListening(true) },
-    { label: 'Open chat panel', click: () => togglePanel(true) },
+    { label: 'Show chat under the orb', click: () => setDockVisible(true, true) },
+    { label: 'Conversation history', click: () => togglePanel(true) },
     { type: 'separator' },
     { label: 'Hide / show orb', click: toggleOrb },
     { label: 'New conversation', click: resetConversation },
     { label: 'Settings (config.json)', click: openConfig },
+    { label: 'Check for updates', click: () => checkForUpdates(false) },
     { type: 'separator' },
     { label: 'Quit COre', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
@@ -239,7 +373,7 @@ function reloadConfig() {
 
 function overlayConfig() {
   const { orb, voice } = config.data;
-  return { orb, voice };
+  return { orb, voice: { ...voice, tts: voice.tts !== false }, lightTheme: !nativeTheme.shouldUseDarkColors };
 }
 
 // ---------------------------------------------------------------- screen
@@ -301,6 +435,29 @@ function abortCurrent() {
     current.abort();
     current = null;
   }
+  if (currentPipeline) {
+    currentPipeline.cancel();
+    currentPipeline = null;
+  }
+  toDock('dock:done', {});
+  toDock('dock:busy', false);
+}
+
+function makeVoicePipeline({ speak }) {
+  const v = config.data.voice;
+  const useKokoro = speak && v.tts !== false && v.engine !== 'system' && !tts.failed;
+  return new OrderedVoicePipeline({
+    synth: useKokoro ? (text) => tts.synth(text, { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed }) : null,
+    forward: (item) => {
+      if (item.type === 'say' && !speak) return;
+      toOverlay('speak:item', item);
+    },
+    onError: (err) => {
+      if (ttsWarned) return;
+      ttsWarned = true;
+      addTranscript('system', `COre's voice is not ready (${err.message}). Using your system voice for now.`);
+    },
+  });
 }
 
 function resetConversation() {
@@ -310,10 +467,11 @@ function resetConversation() {
   transcript.length = 0;
   state.set('transcript', []);
   toPanel('transcript:reset');
+  toDock('dock:reset');
   addTranscript('system', 'Started a new conversation.');
 }
 
-async function handleUserText(text, { withScreen = false } = {}) {
+async function handleUserText(text, { withScreen = false, typed = false } = {}) {
   text = String(text || '').trim();
   if (!text) return;
   abortCurrent();
@@ -340,19 +498,26 @@ async function handleUserText(text, { withScreen = false } = {}) {
 
   const ac = new AbortController();
   current = ac;
+  const speak = !typed || config.data.voice.speakTyped !== false;
+  const pipeline = makeVoicePipeline({ speak });
+  currentPipeline = pipeline;
+  toDock('dock:busy', true);
+  toDock('dock:message', { role: 'core-start' });
   try {
     const { reply } = await brain.ask({
       text,
       shot,
+      typed,
       signal: ac.signal,
+      onText: (t) => { if (!ac.signal.aborted) toDock('dock:delta', t); },
       onItem: (item) => {
         if (ac.signal.aborted) return;
         if (item.type === 'gesture' && item.name === 'point') {
           if (!shot) return; // no screenshot: nothing real to point at
-          toOverlay('speak:item', { ...item, ...mapPoint(shot, item.x, item.y) });
+          pipeline.push({ ...item, ...mapPoint(shot, item.x, item.y) });
           return;
         }
-        toOverlay('speak:item', item);
+        pipeline.push(item);
       },
       onStatus: (s) => {
         toPanel('status', s);
@@ -360,14 +525,19 @@ async function handleUserText(text, { withScreen = false } = {}) {
       },
     });
     if (reply) addTranscript('core', reply);
+    toDock('dock:done', { text: reply });
   } catch (err) {
+    toDock('dock:done', {});
     if (err.aborted) return;
     addTranscript('system', err.message);
     toOverlay('attention', { level: 'urgent', title: 'COre could not answer' });
     toOverlay('speak:item', { type: 'say', text: "I can't reach my brain right now. The chat panel says why." });
     toOverlay('speak:item', { type: 'end' });
   } finally {
-    if (current === ac) current = null;
+    if (current === ac) {
+      current = null;
+      toDock('dock:busy', false);
+    }
   }
 }
 
@@ -408,7 +578,7 @@ function registerHotkeys() {
   };
   bind(hk.listen, () => startListening(false), 'talk');
   bind(hk.listenWithScreen, () => startListening(true), 'talk about screen');
-  bind(hk.panel, () => togglePanel(), 'chat panel');
+  bind(hk.panel, () => toggleDock(), 'chat');
   bind(hk.hide, toggleOrb, 'hide orb');
 }
 
@@ -423,7 +593,33 @@ function wireIpc() {
     orbBounds = { x: +b.x || 0, y: +b.y || 0, r: Math.max(8, +b.r || 46) };
   });
   ipcMain.on('orb:drag', (e, dragging) => { if (fromOverlay(e)) orbDragging = !!dragging; });
-  ipcMain.on('orb:click', (e) => { if (fromOverlay(e)) togglePanel(); });
+  ipcMain.on('orb:click', (e) => { if (fromOverlay(e)) toggleDock(); });
+  ipcMain.on('orb:anchor', (e, a) => {
+    if (!fromOverlay(e) || !a) return;
+    dockAnchor = { x: +a.x || 0, y: +a.y || 0, r: Math.max(8, +a.r || 60) };
+    if (dockVisible) positionDock();
+  });
+
+  const fromDock = (e) => dock && e.sender === dock.webContents;
+  ipcMain.handle('dock:init', (e) => (fromDock(e) ? {
+    settings: dockSettings(),
+    recent: transcript.slice(-8).filter((m) => m.role !== 'system').map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text })),
+  } : null));
+  ipcMain.on('dock:ask', (e, text) => { if (fromDock(e)) handleUserText(text, { typed: true }); });
+  ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); } });
+  ipcMain.on('dock:listen', (e) => { if (fromDock(e)) startListening(false); });
+  ipcMain.on('dock:openPanel', (e) => { if (fromDock(e)) togglePanel(true); });
+  ipcMain.on('dock:hide', (e) => { if (fromDock(e)) setDockVisible(false); });
+  ipcMain.on('dock:reset', (e) => { if (fromDock(e)) resetConversation(); });
+  ipcMain.on('dock:resize', (e, h) => {
+    if (!fromDock(e)) return;
+    const nh = Math.round(Math.min(460, Math.max(48, +h || 60)));
+    if (nh === dockHeight) return;
+    dockHeight = nh;
+    positionDock();
+  });
+  ipcMain.on('dock:setting', (e, { key, value } = {}) => { if (fromDock(e)) applySetting(key, value); });
+  ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
   ipcMain.on('orb:home', (e, home) => {
     if (!fromOverlay(e) || !home) return;
     config.data.orb.home = { x: Math.round(home.x), y: Math.round(home.y) };
@@ -465,7 +661,7 @@ function wireIpc() {
       notify: { port: config.data.notify.port, enabled: config.data.notify.enabled },
     };
   });
-  ipcMain.on('panel:ask', (e, { text, withScreen }) => { if (fromPanel(e)) handleUserText(text, { withScreen }); });
+  ipcMain.on('panel:ask', (e, { text, withScreen }) => { if (fromPanel(e)) handleUserText(text, { withScreen, typed: true }); });
   ipcMain.on('panel:reset', (e) => { if (fromPanel(e)) resetConversation(); });
   ipcMain.on('panel:openConfig', (e) => { if (fromPanel(e)) openConfig(); });
   ipcMain.on('panel:reload', (e) => { if (fromPanel(e)) reloadConfig(); });
@@ -505,6 +701,27 @@ async function startNotify() {
   }
 }
 
+// ---------------------------------------------------------------- updates
+
+function relaunchAfterUpdate(version) {
+  toOverlay('attention', { level: 'info', title: 'COre updated' });
+  toOverlay('speak:item', { type: 'say', text: `Upgrade complete. Version ${version}. Try to contain your excitement.` });
+  toOverlay('speak:item', { type: 'end' });
+  setTimeout(() => {
+    app.isQuitting = true;
+    app.relaunch();
+    app.exit(0);
+  }, 4500);
+}
+
+async function checkForUpdates(quiet) {
+  try {
+    await updater.check({ quiet, onUpdated: relaunchAfterUpdate });
+  } catch (err) {
+    addTranscript('system', `Update failed: ${err.message}`);
+  }
+}
+
 // ---------------------------------------------------------------- app
 
 app.on('second-instance', () => togglePanel(true));
@@ -523,6 +740,17 @@ app.whenReady().then(async () => {
     dialog.showErrorBox('COre', err.message);
   }
   stt = makeStt();
+  tts = new TextToSpeech({
+    cacheDir: path.join(userData, 'models'),
+    onProgress: (p) => toPanel('status', { kind: 'download', file: `voice ${p.file}`, pct: p.pct }),
+  });
+  if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
+  dockVisible = state.get('dockVisible') !== false;
+  updater = new Updater({
+    appRoot: ROOT,
+    getConfig: () => config.data.update,
+    log: (msg) => addTranscript('system', msg),
+  });
 
   // Only COre's own overlay may use the microphone.
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
@@ -533,13 +761,16 @@ app.whenReady().then(async () => {
   ));
 
   wireIpc();
+  nativeTheme.on('updated', () => toOverlay('config', overlayConfig()));
   // Linux compositors sometimes need a beat before a transparent window is created.
   if (IS_LINUX) await new Promise((r) => setTimeout(r, 300));
   createOverlay();
   createPanel();
+  createDock();
   createTray();
   registerHotkeys();
   await startNotify();
+  updater.start(relaunchAfterUpdate);
 
   const hk = config.data.hotkeys;
   if (!transcript.length) {
@@ -558,6 +789,8 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
   if (stt) stt.dispose();
+  if (tts) tts.dispose();
+  if (updater) updater.stop();
   if (state) state.flush();
 });
 

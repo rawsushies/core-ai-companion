@@ -32,3 +32,8 @@ test('planner orders speech and gestures as the model wrote them', () => {
 test('cleanForSpeech strips markdown', () => {
   assert.equal(cleanForSpeech('# Title\n**bold** and `code` and [link](http://x)'), 'Title bold and code and link');
 });
+
+test('cleanForSpeech drops list markers so the voice never says "dash"', () => {
+  assert.equal(cleanForSpeech('- Name things well.'), 'Name things well.');
+  assert.equal(cleanForSpeech('1. First\n2) Second'), 'First Second');
+});

@@ -22,7 +22,10 @@
     urgent:  [1.00, 0.16, 0.22],
   };
 
-  let cfg = { orb: { style: 'smoke', radius: 60, particles: 24000, renderScale: 1, home: null }, voice: { tts: true } };
+  let cfg = { orb: { style: 'smoke', radius: 60, particles: 24000, renderScale: 1, home: null, backdrop: 'auto' }, voice: { tts: true }, lightTheme: false };
+  let light = 0;
+  let dockVisible = false;
+  let lastAnchorSent = 0;
   let renderer;
   let body;
   let home;
@@ -115,7 +118,7 @@
   }
 
   function onSpeakItem(item) {
-    if (item.type === 'say') voice.say(item.text);
+    if (item.type === 'say') voice.say(item.text, item.audio ? { audio: item.audio, sampleRate: item.sampleRate, rate: item.rate } : null);
     else if (item.type === 'gesture') voice.action(() => gesture(item));
     else if (item.type === 'end') voice.end();
   }
@@ -225,6 +228,7 @@
       tint: vis.tint,
       glow: vis.glow,
       halo: vis.halo,
+      light,
       arms,
     });
 
@@ -233,6 +237,11 @@
     if (bridge && now - lastBoundsSent > 100) {
       bridge.orbBounds({ x: body.pos.x, y: body.pos.y, r: body.r });
       lastBoundsSent = now;
+    }
+    // The chat dock hangs under the orb's resting spot (and follows a drag).
+    if (bridge && body.dragging && now - lastAnchorSent > 33) {
+      bridge.orbAnchor({ x: body.pos.x, y: body.pos.y, r: body.r });
+      lastAnchorSent = now;
     }
     requestAnimationFrame(frame);
   }
@@ -246,7 +255,7 @@
     const m = 12;
     const x = Math.min(Math.max(pos.x - w / 2, m), innerWidth - w - m);
     let y = pos.y + body.r * 1.55;
-    if (y + h > innerHeight - m) y = pos.y - body.r * 1.55 - h;
+    if (dockVisible || y + h > innerHeight - m) y = pos.y - body.r * 1.55 - h;
     caption.style.transform = `translate(${Math.round(x)}px, ${Math.round(Math.max(m, y))}px)`;
   }
 
@@ -276,7 +285,7 @@
         body.dragging = false;
         home = { x: body.target.x, y: body.target.y };
         lastGestureAt = performance.now();
-        if (bridge) { bridge.orbDrag(false); bridge.orbHome(home); }
+        if (bridge) { bridge.orbDrag(false); bridge.orbHome(home); bridge.orbAnchor({ ...home, r: body.r }); }
       } else {
         acknowledge();
         if (bridge) bridge.orbClick();
@@ -290,6 +299,8 @@
   function applyConfig(c) {
     if (!c) return;
     cfg = { ...cfg, ...c };
+    const b = (cfg.orb && cfg.orb.backdrop) || 'auto';
+    light = b === 'light' ? 1 : b === 'dark' ? 0 : (cfg.lightTheme ? 1 : 0);
     voice.setConfig(cfg.voice);
     if (body) body.r = cfg.orb.radius || 60;
   }
@@ -326,6 +337,8 @@
       bridge.onSpeechStop(stopAll);
       bridge.onHover((over) => { hoverSince = over ? performance.now() : 0; });
       bridge.onConfig(applyConfig);
+      bridge.onDockVisible((v) => { dockVisible = !!v; });
+      bridge.orbAnchor({ x: home.x, y: home.y, r: body.r });
     } else {
       demo();
     }
@@ -336,8 +349,8 @@
 
   function demo() {
     document.body.classList.add('demo');
-    if (params.get('bg') === 'light') document.body.style.background = '#eef0f4';
-    window.__coreDebug = () => ({ body, pointing, home, mode, inner: [innerWidth, innerHeight] });
+    if (params.get('bg') === 'light') { document.body.style.background = '#eef0f4'; light = 1; }
+    window.__coreDebug = () => ({ body, pointing, home, mode, renderer, inner: [innerWidth, innerHeight] });
     const help = document.getElementById('demo-help');
     if (help) help.hidden = false;
     let mouse = { x: innerWidth / 2, y: innerHeight / 2 };

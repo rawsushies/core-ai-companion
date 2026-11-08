@@ -6,6 +6,8 @@ A desktop companion that lives on your screen as a **sphere of glowing green smo
 flowing over a shell, gathering into drifting filaments and resonating together.
 It talks, listens, looks at your screen when you ask, reaches out **smoke tendrils to point** at things,
 resonates while it speaks, trails smoke when it moves, and **changes colour** when something needs your attention.
+It speaks with a **deep robotic machine voice** (sarcastic by default, adjustable), has a **chat block under the orb**
+for normal Claude-style typed conversations, and **updates itself** from GitHub.
 
 Its brain is **Claude through your own Claude Code login** — no API key. If Claude is unavailable it
 falls back to a **free local model** (Ollama) or any OpenAI-compatible endpoint (DeepSeek, OpenRouter, LM Studio).
@@ -16,7 +18,7 @@ falls back to a **free local model** (Ollama) or any OpenAI-compatible endpoint 
 | Listening | cyan, ripples with your voice |
 | Thinking | violet, faster swirl |
 | Speaking | the shell resonates in waves with the words, flow speeds up and brightens |
-| Explaining / pointing | particles peel off and stream along twisting smoke tendrils to the target |
+| Explaining / pointing | smoke arms end in smoke hands: an open hand with five flexing fingers, or an index finger that lands exactly on the target |
 | Moving | the cloud lags behind its centre like smoke |
 | Notification | colour change and pulsing halo: blue info, lime success, amber warning, red urgent |
 
@@ -60,14 +62,39 @@ speech-recognition model (Whisper base, ~80 MB) that then runs locally.
 |---|---|
 | `Ctrl+Alt+Space` | Talk. Press again to stop early. Pressing while COre talks interrupts it. |
 | `Ctrl+Alt+S` | Talk about your screen (COre gets a screenshot and can point at things) |
-| `Ctrl+Alt+C` | Open the chat panel to type |
+| `Ctrl+Alt+C` | Show / hide the chat block under the orb |
 | `Ctrl+Alt+H` | Hide / show the orb |
 
-- **Drag** the orb anywhere; it remembers the spot. **Click** it to open the chat panel.
+- **Chat block:** type under the orb and COre answers like a normal Claude chat (full detail, lists, code blocks),
+  in the same conversation as your voice chats. Only the opening of typed replies is read aloud (toggle in ⚙).
+- **Drag** the orb anywhere; it remembers the spot and the chat follows. **Click** it to show or hide the chat.
 - **Hover** or click acknowledges a notification colour.
 - Phrases like "look at this", "what's on my screen", "where is the…" also share a screenshot automatically
   (turn off with `screen.autoShareOnDeixis`).
 - Tray icon: talk, new conversation, settings, quit.
+
+## Voice and personality
+
+COre's voice is a local neural voice ([Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX),
+downloaded once, ~90 MB, runs offline) played through a robotic effects chain: pitched down, a detuned doubled
+layer, ring modulation, a metallic comb flanger, a little grit and a chest/presence EQ. The orb resonates with the
+real audio. It is an original machine voice, not a copy of any actor's voice.
+
+Open ⚙ in the chat block to change, instantly:
+
+- **Tone:** Sarcastic (default), Dramatic, Calm, Cheerful, Professional.
+- **Voice:** Onyx (deep, default), Fenrir (gravelly), Michael, Adam, Eric, George, Lewis, or your system voice.
+- **Pitch:** semitones (default -3 = deeper).
+- **Robot:** 0% clean to 100% full machine (default 45%).
+
+If the voice model can't load (e.g. offline on first run), COre falls back to your system voice.
+
+## Updates
+
+COre checks [rawsushies/core-ai-companion](https://github.com/rawsushies/core-ai-companion) every 6 hours (and on
+⚙ → Check updates). When the `version` in that repo's `package.json` is newer, it downloads the new code, keeps
+your settings and installed packages, reinstalls packages only if they changed, and restarts itself. If you
+installed with `git clone`, it uses `git pull`. Change or turn off with `update.source` / `update.enabled`.
 
 ## Settings
 
@@ -115,7 +142,7 @@ hook the tools you care about into this endpoint.
 
 ## Privacy and safety
 
-- The microphone is opened only while COre is listening, and closed right after. Speech recognition runs locally.
+- The microphone is opened only while COre is listening, and closed right after. Speech recognition and the voice run locally.
 - Screenshots are taken only on `Ctrl+Alt+S`, the panel's "Show my screen" box, or a "look at this" phrase.
   They are saved in COre's own workspace folder (last 5 kept) and sent to the brain you configured.
 - The Claude brain runs `claude -p` with **only the read-only `Read` tool** enabled, inside COre's workspace,
@@ -127,7 +154,9 @@ hook the tools you care about into this endpoint.
 
 ```
  hotkey / panel ──► main process (Electron)
-                     ├─ Whisper STT (worker thread, local)
+                     ├─ Whisper STT + Kokoro TTS (worker threads, local)
+                     ├─ chat dock window under the orb (streamed markdown replies)
+                     ├─ updater (GitHub ► download ► apply ► restart)
                      ├─ Brain: Claude Code CLI  ─┐ fallback: Ollama / OpenAI-compatible
                      │   stream ► tag parser ► sentence chunker ► [say | gesture | end]
                      ├─ screen capture ─► ./shots/*.png (Claude reads it)
@@ -138,7 +167,7 @@ hook the tools you care about into this endpoint.
    ├─ orb-smoke.js  WebGL2 GPU particles (transform feedback): flow on a sphere + pull to noise
    │                zero-lines = filaments; arm streams; fading trail buffer; mip bloom
    ├─ orb-gl.js     "liquid" style: raymarched SDF blob
-   ├─ voice.js    OS text-to-speech queue ► amplitude envelope ► vibration
+   ├─ voice.js      rendered Kokoro audio ► robot effects chain ► analyser ► resonance (OS voice fallback)
    └─ listen.js   mic + energy VAD ► 16 kHz PCM
 ```
 

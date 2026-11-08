@@ -129,9 +129,9 @@ class ClaudeCliBrain {
     this.state.set('claudeSessionId', null);
   }
 
-  _args({ sessionId, resume }) {
+  _args({ sessionId, resume, tone }) {
     const f = this.flags;
-    const system = persona({ canReadFiles: true });
+    const system = persona({ canReadFiles: true, tone });
     const args = [
       '-p',
       '--output-format', 'stream-json',
@@ -144,6 +144,8 @@ class ClaudeCliBrain {
     if (f.has('--restricted')) args.push('--restricted');
     if (f.has('--strict-mcp-config')) args.push('--strict-mcp-config');
     if (f.has('--permission-prompts')) args.push('--permission-prompts', 'none');
+    // Re-read the system prompt every turn so a tone change applies mid-conversation.
+    if (f.has('--system-prompt-snapshot')) args.push('--system-prompt-snapshot', 'off');
     if (this.cfg.model) args.push('--model', this.cfg.model);
     if (this.cfg.effort && f.has('--effort')) args.push('--effort', this.cfg.effort);
     if (resume) args.push('--resume', sessionId);
@@ -151,24 +153,24 @@ class ClaudeCliBrain {
     return args;
   }
 
-  async ask({ prompt, signal, onDelta, onTool }) {
+  async ask({ prompt, tone, signal, onDelta, onTool }) {
     await this.detect();
     const existing = this.state.get('claudeSessionId');
     try {
-      return await this._turn({ prompt, signal, onDelta, onTool, sessionId: existing || randomUUID(), resume: !!existing });
+      return await this._turn({ prompt, tone, signal, onDelta, onTool, sessionId: existing || randomUUID(), resume: !!existing });
     } catch (err) {
       // A stale session id (deleted history, other machine): start fresh once.
       if (existing && err.retryable) {
         this.resetConversation();
-        return this._turn({ prompt, signal, onDelta, onTool, sessionId: randomUUID(), resume: false });
+        return this._turn({ prompt, tone, signal, onDelta, onTool, sessionId: randomUUID(), resume: false });
       }
       throw err;
     }
   }
 
-  _turn({ prompt, signal, onDelta, onTool, sessionId, resume }) {
+  _turn({ prompt, tone, signal, onDelta, onTool, sessionId, resume }) {
     return new Promise((resolve, reject) => {
-      const args = this._args({ sessionId, resume });
+      const args = this._args({ sessionId, resume, tone });
       const child = spawn(this.cmd.file, this.cmd.shell ? args.map(quoteForCmd) : args, {
         cwd: this.workDir,
         shell: this.cmd.shell,

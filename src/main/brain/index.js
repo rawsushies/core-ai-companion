@@ -50,17 +50,21 @@ class Brain {
 
   // onItem receives {type:'say'|'gesture'|'end', ...}; onStatus receives
   // {kind:'provider'|'tool'|'fallback', ...} for the panel.
-  async ask({ text, shot, signal, onItem, onStatus = () => {} }) {
+  // typed: the message came from the chat box (normal-chat answer, only the
+  // opening is spoken). onText receives the reply text as it streams.
+  async ask({ text, shot, typed = false, signal, onItem, onText, onStatus = () => {} }) {
     const providers = [this.primary, this.fallback].filter(Boolean);
+    const tone = (this.ctx.config.personality && this.ctx.config.personality.tone) || 'sarcastic';
     let lastErr;
     for (let i = 0; i < providers.length; i++) {
       const p = providers[i];
-      const planner = new SpeechPlanner(onItem);
+      const planner = new SpeechPlanner(onItem, { onText, maxSpoken: typed ? 2 : Infinity });
       let streamed = false;
       onStatus({ kind: 'provider', label: p.label });
       try {
         await p.ask({
-          prompt: buildPrompt(p, text, shot),
+          prompt: buildPrompt(p, typed ? `[typed] ${text}` : text, shot),
+          tone,
           image: shot && shot.base64 ? { base64: shot.base64 } : null,
           signal,
           onDelta: (d) => { streamed = true; planner.feed(d); },
