@@ -108,7 +108,7 @@ class Brain {
     let lastErr;
     for (let i = 0; i < providers.length; i++) {
       const p = providers[i];
-      const planner = new SpeechPlanner(onItem, { onText, maxSpoken: typed ? 2 : Infinity });
+      const planner = new SpeechPlanner(onItem, { onText });
       let streamed = false;
       onStatus({ kind: 'provider', label: p.label });
       try {

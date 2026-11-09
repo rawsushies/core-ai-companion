@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('dock', {
   graphicsMode: () => ipcRenderer.invoke('dock:graphicsMode'),
   onMessage: on('dock:message'),
   onDelta: on('dock:delta'),
+  onSpeak: on('dock:speak'),
   onDone: on('dock:done'),
   onReset: on('dock:reset'),
   onFocus: on('dock:focus'),

@@ -25,7 +25,7 @@ function persona({ canReadFiles, tone = 'sarcastic' }) {
     '',
     'Typed chat: a message that starts with [typed] was written in the chat box under you and your answer is shown there as text.',
     'For those, answer like a normal Claude chat: as much detail as is useful, and markdown, lists and code blocks are welcome.',
-    'Keep your tone, and open with one short sentence that works when spoken, because only the opening is read aloud.',
+    'Keep your tone. Your prose is also read aloud (code blocks are not), so keep it natural to listen to.',
     '',
     'Silent tags (never spoken, never mentioned):',
     '- [[point X,Y]] reach a hand to pixel X,Y of the latest screenshot (only when one was given), right before the sentence about it.',

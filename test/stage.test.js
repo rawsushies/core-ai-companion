@@ -44,3 +44,25 @@ test('a caption widens the needed area', () => {
   const b = S.neededRect({ ...idle, caption: { w: 440, h: 60, above: true } });
   assert.ok(b.w >= 440 && b.y < a.y);
 });
+
+test('steady policy: idle motion only moves a fixed square, never resizes it', () => {
+  const st = { bigSince: 0 };
+  let stage = S.decideSteady({ stage: { x: 0, y: 0, w: 10, h: 10 }, need: S.neededRect(idle), view, r, now: 0, settled: true, state: st });
+  const side = stage.w;
+  for (let i = 0; i < 200; i++) {
+    const wob = { ...idle, pos: { x: 1700 + Math.sin(i / 7) * 60, y: 800 + Math.cos(i / 5) * 40 } };
+    const next = S.decideSteady({ stage, need: S.neededRect(wob), view, r, now: i * 100, settled: true, state: st });
+    if (next) { assert.equal(next.w, side); assert.equal(next.h, side); stage = next; }
+  }
+});
+
+test('steady policy: a drag uses the whole screen once, then returns to the square', () => {
+  const st = { bigSince: 0 };
+  const sq = S.decideSteady({ stage: { x: 0, y: 0, w: 10, h: 10 }, need: S.neededRect(idle), view, r, now: 0, settled: true, state: st });
+  const full = S.decideSteady({ stage: sq, need: S.neededRect(idle), view, r, now: 10, settled: false, dragging: true, state: st });
+  assert.deepEqual(full, { x: 0, y: 0, w: 1920, h: 1080 });
+  assert.equal(S.decideSteady({ stage: full, need: S.neededRect(idle), view, r, now: 20, settled: false, dragging: true, state: st }), null, 'no changes during the drag');
+  assert.equal(S.decideSteady({ stage: full, need: S.neededRect(idle), view, r, now: 30, settled: true, state: st }), null);
+  const back = S.decideSteady({ stage: full, need: S.neededRect(idle), view, r, now: 1000, settled: true, state: st });
+  assert.equal(back.w, sq.w);
+});

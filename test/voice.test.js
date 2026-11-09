@@ -53,7 +53,7 @@ test('every tone is safe for the Windows shell and lands in the persona', () => 
   assert.equal(forWindowsShell(persona({ canReadFiles: true })).includes('"'), false);
 });
 
-test('typed chat: full text streams to the chat, only the opening is spoken', () => {
+test('a spoken-chunk limit still works when asked for', () => {
   const said = [];
   let shown = '';
   const p = new SpeechPlanner((i) => { if (i.type === 'say') said.push(i.text); }, { onText: (t) => { shown += t; }, maxSpoken: 2 });

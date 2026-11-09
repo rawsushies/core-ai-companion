@@ -72,9 +72,9 @@
   const caption = document.getElementById('caption');
 
   const voice = new window.Voice(cfg.voice, {
-    onSay: (text) => {
+    onSay: (text, ms) => {
       showCaption(text);
-      if (text && bridge) bridge.spoken(text); // keeps the chat text in step with the voice
+      if (text && bridge) bridge.spoken(text, ms); // keeps the chat text in step with the voice
     },
     onSpeakStart: () => setMode('speaking'),
     // Any finished turn returns to idle, including silent or empty replies.
@@ -363,11 +363,7 @@
       bridge.orbBounds({ x: body.pos.x, y: body.pos.y, r: body.r });
       lastBoundsSent = now;
     }
-    // The chat dock hangs under the orb's resting spot (and follows a drag).
-    if (bridge && body.dragging && now - lastAnchorSent > 33) {
-      bridge.orbAnchor({ x: body.pos.x, y: body.pos.y, r: body.r });
-      lastAnchorSent = now;
-    }
+    // (The chat hides during a drag and reappears under the orb on drop.)
     requestAnimationFrame(frame);
   }
 
@@ -375,7 +371,7 @@
   function updateStage(now, pos, arms) {
     // While dragging, check often and leave lots of room ahead of the orb so
     // the smoke is never clipped at the window edge.
-    if (!bridge || now - lastStageReq < (body.dragging ? 30 : 80)) return;
+    if (!bridge || now - lastStageReq < 80) return;
     const capShown = caption.classList.contains('show');
     const need = S.neededRect({
       pos,
@@ -389,9 +385,10 @@
     });
     const settled = !pointing && !explainUntil && !body.dragging && Math.hypot(body.vel.x, body.vel.y) < 20
       && body.arms.every((a) => a.extend < 0.02);
-    const next = S.decide({ stage, need, view, r: body.r, now, settled, state: stageState, margin: body.dragging ? body.r * 4 : 0 });
+    const next = S.decideSteady({ stage, need, view, r: body.r, now, settled, dragging: body.dragging, state: stageState });
     if (next) {
       lastStageReq = now;
+      stage = { ...next }; // apply locally at once so drawing and window agree
       bridge.stageNeed(next);
     }
   }
@@ -414,15 +411,37 @@
   function setupPointer() {
     let down = null;
     const toView = (e) => ({ x: e.clientX + stage.x, y: e.clientY + stage.y });
+
+    // Ends a click or drag. Called from several signals because the window
+    // resizes when a drag starts, which can drop pointer capture (then a
+    // plain pointerup never arrives and COre would stay stuck "dragging").
+    function release() {
+      if (!down) return;
+      const d = down;
+      down = null;
+      if (d.moved) {
+        body.dragging = false;
+        home = { x: body.target.x, y: body.target.y };
+        lastGestureAt = performance.now();
+        if (bridge) { bridge.orbDrag(false); bridge.orbHome(home); bridge.orbAnchor({ ...home, r: body.r }); }
+        pulseAt(body.target.x, body.target.y, 0.8); // a splash when dropped
+      } else {
+        acknowledge();
+        pulseAt(d.x, d.y, 1); // a ripple from where you clicked
+        if (bridge) bridge.orbClick();
+      }
+    }
+
     canvas.addEventListener('pointerdown', (e) => {
       const p = toView(e);
       const d = Math.hypot(p.x - body.pos.x, p.y - body.pos.y);
       if (d > body.r * 1.45) return;
       down = { x: p.x, y: p.y, moved: false };
-      canvas.setPointerCapture(e.pointerId);
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
     });
-    canvas.addEventListener('pointermove', (e) => {
+    window.addEventListener('pointermove', (e) => {
       if (!down) return;
+      if (e.buttons === 0) return release(); // button was released somewhere we didn't hear
       const p = toView(e);
       if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 6) {
         down.moved = true;
@@ -432,21 +451,10 @@
       }
       if (down.moved) body.target = { x: p.x, y: p.y };
     });
-    canvas.addEventListener('pointerup', () => {
-      if (!down) return;
-      if (down.moved) {
-        body.dragging = false;
-        home = { x: body.target.x, y: body.target.y };
-        lastGestureAt = performance.now();
-        if (bridge) { bridge.orbDrag(false); bridge.orbHome(home); bridge.orbAnchor({ ...home, r: body.r }); }
-        pulseAt(body.target.x, body.target.y, 0.8); // a splash when dropped
-      } else {
-        acknowledge();
-        pulseAt(down.x, down.y, 1); // a ripple from where you clicked
-        if (bridge) bridge.orbClick();
-      }
-      down = null;
-    });
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    canvas.addEventListener('lostpointercapture', () => { if (down && !down.moved) release(); });
+    window.addEventListener('blur', release);
   }
 
   // ------------------------------------------------------------ boot

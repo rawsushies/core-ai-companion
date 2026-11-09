@@ -356,7 +356,7 @@ function clampStage(r) {
 function initialStage() {
   const r = config.data.orb.radius || 60;
   const home = homeNow();
-  const half = Math.max(r * 3.6, 230);
+  const half = Math.max(Math.round(r * 7.4), 440) / 2; // same square the overlay uses
   return clampStage({ x: home.x - half, y: home.y - half, w: half * 2, h: half * 2 });
 }
 
@@ -441,7 +441,7 @@ function updateHitTest() {
 
 // ---------------------------------------------------------------- chat dock
 
-const DOCK_WIDTH = 400;
+const DOCK_WIDTH = 340; // compact glass chat
 
 function createDock() {
   dock = new BrowserWindow({
@@ -991,7 +991,7 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
   const speak = !typed || config.data.voice.speakTyped !== false;
   const pipeline = makeVoicePipeline({ speak });
   currentPipeline = pipeline;
-  const synced = speak && !typed && config.data.voice.tts !== false;
+  const synced = speak && config.data.voice.tts !== false; // text follows the voice, typed or spoken
   const turnSync = synced ? { spokenAny: false, finished: false, reply: '' } : null;
   syncTurn = turnSync;
   toDock('dock:busy', true);
@@ -1113,7 +1113,20 @@ function wireIpc() {
     if (!fromOverlay(e) || !b) return;
     orbBounds = { x: +b.x || 0, y: +b.y || 0, r: Math.max(8, +b.r || 46) };
   });
-  ipcMain.on('orb:drag', (e, dragging) => { if (fromOverlay(e)) orbDragging = !!dragging; });
+  ipcMain.on('orb:drag', (e, dragging) => {
+    if (!fromOverlay(e)) return;
+    orbDragging = !!dragging;
+    if (process.env.CORE_DEBUG) console.log(`[core] drag=${orbDragging} dockVisible=${dockVisible} orbHidden=${orbHidden}`);
+    // Moving two transparent windows together every frame flickers on
+    // Windows: hide the chat while dragging, bring it back on drop.
+    if (dock && dockVisible && !orbHidden) {
+      if (orbDragging) dock.hide();
+      else setTimeout(() => {
+        if (!orbDragging && dockVisible && !orbHidden) { positionDock(); dock.showInactive(); }
+        if (process.env.CORE_DEBUG) console.log(`[core] dock shown again: ${dock.isVisible()}`);
+      }, 120);
+    }
+  });
   ipcMain.on('stage:need', (e, r) => {
     if (!fromOverlay(e) || !r || ![r.x, r.y, r.w, r.h].every(Number.isFinite)) return;
     applyStage(r);
@@ -1198,9 +1211,10 @@ function wireIpc() {
     if (reason && reason !== 'silence') addTranscript('system', `Microphone: ${reason}`);
   });
   ipcMain.on('overlay:log', (e, msg) => { if (fromOverlay(e)) console.log('[overlay]', msg); });
-  ipcMain.on('voice:spoken', (e, text) => {
-    if (!fromOverlay(e) || !syncTurn) return;
-    toDock('dock:delta', `${syncTurn.spokenAny ? ' ' : ''}${text}`);
+  ipcMain.on('voice:spoken', (e, { text, ms } = {}) => {
+    if (!fromOverlay(e) || !syncTurn || !text) return;
+    // The chat reveals this sentence word by word over its real audio length.
+    toDock('dock:speak', { text: `${syncTurn.spokenAny ? ' ' : ''}${text}`, ms: Math.max(300, Math.min(30000, +ms || 0)) });
     syncTurn.spokenAny = true;
   });
   ipcMain.on('voice:idle', (e) => {

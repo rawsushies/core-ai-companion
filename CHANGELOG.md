@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 — Harmony & glass
+- Fixed flicker while dragging and while idle: COre's window is now a fixed-size square that only moves
+  (moving doesn't redraw; resizing did). It resizes once when a drag or far point starts and once after.
+  Measured: 0 resizes during 15 s of idle life, 2 for a whole drag.
+- Fixed a drag that could get stuck (no drop) when the window resized under the pointer.
+- The chat hides while you drag COre and reappears under it when you drop.
+- Fixed replies going quiet after a few sentences: typed replies are now spoken in full (code is skipped).
+- Voice ⇄ text harmony: each spoken sentence's words appear over the real length of its audio, typed or
+  spoken questions alike.
+- Chat redesign: 340 px translucent glass, shows just the latest exchange (⌃ expands history), fades almost
+  away after 7 s idle and returns on hover, typing or when COre talks.
+
 ## 0.4.1 — Alive and quick
 - New orb animations: assembles from scattered smoke on start and when shown, dissolves when hidden,
   shockwaves on click / drop / notifications / reminders, an inhale when it starts listening, a faster spin

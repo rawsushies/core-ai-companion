@@ -279,7 +279,40 @@
     streaming.text += d;
     renderStream();
   });
+
+  // Voice harmony: reveal a spoken sentence word by word over its audio
+  // length, so the text never runs ahead of COre's voice.
+  let karaoke = null; // { words, shown, start, ms, timer }
+  function finishKaraoke() {
+    if (!karaoke) return;
+    clearInterval(karaoke.timer);
+    if (streaming) { streaming.text += karaoke.words.slice(karaoke.shown).join(''); renderStream(); }
+    karaoke = null;
+  }
+  api.onSpeak(({ text, ms }) => {
+    finishKaraoke();
+    if (!streaming) startStream();
+    const words = text.match(/\s*\S+/g) || [];
+    const total = words.reduce((n, w) => n + w.length, 0) || 1;
+    karaoke = { words, shown: 0, start: performance.now(), ms, timer: 0 };
+    const k = karaoke;
+    k.timer = setInterval(() => {
+      if (karaoke !== k || !streaming) return clearInterval(k.timer);
+      const frac = Math.min(1, (performance.now() - k.start) / k.ms);
+      let chars = 0;
+      let n = 0;
+      while (n < k.words.length && chars + k.words[n].length <= frac * total + 0.5) chars += k.words[n++].length;
+      if (frac >= 1) n = k.words.length;
+      if (n > k.shown) {
+        streaming.text += k.words.slice(k.shown, n).join('');
+        k.shown = n;
+        renderStream();
+      }
+      if (n >= k.words.length) { clearInterval(k.timer); karaoke = null; }
+    }, 60);
+  });
   api.onDone(({ text }) => {
+    finishKaraoke();
     if (streaming) {
       if (text) streaming.text = text;
       renderStream();
@@ -293,6 +326,28 @@
   api.onFocus(() => input.focus());
   api.onSettings(applySettings);
   api.onBusy(setBusy);
+
+  // ---------------------------------------------------------- glass behaviour
+  const historyBtn = document.getElementById('history-toggle');
+  historyBtn.addEventListener('click', () => {
+    const on = shell.classList.toggle('expanded');
+    historyBtn.textContent = on ? '⌄' : '⌃';
+    historyBtn.title = on ? 'Hide history' : 'Show history';
+    log.scrollTop = log.scrollHeight;
+    reportSize();
+  });
+  let lastActivity = performance.now();
+  let hovering = false;
+  const wake = () => { lastActivity = performance.now(); shell.classList.remove('faded'); };
+  shell.addEventListener('mouseenter', () => { hovering = true; wake(); });
+  shell.addEventListener('mouseleave', () => { hovering = false; lastActivity = performance.now(); });
+  for (const ev of ['keydown', 'pointerdown', 'focusin']) document.addEventListener(ev, wake, true);
+  new MutationObserver(wake).observe(log, { childList: true, subtree: true, characterData: true });
+  setInterval(() => {
+    const idle = performance.now() - lastActivity > 7000;
+    const typing = document.activeElement === input && input.value.trim();
+    shell.classList.toggle('faded', idle && !hovering && !busy && !typing && settings.hidden);
+  }, 500);
 
   api.init().then((d) => {
     if (!d) return;

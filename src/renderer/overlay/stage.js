@@ -58,11 +58,42 @@
     return { x, y, w, h };
   }
 
-  // Decide whether the window should change.
-  //   grow:   something needed is outside the window -> resize now.
-  //   shrink: the window has been much bigger than needed for a while (and
-  //           nothing is in motion) -> fit it again.
+  function sameSize(a, b) {
+    return Math.abs(a.w - b.w) < 2 && Math.abs(a.h - b.h) < 2;
+  }
+
+  // Flicker-free policy. Resizing a transparent window rebuilds its canvas
+  // (a visible flash), moving it doesn't. So COre normally lives in a fixed
+  // square that only moves; it resizes only when a gesture starts or ends:
+  //   dragging -> one resize to the whole screen for the whole drag
+  //   need bigger than the square (pointing far) -> one resize to fit
+  //   settled again -> one resize back to the square
   // state carries { bigSince } between calls.
+  function decideSteady({ stage, need, view, r, now, settled, dragging, state }) {
+    if (dragging) {
+      const full = { x: 0, y: 0, w: view.w, h: view.h };
+      return sameSize(stage, full) && stage.x === 0 && stage.y === 0 ? null : full;
+    }
+    const side = Math.max(Math.round(r * 7.4), 440);
+    const fitsSquare = need.w <= side - 8 && need.h <= side - 8;
+    const square = () => clampTo({ x: need.x + need.w / 2 - side / 2, y: need.y + need.h / 2 - side / 2, w: side, h: side }, view);
+    if (!fitsSquare) {
+      state.bigSince = 0;
+      return contains(stage, need) ? null : clampTo(pad(need, r * 1.2), view);
+    }
+    if (sameSize(stage, { w: side, h: side })) {
+      state.bigSince = 0;
+      return contains(stage, need, -4) ? null : square(); // move only
+    }
+    // Bigger (after a drag/point) or smaller: go back to the square once settled.
+    if (!contains(stage, need)) { state.bigSince = 0; return square(); }
+    if (!settled) { state.bigSince = 0; return null; }
+    if (!state.bigSince) state.bigSince = now;
+    if (now - state.bigSince > 900) { state.bigSince = 0; return square(); }
+    return null;
+  }
+
+  // Older adaptive policy (kept for tests/tools).
   function decide({ stage, need, view, r, now, settled, state, margin: m }) {
     const margin = m || r * 1.2;
     if (!contains(stage, need)) {
@@ -83,5 +114,5 @@
     return null;
   }
 
-  return { neededRect, pad, contains, clampTo, decide };
+  return { neededRect, pad, contains, clampTo, decide, decideSteady };
 });

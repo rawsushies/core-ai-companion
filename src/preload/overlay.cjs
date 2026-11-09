@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('core', {
   log: (msg) => ipcRenderer.send('overlay:log', String(msg)),
   rendererFailed: (msg) => ipcRenderer.send('overlay:rendererFailed', String(msg)),
   ready: () => ipcRenderer.send('overlay:ready'),
-  spoken: (text) => ipcRenderer.send('voice:spoken', String(text)),
+  spoken: (text, ms) => ipcRenderer.send('voice:spoken', { text: String(text), ms: Number(ms) || 0 }),
   speechIdle: () => ipcRenderer.send('voice:idle'),
   onSpeakItem: on('speak:item'),
   onState: on('state'),

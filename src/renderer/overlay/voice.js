@@ -222,7 +222,11 @@
       this.speaking = true;
       this.kick = 1;
       this.hooks.onSpeakStart();
-      this.hooks.onSay(text);
+      // Tell listeners how long this sentence will take, so text can follow it.
+      const estMs = (rendered && rendered.audio && rendered.audio.length)
+        ? (rendered.audio.length / (rendered.sampleRate || 24000) / (rendered.rate || 1)) * 1000
+        : (this.cfg.tts !== false && 'speechSynthesis' in window && this.voice ? text.length * 62 / (this.cfg.rate || 1) : 500 + text.length * 58);
+      this.hooks.onSay(text, estMs);
 
       if (this.cfg.tts !== false && rendered && rendered.audio && rendered.audio.length) {
         try {
