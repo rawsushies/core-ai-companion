@@ -44,6 +44,9 @@
     return r === 'on' || (r !== 'off' && reducedMotionOS);
   }
 
+  // How each mood colours the voice (playback rate: tempo and pitch together).
+  const MOOD_VOICE = { happy: 1.03, amused: 1.02, curious: 1.01, annoyed: 1.03, excited: 1.07, sad: 0.94, calm: 0.97 };
+
   const ATTENTION = {
     info:    [0.28, 0.58, 1.00],
     success: [0.80, 1.00, 0.30],
@@ -273,7 +276,7 @@
     else if (item.name === 'explain') explain();
     else if (item.name === 'form') { lastModelGesture = performance.now(); formShape(item.shape); }
     else if (item.name === 'gesture') { lastModelGesture = performance.now(); startGesture(item.gesture, { n: item.n }); }
-    else if (item.name === 'mood' && MOODS[item.mood]) mood = { name: item.mood, since: performance.now() };
+    else if (item.name === 'mood' && MOODS[item.mood]) { mood = { name: item.mood, since: performance.now() }; voice.moodRate = MOOD_VOICE[item.mood] || 1; }
   }
 
   function onSpeakItem(item) {
@@ -380,7 +383,7 @@
       halo = attention.level === 'urgent' ? 1 : 0.75;
     }
     // Mood: lasts ~9 s, eased in and out.
-    if (mood && now - mood.since > 9000) mood = null;
+    if (mood && now - mood.since > 9000) { mood = null; voice.moodRate = 1; }
     moodW += ((mood ? 1 : 0) - moodW) * Math.min(1, dt * 3);
     const md = mood ? MOODS[mood.name] : null;
     if (md && !attention) {

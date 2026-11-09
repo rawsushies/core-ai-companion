@@ -1,5 +1,13 @@
 # Changelog
 
+## 10.2.0 — A voice with feelings
+- Emotion-driven voice: when COre's mood changes, its voice follows. It speaks a little faster and brighter
+  when excited or happy, slower and lower when sad, softer when calm. The chat text stays in step.
+- Re-checked the original voice bugs with the real Claude and the real neural voice: an 8-sentence reply
+  was spoken in full, each sentence started within about 0.1 s of the last, and the text reveal matched
+  every sentence's audio length.
+- Debug logging (`CORE_DEBUG=1`) now shows brain tags, pointing corrections and voice timing.
+
 ## 10.1.0 — Tested with the real Claude
 - First full test against real Claude (not a stand-in). Notes, skill lookups, helper clones and screen
   pointing all worked; pointing landed within a few pixels of the target.

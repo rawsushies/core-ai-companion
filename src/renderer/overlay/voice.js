@@ -37,6 +37,7 @@
       this.token = 0;
       this.ctx = null;
       this.current = null; // playing WebAudio sources
+      this.moodRate = 1; // emotion: slightly faster/brighter or slower/lower speech
       this.setConfig(cfg);
       if ('speechSynthesis' in window) {
         speechSynthesis.addEventListener('voiceschanged', () => this._pickVoice());
@@ -230,7 +231,7 @@
       this.hooks.onSpeakStart();
       // Tell listeners how long this sentence will take, so text can follow it.
       const estMs = (rendered && rendered.audio && rendered.audio.length)
-        ? (rendered.audio.length / (rendered.sampleRate || 24000) / (rendered.rate || 1)) * 1000
+        ? (rendered.audio.length / (rendered.sampleRate || 24000) / ((rendered.rate || 1) * this.moodRate)) * 1000
         : (this.cfg.tts !== false && 'speechSynthesis' in window && this.voice ? text.length * 62 / (this.cfg.rate || 1) : 500 + text.length * 58);
       this.hooks.onSay(text, estMs);
 
@@ -241,7 +242,7 @@
           const pcm = rendered.audio instanceof Float32Array ? rendered.audio : new Float32Array(rendered.audio);
           const buf = ctx.createBuffer(1, pcm.length, rendered.sampleRate || 24000);
           buf.copyToChannel(pcm, 0);
-          const rate = rendered.rate || 1;
+          const rate = (rendered.rate || 1) * this.moodRate;
           const main = ctx.createBufferSource();
           main.buffer = buf;
           main.playbackRate.value = rate;

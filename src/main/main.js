@@ -1884,6 +1884,7 @@ function wireIpc() {
   });
   ipcMain.on('overlay:log', (e, msg) => { if (fromOverlay(e)) console.log('[overlay]', msg); });
   ipcMain.on('voice:spoken', (e, { text, ms } = {}) => {
+    if (process.env.CORE_DEBUG) console.log(`[core] spoken ${Date.now()} ms=${Math.round(ms)} ${String(text).slice(0, 50)}`);
     if (!fromOverlay(e) || !syncTurn || !text) return;
     // The chat reveals this sentence word by word over its real audio length.
     toDock('dock:speak', { text: `${syncTurn.spokenAny ? ' ' : ''}${text}`, ms: Math.max(300, Math.min(30000, +ms || 0)) });
