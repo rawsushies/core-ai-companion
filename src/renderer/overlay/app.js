@@ -187,6 +187,109 @@
     caption.classList.add('show');
   }
 
+  // ------------------------------------------------------------ glance card
+  // Now playing, synced lyrics or a short list beside the orb. DOM only: it
+  // updates when the line or the second changes, never per frame.
+  const glanceEl = document.getElementById('glance');
+  const gq = (c) => glanceEl.querySelector(c);
+  const GE = { kicker: gq('.g-kicker'), title: gq('.g-title'), sub: gq('.g-sub'), lyrics: gq('.g-lyrics'), prev: gq('.g-prev'), cur: gq('.g-cur'), next: gq('.g-next'), list: gq('.g-list'), bar: gq('.g-bar'), fill: gq('.g-bar i') };
+  let glance = null;
+  let glanceLines = null;
+  let glancePlain = null;
+  let glanceIdx = -2;
+  let glanceTimer = 0;
+  window.__coreSetGlance = (g) => setGlance(g); // test hook
+  window.__coreGlance = () => (glance ? { kind: glance.kind, title: GE.title.textContent, cur: GE.cur.textContent, hidden: glanceEl.hidden } : null); // test hook
+
+  function glancePos() {
+    if (!glance || !glance.at) return 0;
+    return Math.min(glance.durMs || Infinity, glance.posMs + (glance.playing ? Date.now() - glance.at : 0));
+  }
+
+  // Same binary search as glance.js lineIndex (main process).
+  function lyricIndex(lines, ms) {
+    let lo = 0, hi = lines.length - 1, ans = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].t <= ms) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+    return ans;
+  }
+
+  function glanceLyricLine(i) { return i >= 0 && glanceLines && glanceLines[i] ? glanceLines[i].text || '♪' : ''; }
+
+  function tickGlance() {
+    if (!glance) return;
+    const pos = glancePos();
+    if (glance.durMs) GE.fill.style.transform = `scaleX(${Math.min(1, pos / glance.durMs).toFixed(4)})`;
+    if (glance.kind === 'lyrics' && glanceLines && glanceLines.length) {
+      const i = lyricIndex(glanceLines, pos + 250); // a beat early reads better
+      if (i !== glanceIdx) {
+        glanceIdx = i;
+        GE.prev.textContent = glanceLyricLine(i - 1);
+        GE.cur.textContent = i < 0 ? '♪' : glanceLyricLine(i);
+        GE.next.textContent = glanceLyricLine(i + 1);
+        GE.cur.classList.remove('in'); void GE.cur.offsetWidth; GE.cur.classList.add('in');
+      }
+    }
+  }
+
+  function setGlance(g) {
+    clearInterval(glanceTimer);
+    glanceTimer = 0;
+    if (!g || (cfg.a11y && cfg.a11y.captions === false && g.kind === 'lyrics')) {
+      glance = null; glanceLines = null; glancePlain = null;
+      glanceEl.classList.remove('show');
+      setTimeout(() => { if (!glance) glanceEl.hidden = true; }, 220);
+      return;
+    }
+    const sameTrack = glance && glance.kind === g.kind && glance.title === g.title && glance.artist === g.artist;
+    if (!sameTrack) { glanceLines = null; glancePlain = null; glanceIdx = -2; }
+    if (g.lines !== undefined) { glanceLines = g.lines; glanceIdx = -2; }
+    if (g.plain !== undefined) glancePlain = g.plain;
+    glance = g;
+    glanceEl.hidden = false;
+    glanceEl.dataset.kind = g.kind;
+    GE.list.textContent = '';
+    if (g.kind === 'card') {
+      GE.kicker.textContent = '';
+      GE.title.textContent = g.title || '';
+      GE.sub.textContent = '';
+      for (const l of g.lines || []) { const li = document.createElement('li'); li.textContent = l; GE.list.append(li); }
+    } else if (g.waiting) {
+      GE.kicker.textContent = g.kind === 'lyrics' ? 'Lyrics' : 'Now playing';
+      GE.title.textContent = 'Listening for music…';
+      GE.sub.textContent = '';
+    } else {
+      GE.kicker.textContent = g.kind === 'lyrics' ? 'Lyrics' : g.playing ? 'Now playing' : 'Paused';
+      GE.title.textContent = g.title || '';
+      GE.sub.textContent = g.artist || '';
+      if (g.kind === 'lyrics') {
+        const synced = glanceLines && glanceLines.length;
+        GE.lyrics.hidden = !synced;
+        if (!synced) {
+          GE.prev.textContent = GE.cur.textContent = GE.next.textContent = '';
+          if (g.note) { const li = document.createElement('li'); li.className = 'note'; li.textContent = g.note; GE.list.append(li); }
+          for (const l of glancePlain || []) { const li = document.createElement('li'); li.textContent = l; GE.list.append(li); }
+        }
+      }
+      tickGlance();
+      if (g.playing) glanceTimer = setInterval(tickGlance, g.kind === 'lyrics' ? 200 : 1000);
+    }
+    GE.lyrics.hidden = !(g.kind === 'lyrics' && glanceLines && glanceLines.length && !g.waiting);
+    GE.bar.hidden = g.kind === 'card' || g.waiting || !g.durMs;
+    requestAnimationFrame(() => glanceEl.classList.add('show'));
+  }
+
+  // Beside the orb, on the side with room; in display coordinates.
+  function glanceRect(pos) {
+    if (!glance || glanceEl.hidden) return null;
+    const w = glanceEl.offsetWidth;
+    const h = glanceEl.offsetHeight;
+    const gap = body.r * 1.7;
+    const right = pos.x + gap + w + 12 < view.w;
+    const x = right ? pos.x + gap : pos.x - gap - w;
+    const y = Math.min(Math.max(pos.y - h / 2, 12), view.h - h - 12);
+    return { x, y, w, h };
+  }
+
   // ------------------------------------------------------------ gestures
 
   function point(x, y) {
@@ -541,6 +644,8 @@
     });
 
     placeCaption(local(pos));
+    const gr = glanceRect(pos);
+    if (gr) glanceEl.style.transform = `translate(${Math.round(gr.x - ox)}px, ${Math.round(gr.y - oy)}px)`;
 
     if (bridge && now - lastBoundsSent > 100) {
       bridge.orbBounds({ x: body.pos.x, y: body.pos.y, r: body.r });
@@ -566,6 +671,7 @@
       arms,
       point: pointing ? { x: pointing.x, y: pointing.y } : null,
       caption: capShown ? { w: caption.offsetWidth, h: caption.offsetHeight, above: dockVisible } : null,
+      extra: [glanceRect(pos)],
     });
     const settled = !pointing && !explainUntil && !body.dragging && Math.hypot(body.vel.x, body.vel.y) < 20
       && body.arms.every((a) => a.extend < 0.02);
@@ -797,6 +903,7 @@
       bridge.onHover((over) => { hoverSince = over ? performance.now() : 0; });
       bridge.onConfig(applyConfig);
       bridge.onSpeaker((sp) => { cfg.speaker = sp; });
+      if (bridge.onGlance) bridge.onGlance(setGlance);
       bridge.onDockVisible((v) => { dockVisible = !!v; });
       bridge.onStage((st) => { if (st) stage = { ...st }; });
       bridge.onCursor((c) => {

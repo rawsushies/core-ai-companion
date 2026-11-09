@@ -1153,6 +1153,7 @@ function runSkillTag(item) {
     let r;
     try { r = await SK.runSkill(item.skill, item.args, skillCtx()); } catch (err) { r = { error: err.message }; }
     if (r.message) toDock('dock:message', { role: 'system', text: r.message });
+    if (r.glance) showGlance(r.glance);
     if (r.action) {
       const id = require('crypto').randomUUID();
       actions.set(id, { kind: r.action.kind, value: r.action.value });
@@ -1165,6 +1166,141 @@ function runSkillTag(item) {
   })();
   if (turnSkills) turnSkills.push(job);
   return job;
+}
+
+// ---------------------------------------------------------------- glance (card beside the orb)
+// Now playing, synced lyrics, or a short card. The media session is read only
+// while a music or lyrics card is open; see glance.js for the cost rules.
+
+const GL = require('./glance');
+let glance = null; // { what: 'music'|'lyrics'|'card', track, key, lyrics, linesSent, note }
+let glanceReader = null;
+let glanceTimer = null;
+let glanceIdleSince = 0;
+
+function stopGlanceReader() {
+  if (glanceReader) { glanceReader.stop(); glanceReader.removeAllListeners(); glanceReader = null; }
+}
+
+function hideGlance() {
+  glance = null;
+  clearTimeout(glanceTimer);
+  glanceIdleSince = 0;
+  stopGlanceReader();
+  toOverlay('glance', null);
+}
+
+function glanceCard(title, lines, ms = 25000) {
+  stopGlanceReader();
+  clearTimeout(glanceTimer);
+  glance = { what: 'card' };
+  toOverlay('glance', { kind: 'card', title, lines });
+  glanceTimer = setTimeout(hideGlance, ms);
+}
+
+function pushGlance() {
+  if (!glance || glance.what === 'card') return;
+  const t = glance.track;
+  const out = { kind: glance.what, waiting: !t };
+  if (t) Object.assign(out, { title: t.title, artist: t.artist, posMs: t.posMs, durMs: t.durMs, playing: t.playing, at: t.at });
+  if (glance.what === 'lyrics') {
+    const L = glance.lyrics;
+    out.note = glance.note || (!L ? 'Finding the lyrics…' : L.instrumental ? 'Instrumental' : !L.synced && !L.plain ? 'No lyrics found for this song.' : '');
+    if (L && !glance.linesSent) {
+      out.lines = L.synced ? L.synced.slice(0, 400) : null;
+      out.plain = !L.synced && L.plain ? L.plain.split(/\r?\n/).filter((x) => x.trim()).slice(0, 12) : null;
+      glance.linesSent = true;
+    }
+  }
+  toOverlay('glance', out);
+}
+
+function loadLyrics(track) {
+  const key = glance.key;
+  glance.lyrics = null;
+  glance.linesSent = false;
+  glance.note = '';
+  if (config.data.skills.lyrics === false) { glance.note = 'Lyrics lookup is off in Settings, Skills.'; return; }
+  GL.fetchLyrics(track, (url, opts) => require('electron').net.fetch(url, opts)).then((r) => {
+    if (!glance || glance.key !== key) return;
+    glance.lyrics = r;
+    glance.linesSent = false;
+    pushGlance();
+  }, () => {
+    if (!glance || glance.key !== key) return;
+    glance.note = "I couldn't reach the lyrics service.";
+    pushGlance();
+  });
+}
+
+function onGlanceMedia(m) {
+  if (!glance || glance.what === 'card') return;
+  if (!m) return;
+  clearTimeout(glanceTimer);
+  const key = `${m.title}\u0000${m.artist}`;
+  const changed = glance.key !== key;
+  glance.track = m;
+  glance.key = key;
+  // Paused or stopped for a minute: the card goes away by itself.
+  if (m.playing) glanceIdleSince = 0;
+  else if (!glanceIdleSince) glanceIdleSince = Date.now();
+  else if (Date.now() - glanceIdleSince > 60000) { hideGlance(); return; }
+  if (changed && glance.what === 'lyrics') loadLyrics(m);
+  pushGlance();
+}
+
+function showGlance(req) {
+  if (!req || config.data.skills.glance === false) return;
+  if (req.what === 'off') { hideGlance(); return; }
+  if (req.what === 'card') { glanceCard(req.card.title, req.card.lines); return; }
+  const prev = glance && glance.what !== 'card' ? glance : null;
+  glance = { what: req.what, track: prev ? prev.track : null, key: prev ? prev.key : null, lyrics: null, linesSent: false, note: '' };
+  if (glance.track && req.what === 'lyrics') loadLyrics(glance.track);
+  if (!glanceReader) {
+    const reader = new GL.MediaReader();
+    if (!reader.supported) { glanceCard('Now playing', ["I can't read what's playing on this system yet."], 8000); return; }
+    glanceReader = reader;
+    reader.on('update', onGlanceMedia);
+    reader.start();
+  }
+  pushGlance();
+  clearTimeout(glanceTimer);
+  glanceTimer = setTimeout(() => {
+    if (glance && glance.what !== 'card' && !glance.track) glanceCard('Now playing', ['Nothing is playing right now.'], 6000);
+  }, 6000);
+}
+
+// ---------------------------------------------------------------- quick replies (no brain)
+// Short, unambiguous requests are answered on the spot: no waiting and no
+// usage. Everything else goes to the brain as usual.
+
+function quickReply(text, { typed }) {
+  if (config.data.skills.quick === false) return false;
+  const q = GL.quickIntent(text);
+  if (!q) return false;
+  let line = null;
+  const now = new Date();
+  if (q.kind === 'time') line = `It's ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+  else if (q.kind === 'date') line = `It's ${now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}.`;
+  else if (q.kind === 'glance') {
+    if (config.data.skills.glance === false) return false;
+    showGlance({ what: q.what });
+    line = q.what === 'off' ? null : q.what === 'lyrics' ? 'Lyrics, coming up.' : "Here's what's playing.";
+  } else if (q.kind === 'music') {
+    if (config.data.skills.music === false) return false;
+    const cmd = SK.musicCommand(q.action, process.platform);
+    if (!cmd) return false; // let the brain explain
+    require('child_process').execFile(cmd.file, cmd.args, { timeout: 6000, windowsHide: true }, () => {});
+    line = { play: 'Playing.', pause: 'Paused.', next: 'Next one.', previous: 'Going back.', louder: 'Louder.', quieter: 'Quieter.', mute: 'Muted.' }[q.action];
+  }
+  addTranscript('user', text);
+  if (presence) presence.noteInteraction();
+  if (line) {
+    addTranscript('core', line);
+    toDock('dock:message', { role: 'core', text: line, author: 'prime' });
+    if (!typed || config.data.voice.speakTyped !== false) speakLine(line);
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------- project tools (read-only)
@@ -1808,6 +1944,11 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       return;
     }
     if (route.targets.includes('prime')) text = route.text || text; // "@COre explain this"
+  }
+  if (!internal && !chain && !withScreen) {
+    // Instant answers for short requests (time, music keys, lyrics card).
+    const busyBefore = !!current;
+    if (quickReply(text, { typed })) { if (!busyBefore) toOverlay('state', 'idle'); return; }
   }
   if (chain) {
     if (syncTurn && syncTurn.finished) toDock('dock:done', { text: syncTurn.reply });
@@ -2636,6 +2777,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('will-quit', () => {
+  stopGlanceReader();
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
   if (!restarting) {

@@ -19,7 +19,7 @@
   // Everything that must be visible: the body with its glow and smoke puffs,
   // the tail, where the body is heading, both arms with their hands, a point
   // target, and the caption.
-  function neededRect({ pos, target, tail, r, arms = [], point = null, caption = null }) {
+  function neededRect({ pos, target, tail, r, arms = [], point = null, caption = null, extra = [] }) {
     const body = r * 2.1;
     const box = { x0: pos.x, y0: pos.y, x1: pos.x, y1: pos.y };
     grow(box, pos.x, pos.y, body);
@@ -36,6 +36,11 @@
       const cy = caption.above ? pos.y - r * 1.55 - caption.h - 12 : pos.y + r * 1.55 + caption.h + 12;
       box.y0 = Math.min(box.y0, cy);
       box.y1 = Math.max(box.y1, cy);
+    }
+    for (const e of extra) {
+      if (!e) continue;
+      grow(box, e.x, e.y, 8);
+      grow(box, e.x + e.w, e.y + e.h, 8);
     }
     return { x: box.x0, y: box.y0, w: box.x1 - box.x0, h: box.y1 - box.y0 };
   }

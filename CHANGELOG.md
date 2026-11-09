@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Glance: a card beside the orb
+- "What's playing?" shows the current song, artist and progress next to COre. "Show me the lyrics" shows the
+  synced lyrics, with the line being sung in Emerald. "Hide that" closes it. COre can also show any short list or
+  numbers on its own ("show me today's plan").
+- The song comes from the system media session: Windows media controls (Spotify, browsers, most players) or
+  playerctl on Linux. It's read only while a music or lyrics card is open, and the card closes by itself after a
+  minute of pause.
+- Lyrics come from lrclib.net (free, no account). Only the song title and artist are sent, and only when you ask
+  for lyrics. There's an off switch (`skills.lyrics`).
+
+### Instant answers
+- Short requests are answered on the spot without the brain: the time, the date, play / pause / next / previous /
+  louder / quieter / mute, show or hide the lyrics or now-playing card. Measured in the app: about 40–200 ms
+  instead of a model round trip, and no usage. Anything longer still goes to the brain. Switch: `skills.quick`.
+- Notes in the chat lost their emoji (Noted, Music, Opening, Timer set).
+
 ### Chat redesign (brand kit)
 - The chat under the orb is one clear panel: no fill (your screen shows through), a solid brand-coloured
   frame and dividers. A header shows COre's real mark, its status (Online / Thinking… / Speaking / Offline),

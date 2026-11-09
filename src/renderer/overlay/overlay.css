@@ -52,3 +52,36 @@ body.demo {
 
 /* Meiosis: the speaking core's name above its subtitle. */
 #caption .speaker { display: block; font-family: 'COre Display', 'COre Sans', sans-serif; font-size: 0.72em; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 2px; opacity: 0.95; }
+
+/* Glance: the card beside the orb (now playing, lyrics, short lists). Brand:
+   Void card, solid frame, Ink text, Emerald for the line being sung. */
+.glance {
+  position: fixed; left: 0; top: 0; width: 240px; padding: 11px 13px 12px;
+  background: rgba(5, 7, 10, 0.95); border: 1px solid #1d3327; border-radius: 14px;
+  color: #e8fff1; font-size: 13px; line-height: 1.4; pointer-events: none;
+  opacity: 0; transition: opacity 200ms ease; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+.glance.show { opacity: 1; }
+.glance[hidden] { display: none; }
+.g-kicker { font: 10.5px/1.3 "COre Mono", monospace; color: #3dff85; margin-bottom: 3px; }
+.g-kicker:empty { display: none; }
+.g-title { font: 600 14px/1.25 "COre Display", "COre Sans", sans-serif; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glance[data-kind="card"] .g-title { white-space: normal; }
+.g-sub { color: #86a595; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-sub:empty { display: none; }
+.g-lyrics { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
+.g-lyrics[hidden] { display: none; }
+.g-prev, .g-next { color: #86a595; font-size: 12px; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-prev { opacity: 0.6; }
+.g-cur { color: #7dffb0; font: 600 15px/1.3 "COre Display", "COre Sans", sans-serif; letter-spacing: -0.01em; min-height: 1.3em; }
+.g-cur.in { animation: g-in 260ms ease-out; }
+@keyframes g-in { from { opacity: 0; transform: translateY(4px); } }
+.g-list { margin: 7px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.g-list:empty { display: none; }
+.g-list li { font-size: 12.5px; color: #e8fff1; }
+.glance[data-kind="card"] .g-list li::before { content: ""; display: inline-block; width: 4px; height: 4px; border-radius: 50%; background: #3dff85; margin-right: 8px; vertical-align: 3px; }
+.g-list li.note { color: #86a595; }
+.g-bar { margin-top: 10px; height: 2px; background: #1d3327; border-radius: 1px; overflow: hidden; }
+.g-bar[hidden] { display: none; }
+.g-bar i { display: block; height: 100%; background: #3dff85; transform-origin: 0 50%; transform: scaleX(0); transition: transform 1s linear; }
+@media (prefers-reduced-motion: reduce) { .g-cur.in { animation: none; } .g-bar i { transition: none; } }

@@ -162,7 +162,7 @@ function loadPlugins(dir) {
   return out.slice(0, 30);
 }
 
-const BUILTIN = ['note', 'notes', 'timer', 'weather', 'music', 'open', 'search', 'calendar', 'archicad'];
+const BUILTIN = ['note', 'notes', 'timer', 'weather', 'music', 'open', 'search', 'calendar', 'archicad', 'glance'];
 
 // ------------------------------------------------------------------ run
 
@@ -176,7 +176,7 @@ async function runSkill(name, args, ctx) {
   switch (n) {
     case 'note': {
       const note = ctx.notes.add(a);
-      return note ? { message: `📝 Noted: ${note.text}` } : { error: 'Nothing to note.' };
+      return note ? { message: `Noted: ${note.text}` } : { error: 'Nothing to note.' };
     }
     case 'notes': {
       const list = ctx.notes.find(a);
@@ -198,14 +198,14 @@ async function runSkill(name, args, ctx) {
       const cmd = musicCommand(a, ctx.platform);
       if (!cmd) return { error: `Music control ${a} is not available here.` };
       await ctx.runFixed(cmd);
-      return { message: `🎵 ${a}` };
+      return { message: `Music: ${a}` };
     }
     case 'open': {
       if (off('apps')) return { error: 'Opening apps is turned off in Settings.' };
       const app = appFor(a, ctx.platform);
       if (!app) return { error: `I can only open apps from my list, and ${a} is not on it.` };
       await ctx.launch(app);
-      return { message: `🚀 Opening ${a}` };
+      return { message: `Opening ${a}` };
     }
     case 'search': {
       if (!a) return { error: 'Nothing to search for.' };
@@ -226,6 +226,16 @@ async function runSkill(name, args, ctx) {
       const range = /tomorrow/i.test(a) ? 'tomorrow' : /week/i.test(a) ? 'week' : 'today';
       const [from, to] = CAL.rangeFor(range, ctx.now ? ctx.now() : new Date());
       return { result: CAL.describe(CAL.occurrences(CAL.parseIcs(text), from, to), range) };
+    }
+    case 'glance': {
+      // The card beside the orb: music, lyrics, off, or "Title | line | line".
+      if (off('glance')) return { error: 'The glance card is turned off in Settings.' };
+      const w = a.toLowerCase();
+      if (/^(music|now playing|playing|song)$/.test(w)) return { glance: { what: 'music' } };
+      if (/^lyrics?$/.test(w)) return { glance: { what: 'lyrics' } };
+      if (/^(off|hide|close)$/.test(w)) return { glance: { what: 'off' } };
+      const card = require('./glance').parseCard(a);
+      return card ? { glance: { what: 'card', card } } : { error: 'Nothing to show.' };
     }
     case 'archicad': {
       // Read-only BIM proof of concept (local Archicad JSON API). Off by default.

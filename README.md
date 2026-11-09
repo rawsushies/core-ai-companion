@@ -102,7 +102,9 @@ nothing is written until you click Apply. Every applied change can be undone.
 
 **Skills.** Notes, timers and reminders, weather (free Open-Meteo; set your city), music control
 (play/pause/next/volume), opening apps from a safe list, web search buttons, and your calendar via a private
-ICS link. Lookups come back as a spoken answer. **Plugins:** put JSON files in COre's data folder under
+ICS link. Lookups come back as a spoken answer. **Glance:** ask "what's playing?" or "show me the lyrics" and a
+small card appears beside the orb with the song or its synced lyrics (from lrclib.net, only when you ask). Short
+requests like the time or "next song" are answered instantly, without the brain. **Plugins:** put JSON files in COre's data folder under
 `skills/`, for example:
 
 ```json

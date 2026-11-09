@@ -95,6 +95,9 @@ const DEFAULTS = {
     calendar: true,
     calendarUrl: '', // secret-ish ICS link from your calendar's settings
     archicad: false, // read-only access to a running Archicad on this PC (local JSON API)
+    glance: true, // the card beside the orb (now playing, lyrics, short lists)
+    lyrics: true, // look up lyrics on lrclib.net (sends the song title and artist) when you ask for them
+    quick: true, // answer short requests (time, music keys, lyrics) on the spot, without the brain
   },
   watch: {
     enabled: true, // notice error pop-ups / frozen apps from window titles and offer help (no screenshots)
