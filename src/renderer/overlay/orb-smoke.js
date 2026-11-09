@@ -454,14 +454,16 @@
   }
 
   class SmokeOrbRenderer {
-    constructor(canvas, { renderScale = 1, particles = 24000 } = {}) {
+    // lite: 8-bit buffers (half-float trails are slow on software rendering
+    // and low-end GPUs); used by safe graphics and the battery profile.
+    constructor(canvas, { renderScale = 1, particles = 24000, lite = false } = {}) {
       this.canvas = canvas;
       this.renderScale = renderScale;
       this.count = Math.max(2000, Math.min(200000, particles | 0));
       const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
       if (!gl) throw new Error('WebGL2 is not available');
       this.gl = gl;
-      this.float = !!gl.getExtension('EXT_color_buffer_float');
+      this.float = !lite && !!gl.getExtension('EXT_color_buffer_float');
 
       this.sim = program(gl, SIM_VS, SIM_FS, ['oPos', 'oVel', 'oMeta']);
       this.pts = program(gl, PT_VS, PT_FS);

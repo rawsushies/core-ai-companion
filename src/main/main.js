@@ -125,6 +125,7 @@ const clones = new Map(); // id -> helper clone
 let cloneSeq = 0;
 let mainSpeaking = false; // the main orb has sentences queued or playing
 let mainSpeakingSince = 0;
+let timingTurnStart = 0; // CORE_DEBUG latency measurement
 let floor = null;
 let lastReaction = 0;
 let notes = null;
@@ -715,9 +716,9 @@ function setStartWithWindows(on) {
 
 // Performance profiles: one choice sets the smoke's cost.
 const PROFILES = {
-  battery: { particles: 9000, renderScale: 0.7, idleFps: 15 },
-  balanced: { particles: 24000, renderScale: 1, idleFps: 30 },
-  quality: { particles: 40000, renderScale: 1, idleFps: 60 },
+  battery: { particles: 8000, renderScale: 0.65, idleFps: 10, maxFps: 30, lite: true },
+  balanced: { particles: 20000, renderScale: 0.9, idleFps: 20, maxFps: 0, lite: false },
+  quality: { particles: 40000, renderScale: 1, idleFps: 45, maxFps: 0, lite: false },
 };
 
 // Apply one validated change right away where that's possible.
@@ -976,8 +977,10 @@ function reloadConfig() {
 
 function overlayConfig() {
   const { orb, voice } = config.data;
+  // Software rendering (safe graphics) is CPU-bound: 8-bit buffers, lower
+  // resolution and frame caps cut idle CPU ~3.6x (measured 173% -> 48%).
   const orbCfg = SAFE_GRAPHICS
-    ? { ...orb, particles: Math.min(orb.particles || 24000, 9000), renderScale: Math.min(orb.renderScale || 1, 0.8), idleFps: Math.min(orb.idleFps || 30, 24) }
+    ? { ...orb, particles: Math.min(orb.particles || 24000, 6000), renderScale: Math.min(orb.renderScale || 1, 0.6), idleFps: Math.min(orb.idleFps || 30, 10), maxFps: 30, lite: true }
     : orb;
   return {
     orb: orbCfg,
@@ -1325,7 +1328,8 @@ function makeVoicePipeline({ speak }) {
     forward: (item) => {
       if (item.type === 'say' && !speak) return;
       if (item.type === 'say') {
-        if (!mainSpeaking && process.env.CORE_DEBUG) console.log(`[core] voice prime start ${Date.now()}`);
+        if (!mainSpeaking && process.env.CORE_DEBUG) console.log(`[core] voice prime start ${Date.now()}${timingTurnStart ? ` (first-speech ${Date.now() - timingTurnStart}ms)` : ''}`);
+        timingTurnStart = 0;
         mainSpeaking = true; mainSpeakingSince = Date.now(); stopCloneSpeech();
       }
       toOverlay('speak:item', item);
@@ -1657,7 +1661,8 @@ function cloneFrom(e) {
 function cloneConfig(c) {
   const { orb, voice } = config.data;
   return {
-    orb: { ...orb, radius: c.r, home: null, particles: Math.min(orb.particles || 24000, 9000), idleFps: Math.min(orb.idleFps || 30, 24) },
+    // Helpers are small: fewer particles, lower resolution, light buffers.
+    orb: { ...orb, radius: c.r, home: null, particles: Math.min(orb.particles || 24000, 4000), renderScale: Math.min(orb.renderScale || 1, 0.7), idleFps: Math.min(orb.idleFps || 30, 10), maxFps: 30, lite: true },
     voice: { ...voice, tts: voice.tts !== false, semitones: c.look.semitones },
     lightTheme: !nativeTheme.shouldUseDarkColors,
     view: { w: CLONE_WIN, h: CLONE_WIN },
@@ -1860,6 +1865,9 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
 
   const ac = new AbortController();
   current = ac;
+  const turnStart = Date.now();
+  let firstTextAt = 0;
+  timingTurnStart = turnStart;
   const speak = !typed || config.data.voice.speakTyped !== false;
   const pipeline = makeVoicePipeline({ speak });
   currentPipeline = pipeline;
@@ -1875,7 +1883,10 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       typed,
       context: contextBlocks.join('\n\n'),
       signal: ac.signal,
-      onText: (t) => { if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t); },
+      onText: (t) => {
+        if (!firstTextAt) { firstTextAt = Date.now(); if (process.env.CORE_DEBUG) console.log(`[core] timing first-text ${firstTextAt - turnStart}ms`); }
+        if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t);
+      },
       onItem: (item) => {
         if (ac.signal.aborted) return;
         if (process.env.CORE_DEBUG && item.type !== 'say') console.log('[core] item', JSON.stringify(item));

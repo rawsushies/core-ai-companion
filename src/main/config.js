@@ -75,7 +75,7 @@ const DEFAULTS = {
     radius: 60, // px
     particles: 24000, // smoke style: more = denser filaments, heavier on the GPU
     renderScale: 1, // lower (0.6-0.8) on slow GPUs
-    idleFps: 30, // frame rate when nothing is happening (moving/talking always runs at full rate)
+    idleFps: 20, // frame rate when nothing is happening (moving/talking runs faster)
     graphics: 'auto', // 'auto' | 'software' (safe mode: fixes black boxes on some drivers) | 'gpu'
     backdrop: 'auto', // 'auto' follows your Windows/macOS light or dark theme; or 'light' / 'dark'
     followDisplay: true, // move to the monitor you're using when you summon COre

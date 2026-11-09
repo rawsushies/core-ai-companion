@@ -433,14 +433,50 @@
       || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
   }
 
+  // Frame counters for diagnostics and performance tests.
+  const stats = { draws: 0, active: 0 };
+  let idleTimer = null;
+  window.__coreStats = () => ({ ...stats, why: activeReasons() });
+  function activeReasons() {
+    if (!body) return [];
+    const r = [];
+    if (mode !== 'idle') r.push(`mode:${mode}`);
+    if (voice.speaking) r.push('speaking');
+    if (pointing) r.push('pointing');
+    if (explainUntil) r.push('explain');
+    if (act) r.push('gesture');
+    if (shapeAct || shapeW > 0.01) r.push('shape');
+    if (body.dragging) r.push('drag');
+    if (attention) r.push('attention');
+    if (mood) r.push('mood');
+    if (noticeKick > 0.05) r.push('notice');
+    if (anim.form < 0.995) r.push('form');
+    if (anim.pulse) r.push('pulse');
+    if (anim.spin > 0.05) r.push('spin');
+    if (anim.inhale > 0.02) r.push('inhale');
+    if (Math.hypot(body.vel.x, body.vel.y) > 30) r.push('moving');
+    if (body.arms.some((a) => a.extend > 0.02)) r.push('arms');
+    return r;
+  }
   function frame(now) {
     // Idle: draw at idleFps to keep GPU and desktop compositing light.
     const idleFps = (cfg.orb && cfg.orb.idleFps) || 30;
     if (!isActive() && now - lastDraw < 1000 / idleFps - 2) {
+      // Sleep until the next idle frame instead of spinning on rAF: a pending
+      // rAF keeps the compositor producing frames at the display rate.
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => requestAnimationFrame(frame), Math.max(4, 1000 / idleFps - (now - lastDraw)));
+      return;
+    }
+    // Active frames are capped too on light profiles (safe graphics, battery).
+    const maxFps = (cfg.orb && cfg.orb.maxFps) || 0;
+    if (maxFps && isActive() && now - lastDraw < 1000 / maxFps - 2) {
       requestAnimationFrame(frame);
       return;
     }
     lastDraw = now;
+    stats.draws++;
+    if (isActive()) stats.active++;
     const dt = Math.min(0.1, (now - last) / 1000); // motion substeps keep long frames stable
     last = now;
     const t = (now - t0) / 1000;
@@ -717,7 +753,7 @@
     try {
       renderer = style === 'liquid'
         ? new window.LiquidOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1 })
-        : new window.SmokeOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1, particles: cfg.orb.particles || 24000 });
+        : new window.SmokeOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1, particles: cfg.orb.particles || 24000, lite: !!cfg.orb.lite });
     } catch (err) {
       // No WebGL2 (blocklisted or missing GPU): main restarts in safe graphics
       // mode, which renders WebGL in software.

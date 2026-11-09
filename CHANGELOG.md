@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Lighter on CPU and GPU (measured)
+- While idle, COre now sleeps between frames instead of keeping the compositor awake at the display rate.
+- New light rendering path: 8-bit buffers, lower resolution and an active-frame cap. It's used by safe
+  graphics, the Battery profile and every helper core.
+- Measured idle CPU in safe graphics mode (software rendering): **173% → 37%** of one core. On a real GPU these
+  savings are GPU time and power instead.
+- Profiles retuned: Battery (8,000 particles, 65% resolution, 10 fps idle, 30 fps cap), Balanced (20,000,
+  90%, 20 fps idle), Best quality (40,000, full, 45 fps idle). Default idle frame rate 30 → 20.
+- Helper cores render at 4,000 particles, 70% resolution and 10 fps idle, light buffers.
+- Overlay frame counters (`window.__coreStats()`) and, with `CORE_DEBUG=1`, latency logs (first text, first
+  speech). Measured with the real Claude: about 0.7 s to the first word of text and 1.7 s to the first audio on
+  warm turns.
+
 ### Archicad (read-only proof of concept)
 - Turn on Settings → Skills → "Read my open Archicad project" and ask COre how many doors, walls or windows the
   open project has. COre talks to Archicad's built-in JSON API on this PC only (127.0.0.1, ports 19723–19743)
