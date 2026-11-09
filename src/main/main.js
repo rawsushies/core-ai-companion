@@ -168,8 +168,9 @@ const toDock = (c, p) => send(dock, c, p);
 // ('prime' | 'scout' | 'forge' | 'sentinel'; entries from older versions have
 // none and read as Prime), meta.kind is message/progress/tool/error/permission,
 // meta.to lists the cores a user message was addressed to.
+let transcriptSeq = 0; // cursor for the phone companion
 function addTranscript(role, text, meta = {}) {
-  const entry = { role, text, ts: Date.now(), ...meta };
+  const entry = { role, text, ts: Date.now(), ...meta, seq: ++transcriptSeq };
   transcript.push(entry);
   if (transcript.length > 200) transcript.shift();
   state.set('transcript', transcript.slice(-100));
@@ -723,6 +724,7 @@ const PROFILES = {
 
 // Apply one validated change right away where that's possible.
 function applyLive(key, value) {
+  if (key === 'phone.enabled') syncPhone();
   if (key === 'app.startWithWindows') setStartWithWindows(value);
   if (key === 'orb.profile' && PROFILES[value]) { Object.assign(config.data.orb, PROFILES[value]); config.save(); }
   if (key.startsWith('a11y.')) { toOverlay('config', overlayConfig()); toDock('dock:settings', dockSettings()); }
@@ -766,6 +768,90 @@ function removeUserData(names) {
   for (const n of names) {
     try { fs.rmSync(path.join(dir, n), { recursive: true, force: true }); } catch {}
   }
+}
+
+function toSettings(channel, payload) {
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send(channel, payload);
+}
+
+// ---------------------------------------------------------------- phone companion
+// Off by default. See companion.js and docs/dev/PHONE.md for the security model.
+const { Companion } = require('./companion');
+let companion = null;
+
+function loadPhoneDevices() {
+  const out = [];
+  for (const d of state.get('phoneDevices') || []) {
+    try {
+      const raw = String(d.key || '');
+      const k = raw.startsWith('enc:') ? safeStorage.decryptString(Buffer.from(raw.slice(4), 'base64')) : raw.startsWith('plain:') ? raw.slice(6) : '';
+      const key = new Uint8Array(Buffer.from(k, 'base64'));
+      if (key.length === 32) out.push({ ...d, key });
+    } catch {}
+  }
+  return out;
+}
+
+function savePhoneDevices(list) {
+  state.set('phoneDevices', list.map((d) => {
+    const k = Buffer.from(d.key).toString('base64');
+    const key = safeStorage.isEncryptionAvailable() ? `enc:${safeStorage.encryptString(k).toString('base64')}` : `plain:${k}`;
+    return { id: d.id, name: d.name, key, ctr: d.ctr, created: d.created, lastSeen: d.lastSeen };
+  }));
+}
+
+function phoneFeed(since) {
+  const events = transcript.filter((e) => e.seq > since && e.role !== 'system' && e.text).slice(-50).map((e) => {
+    const c = e.author ? coreById(e.author) : null;
+    return { seq: e.seq, role: e.role, text: String(e.text).slice(0, 8000), author: e.author, name: c && c.name, color: c && c.color };
+  });
+  return { events, status: { busy: !!current, speaking: mainSpeaking } };
+}
+
+function ensureCompanion() {
+  if (companion) return companion;
+  companion = new Companion({
+    port: Number(config.data.phone.port) || 47330,
+    host: /^[\w.:-]{3,60}$/.test(config.data.phone.host || '') ? config.data.phone.host : '',
+    staticDir: path.join(__dirname, '..', 'renderer', 'phone'),
+    naclFile: require.resolve('tweetnacl/nacl-fast.min.js'),
+    iconFile: path.join(ROOT, 'assets', 'brand', 'icon-128.png'),
+    devices: loadPhoneDevices(),
+    saveDevices: savePhoneDevices,
+    confirmPair: async ({ name, code }) => {
+      // End-to-end tests only (unpackaged dev runs): there is nobody to click Allow.
+      if (process.env.CORE_E2E_PAIR_ALLOW === '1' && !app.isPackaged) { toSettings('settings:phone', { paired: name }); return true; }
+      const parent = settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined;
+      const r = await dialog.showMessageBox(parent, {
+        type: 'question', buttons: ['Allow', 'Deny'], defaultId: 1, cancelId: 1, noLink: true,
+        title: 'Pair a phone', message: `Allow "${name}" to talk to COre?`,
+        detail: `Allow only if your phone shows this code:\n\n${code}\n\nThe phone can read the chat, send messages and stop COre talking. You can remove it any time in Settings, Phone.`,
+      });
+      const ok = r.response === 0;
+      if (ok) toSettings('settings:phone', { paired: name });
+      return ok;
+    },
+    onMessage: (text, device) => { handleUserText(text, { typed: true }); toolAudit(`phone ${device.name}: message`); },
+    onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
+    getFeed: phoneFeed,
+  });
+  return companion;
+}
+
+async function syncPhone() {
+  const on = config.data.phone && config.data.phone.enabled;
+  if (on) {
+    try { await ensureCompanion().start(); } catch (err) {
+      addTranscript('system', `The phone companion could not start: ${err.code === 'EADDRINUSE' ? `port ${config.data.phone.port} is in use` : err.message}.`, { kind: 'error' });
+    }
+  } else if (companion) companion.stop();
+}
+
+function phoneQr(url) {
+  const qr = require('qrcode-generator')(0, 'M');
+  qr.addData(url);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
 }
 
 // ---------------------------------------------------------------- backups
@@ -846,6 +932,18 @@ async function settingsAction(name) {
         return { message: `Nothing was restored: ${err.message}` };
       }
     }
+    case 'pairPhone': {
+      if (!config.data.phone.enabled) changeSetting('phone.enabled', true);
+      try { await ensureCompanion().start(); } catch (err) { return { message: `The phone companion could not start: ${err.message}` }; }
+      const p = companion.startPairing();
+      if (!p.url) return { message: "This PC doesn't seem to be on a local network (no Wi-Fi or LAN address)." };
+      return { pair: { svg: phoneQr(p.url), url: p.url, expires: p.expires }, values: settingsValues() };
+    }
+    case 'phoneDevices':
+      return { devices: companion ? companion.list() : loadPhoneDevices().map(({ key, ...d }) => d) };
+    case 'revokeAllPhones':
+      if (companion) companion.revokeAll(); else state.set('phoneDevices', []);
+      return { message: 'All phones removed. They must pair again.', devices: [] };
     case 'logs':
       fs.mkdirSync(crashLog.dir, { recursive: true });
       shell.openPath(crashLog.dir);
@@ -882,6 +980,13 @@ async function settingsAction(name) {
       return { message: `COre runs from a folder here. Quit COre, then delete ${ROOT} (and optionally ${app.getPath('userData')}).` };
     }
     default:
+      if (name.startsWith('revokePhone:')) {
+        const id = name.slice(12);
+        let ok = false;
+        if (companion) ok = companion.revoke(id);
+        else { const all = state.get('phoneDevices') || []; ok = all.some((d) => d.id === id); state.set('phoneDevices', all.filter((d) => d.id !== id)); }
+        return { message: ok ? 'Phone removed.' : 'That phone was already removed.', devices: companion ? companion.list() : (state.get('phoneDevices') || []).map(({ key, ...d }) => d) };
+      }
       return { message: 'Unknown action.' };
   }
 }
@@ -1251,6 +1356,7 @@ function hideGlance() {
   clearTimeout(glanceTimer);
   glanceIdleSince = 0;
   stopGlanceReader();
+  if (companion) companion.stop();
   toOverlay('glance', null);
 }
 
@@ -2685,7 +2791,7 @@ app.whenReady().then(async () => {
   state = loadState(userData);
   workDir = path.join(userData, 'claude-workspace');
   fs.mkdirSync(path.join(workDir, 'shots'), { recursive: true });
-  transcript.push(...(state.get('transcript') || []));
+  transcript.push(...(state.get('transcript') || []).map((e) => ({ ...e, seq: ++transcriptSeq })));
 
   try {
     brain = makeBrain();
@@ -2750,6 +2856,7 @@ app.whenReady().then(async () => {
   }
   plugins = SK.loadPlugins(path.join(userData, 'skills'));
   setTimeout(checkAutoBackup, 60_000);
+  syncPhone();
   setInterval(checkAutoBackup, 3600_000).unref();
   reminders = new Reminders({ store: state, onFire: onReminder });
 

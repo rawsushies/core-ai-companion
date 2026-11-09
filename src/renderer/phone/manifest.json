@@ -1,0 +1,1 @@
+{ "name": "COre", "short_name": "COre", "start_url": "/", "display": "standalone", "background_color": "#05070a", "theme_color": "#05070a", "icons": [{ "src": "/icon.png", "sizes": "128x128", "type": "image/png" }] }

@@ -12,7 +12,7 @@ test('every schema key exists in the default config', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-set-'));
   const cfg = loadConfig(dir);
   for (const [key, f] of FIELDS) {
-    if (f.type === 'actions') continue; // buttons, not settings
+    if (f.type === 'actions' || f.type === 'devices') continue; // buttons and lists, not settings
     assert.notStrictEqual(getPath(cfg.data, key), undefined, key);
   }
 });

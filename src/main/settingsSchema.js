@@ -105,6 +105,15 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'phone',
+    title: 'Phone',
+    fields: [
+      { key: 'phone.enabled', label: 'Let paired phones talk to COre over this Wi-Fi (end-to-end encrypted, never through the internet)', type: 'toggle' },
+      { key: 'phone.actions', label: 'Scan a QR code with your phone camera. Both screens show a code to compare.', type: 'actions', items: [['pairPhone', 'Pair a phone'], ['revokeAllPhones', 'Remove all phones']] },
+      { key: 'phone.devices', label: 'Paired phones', type: 'devices' },
+    ],
+  },
+  {
     id: 'backup',
     title: 'Backup',
     fields: [

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Phone companion (off by default)
+- Chat with COre from your phone's browser on the same Wi-Fi: see the chat and COre's status, send messages, stop it
+  talking. Settings → Phone → **Pair a phone** shows a QR code; scan it, compare the 6-digit code on both screens,
+  click Allow.
+- End-to-end encrypted with a per-phone key, with replay protection, and private networks only. Nothing goes through
+  the internet. Remove a phone any time and it's locked out at once. Details and honest limits:
+  `docs/dev/PHONE.md`.
+
 ### Backups (local or cloud folder)
 - Settings → Backup keeps copies of your settings, memories, notes, reminders, chat state and plugins in any
   folder. **Use my cloud folder** finds OneDrive, Google Drive, Dropbox or iCloud Drive and uses a `COre Backups`

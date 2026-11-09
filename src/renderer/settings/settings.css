@@ -60,3 +60,18 @@ code, kbd, .hotkey { font-family: 'COre Mono', Consolas, monospace; }
 
 .secret.buttons { flex-wrap: wrap; justify-content: flex-end; }
 .toast { background: #0b1f15; border-color: #18382a; max-width: min(520px, 80vw); text-align: center; }
+
+/* Phone: paired devices and the pairing QR code. */
+.devices { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.device { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 7px 10px; background: #0b1f15; border: 1px solid #18382a; border-radius: 10px; font-size: 13px; }
+.muted { color: var(--muted); font-size: 12px; }
+.pair-modal { position: fixed; inset: 0; background: rgba(5, 7, 10, 0.82); display: grid; place-items: center; z-index: 10; }
+.pair-card { width: 320px; padding: 18px; background: #05070a; border: 1px solid #1d3327; border-radius: 16px; text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.pair-card h3 { margin: 0; font: 600 16px/1.2 'COre Display', 'COre Sans', sans-serif; letter-spacing: -0.03em; }
+.pair-card .qr { width: 220px; height: 220px; background: #e8fff1; border-radius: 12px; padding: 6px; }
+.pair-card .qr svg { width: 100%; height: 100%; display: block; }
+.pair-card p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.pair-card code { font: 11.5px 'COre Mono', monospace; color: #7dffb0; }
+.field:has(.devices) { grid-template-columns: 1fr 380px; }
+.device { grid-template-columns: auto 1fr auto; }
+.device .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }

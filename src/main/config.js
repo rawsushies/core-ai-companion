@@ -99,6 +99,11 @@ const DEFAULTS = {
     lyrics: true, // look up lyrics on lrclib.net (sends the song title and artist) when you ask for them
     quick: true, // answer short requests (time, music keys, lyrics) on the spot, without the brain
   },
+  phone: {
+    enabled: false, // the phone companion: chat with COre from your phone's browser on the same Wi-Fi
+    port: 47330,
+    host: '', // this PC's address for the QR code; empty = detect (set it if you have several networks or a VPN)
+  },
   backup: {
     folder: '', // where backups go (a cloud-synced folder makes them cloud backups)
     auto: '24', // hours between automatic backups ('0' = never); runs only when a folder is set

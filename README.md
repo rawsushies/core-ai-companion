@@ -111,6 +111,9 @@ requests like the time or "next song" are answered instantly, without the brain.
 { "name": "wiki", "description": "search Wikipedia", "url": "https://en.wikipedia.org/wiki/Special:Search?search={q}" }
 ```
 
+**Phone companion (optional).** Pair your phone with a QR code (Settings → Phone) and chat with COre from the
+phone's browser on the same Wi-Fi, end-to-end encrypted. See [docs/dev/PHONE.md](docs/dev/PHONE.md).
+
 **Backups.** Settings → Backup keeps copies of your settings, memories, notes and plugins in a folder you choose.
 Pick a OneDrive, Google Drive or Dropbox folder and they're cloud backups. API keys are never included, and a
 passphrase can encrypt them.

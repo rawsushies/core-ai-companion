@@ -16,7 +16,9 @@
   "dependencies": {
     "@huggingface/transformers": "4.3.1",
     "electron-updater": "6.8.10",
-    "kokoro-js": "1.2.1"
+    "kokoro-js": "1.2.1",
+    "qrcode-generator": "1.4.4",
+    "tweetnacl": "1.0.3"
   },
   "devDependencies": {
     "electron": "45.0.0",
