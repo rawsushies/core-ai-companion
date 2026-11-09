@@ -25,6 +25,7 @@ const { matchWake } = require('./handsfree');
 const { ScreenWatch } = require('./watch');
 const { refinePoint } = require('./pointing');
 const SK = require('./skills');
+const { ProjectTools } = require('./tools');
 const { toneKey } = require('./brain/persona');
 const { CrashLog } = require('./crashlog');
 const { smokeTarget, SmokeTest } = require('./smoke');
@@ -773,6 +774,12 @@ async function settingsAction(name) {
     case 'diagnostics':
       await copyDiagnostics();
       return { message: 'Diagnostics copied to the clipboard.' };
+    case 'pickProjectFolder': {
+      const r = await dialog.showOpenDialog(settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined, { title: 'Share a project folder with COre (read-only)', properties: ['openDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return { message: 'Nothing changed.' };
+      const res = changeSetting('tools.projectRoot', r.filePaths[0]);
+      return { message: res.ok ? `COre can now read ${path.basename(r.filePaths[0])} (never change it).` : res.error, values: res.values, secrets: res.secrets };
+    }
     case 'logs':
       fs.mkdirSync(crashLog.dir, { recursive: true });
       shell.openPath(crashLog.dir);
@@ -1069,6 +1076,11 @@ function fmtTime(ts) {
 
 // Tags that act instead of animating. Returns true when handled here.
 function handleActionTag(item) {
+  if (item.name === 'tool') {
+    const job = Promise.resolve(runToolTag(item, 'prime'));
+    if (turnSkills) turnSkills.push(job);
+    return true;
+  }
   if (item.name === 'do') { runSkillTag(item); return true; }
   if (item.name === 'clone') { delegate(null, item.task); return true; }
   if (item.name === 'delegate') { delegate(item.core, item.task); return true; }
@@ -1149,6 +1161,26 @@ function runSkillTag(item) {
   })();
   if (turnSkills) turnSkills.push(job);
   return job;
+}
+
+// ---------------------------------------------------------------- project tools (read-only)
+
+function projectTools() {
+  const t = config.data.tools || {};
+  return new ProjectTools({ root: t.projectRoot, enabled: t.enabled !== false });
+}
+
+// Every tool call is visible in the chat and written to logs/tools.log.
+function runToolTag(item, coreId) {
+  const r = projectTools().run(item);
+  const name = coreById(coreId) ? coreById(coreId).name : 'COre';
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), core: coreId, tool: item.tool, arg: String(item.arg).slice(0, 200), ok: r.ok, ...(r.ok ? {} : { error: r.error }) })}\n`);
+  } catch {}
+  addTranscript('system', r.ok ? `${name} ${r.summary}` : `${name} couldn't ${item.tool} ${item.arg}: ${r.error}`, { author: coreId, kind: r.ok ? 'progress' : 'error' });
+  return r.ok ? `${item.tool} ${item.arg}:\n${r.text}` : `${item.tool} ${item.arg} failed: ${r.error}`;
 }
 
 // Runs only when the user clicks the button in the chat.
@@ -1440,7 +1472,16 @@ function askCore(coreId, text, { task } = {}) {
     c.ac = ac;
     try {
       const context = memory && config.data.memory.enabled !== false ? memory.contextFor(text) || '' : '';
-      const { reply, truncated, error } = await helperBrain(c).ask({ text: CL.corePrompt(c.core, text, task), typed: true, context, signal: ac.signal, onItem: () => {} });
+      // Up to 3 rounds of read-only project tools before the final answer.
+      let msg = CL.corePrompt(c.core, text, task);
+      let reply = ''; let truncated = false; let error = null;
+      for (let round = 0; ; round++) {
+        const reqs = [];
+        ({ reply, truncated, error } = await helperBrain(c).ask({ text: msg, typed: true, context: round ? '' : context, signal: ac.signal, onItem: (it) => { if (it.type === 'gesture' && it.name === 'tool') reqs.push(it); } }));
+        if (!reqs.length || round >= 3 || ac.signal.aborted || truncated) break;
+        const results = reqs.slice(0, 5).map((q) => runToolTag(q, c.id));
+        msg = `[skill] Results of your project reads:\n${results.join('\n\n')}\n\nNow answer the request, in the same answer format.`;
+      }
       const full = String(reply || '').trim();
       if (!clones.has(c.id) || ac.signal.aborted) return { ok: false, error: 'cancelled' };
       // The first paragraph is the spoken summary; the chat shows the details

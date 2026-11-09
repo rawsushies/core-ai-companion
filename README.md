@@ -94,6 +94,11 @@ the web yet. See [docs/dev/MEIOSIS.md](docs/dev/MEIOSIS.md).
 **Take a look** button. It notices from window titles only; a screenshot is taken when you click. When it points
 at something, the smoke finger snaps onto the nearest button or label. Summon it on another monitor and it moves there.
 
+**Project reading (read-only).** Share one folder in Settings → Projects and COre and its cores can list,
+read and search it to answer from your actual files. Nothing outside the folder is reachable, `.env`, keys
+and credential files are never read, nothing is ever written or run, and every access shows in the chat and
+in `logs/tools.log`.
+
 **Skills.** Notes, timers and reminders, weather (free Open-Meteo; set your city), music control
 (play/pause/next/volume), opening apps from a safe list, web search buttons, and your calendar via a private
 ICS link. Lookups come back as a spoken answer. **Plugins:** put JSON files in COre's data folder under

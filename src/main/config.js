@@ -82,6 +82,10 @@ const DEFAULTS = {
     hideFromCaptures: true, // hide the orb for a moment while COre takes a screenshot
     home: null, // {x, y} remembered after you drag it
   },
+  tools: {
+    projectRoot: '', // a folder the user shared with COre's cores, read-only ('' = none)
+    enabled: true, // let the cores read it
+  },
   skills: {
     weather: true,
     city: '', // used when you ask for the weather without a place

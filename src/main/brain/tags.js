@@ -44,6 +44,8 @@ function parseTag(body) {
     const m2 = /^([a-z][a-z0-9-]*)\s*([\s\S]*)$/i.exec(rest);
     return m2 ? { name, skill: m2[1].toLowerCase(), args: m2[2].trim().slice(0, 500) } : null;
   }
+  // Read-only project tools (Phase 4): paths are validated by tools.js.
+  if ((name === 'read' || name === 'list' || name === 'find') && (rest || name === 'list')) return { name: 'tool', tool: name, arg: (rest || '.').slice(0, 300) };
   if (name === 'delegate') {
     const m3 = /^([\p{L}][\p{L}\p{N}_-]*)\s+([\s\S]+)$/u.exec(rest);
     return m3 ? { name, core: m3[1], task: m3[2].trim().slice(0, 2000) } : null;
@@ -120,7 +122,7 @@ class TagStreamParser {
   flush() {
     const out = [];
     // An unclosed run is plain text, unless it's clearly a cut-off tag.
-    const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|delegate|do|mood|remember|forget|remind|open|copy)\b/i.test(this.buf);
+    const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|delegate|do|read|list|find|mood|remember|forget|remind|open|copy)\b/i.test(this.buf);
     const rest = cutTag ? '' : this.buf;
     pushText(out, rest);
     this.buf = '';

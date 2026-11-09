@@ -39,9 +39,10 @@ Ollama, OpenAI-compatible). They are not new AI engines.
 - Smoke, gestures, captions, reduced motion and caption settings are unchanged.
 
 ## Limits (honest)
-- Specialists have **no file, shell or web tools** yet. That is Phase 4 (permissioned task engine). Scout
-  answers from model knowledge and must state uncertainty. Forge drafts code and designs in the chat.
-  Sentinel reviews what it is given.
+- With a project folder shared (Settings → Projects), every core can **read** it through validated
+  read-only tools (`src/main/tools.js`: list/read/find, contained by realpath, secrets refused, capped,
+  audited). There is still **no writing, shell or web**: writes need previews and confirmations (next
+  Phase 4 slice). Scout answers from model knowledge plus the project and must state uncertainty.
 
 ## Slices
 1 identities/config · 2 message model · 3 chat UI · 4 mentions/picker · 5 clone integration (persistent

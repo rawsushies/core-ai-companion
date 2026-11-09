@@ -80,6 +80,34 @@
       wrap.append(input, out);
       return wrap;
     }
+    if (field.type === 'folder') {
+      // Folders are chosen with the system picker (in the main process).
+      const wrap = document.createElement('span');
+      wrap.className = 'secret folder';
+      const p = document.createElement('span');
+      p.className = 'path';
+      p.textContent = v ? `📁 ${String(v).split(/[\\/]/).filter(Boolean).pop()}` : 'Not shared';
+      p.title = v || '';
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'ghost';
+      pick.textContent = v ? 'Change…' : 'Choose…';
+      pick.addEventListener('click', async () => {
+        const r = await api.action('pickProjectFolder');
+        if (r && r.values) { data.values = r.values; render(); }
+        if (r && r.message) toast(r.message);
+      });
+      wrap.append(p, pick);
+      if (v) {
+        const stop = document.createElement('button');
+        stop.type = 'button';
+        stop.className = 'ghost';
+        stop.textContent = 'Stop sharing';
+        stop.addEventListener('click', async () => { await save(field, ''); render(); });
+        wrap.append(stop);
+      }
+      return wrap;
+    }
     if (field.type === 'text' && field.secret) {
       // Secret: never shown back. Paste to replace, Remove to clear.
       const wrap = document.createElement('span');

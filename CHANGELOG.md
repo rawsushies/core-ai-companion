@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Cores can read your project (read-only, with permission)
+- Share one project folder in Settings → Projects (system folder picker; Stop sharing at any time). COre and
+  its cores can then list, read and search it with `[[list]]`, `[[read]]` and `[[find]]`, and answer from
+  the actual files ("Forge searched for TODO (1 hit)").
+- Read-only by design: no writing, no running anything, no shell. Paths are resolved through symlinks, so
+  nothing outside the folder is reachable. Secret-looking files (`.env`, keys, `credentials.json`…) are always
+  refused, dependency folders are skipped, and file size and output are capped.
+- Every access appears in the chat as it happens and is written to `logs/tools.log`.
+- Specialists can take up to three rounds of reading in their own session before answering.
+
 ### Meiosis Mode: four cores, one chat
 - New chat look: replies are glassy bubbles tinted in each core's colour, each with a small swirling
   smoke-orb avatar. Consecutive replies from the same core share one avatar. Your messages show which

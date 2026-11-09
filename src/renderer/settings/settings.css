@@ -48,3 +48,5 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .secret { display: flex; gap: 8px; align-items: center; width: 100%; min-width: 0; }
 .secret input { flex: 1; min-width: 0; }
 .secret button { flex: none; padding: 6px 10px; }
+.folder .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.field:has(.folder) { grid-template-columns: 1fr 300px; }

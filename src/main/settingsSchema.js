@@ -79,6 +79,14 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'projects',
+    title: 'Projects',
+    fields: [
+      { key: 'tools.projectRoot', label: 'Project folder COre may read (never change)', type: 'folder', optional: true },
+      { key: 'tools.enabled', label: 'Let COre and its cores read it', type: 'toggle' },
+    ],
+  },
+  {
     id: 'skills',
     title: 'Skills',
     fields: [
@@ -128,6 +136,11 @@ function validate(key, value) {
     if (!t) return f.optional ? '' : undefined;
     if (f.pattern && !new RegExp(f.pattern, 'i').test(t)) return undefined;
     return t.length <= (f.maxLength || 200) && !/[\u0000-\u001f]/.test(t) ? t : undefined;
+  }
+  if (f.type === 'folder') {
+    const t = String(value == null ? '' : value).trim();
+    if (!t) return f.optional ? '' : undefined;
+    try { return require('fs').statSync(t).isDirectory() && require('path').isAbsolute(t) ? t : undefined; } catch { return undefined; }
   }
   if (f.type === 'hotkey') return HOTKEY_RE.test(String(value)) ? String(value) : undefined;
   return undefined;

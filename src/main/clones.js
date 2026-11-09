@@ -62,7 +62,8 @@ function corePrompt(core, text, task) {
     task
       ? `This is part of shared task ${task.id}, coordinated by COre (Prime). Other specialists may work on the same request in parallel: stay within your role.`
       : "The user is talking to you directly in COre's shared chat.",
-    'Answer format: first ONE short spoken sentence that sums up your answer (it is read aloud), then a blank line, then the full answer (markdown welcome). No [[tags]].',
+    'Answer format: first ONE short spoken sentence that sums up your answer (it is read aloud), then a blank line, then the full answer (markdown welcome).',
+    'If the user shared a project folder you may look at it, read-only, with these tags only: [[list PATH]] [[read PATH]] [[find TEXT]] (paths relative to the project). Use them, then wait: the results come back in the next message. You cannot change files. No other [[tags]].',
     '',
     String(text || '').slice(0, 8000),
   ].join('\n');
