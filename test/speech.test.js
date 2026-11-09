@@ -71,5 +71,14 @@ test('a long opening with no punctuation is split after a few words', () => {
   const c = new SentenceChunker(24);
   const out = c.feed('so the thing you really want to do first is open the settings and look at the voice panel ');
   assert.equal(out.length, 1);
-  assert.ok(out[0].length <= 49 && out[0].split(' ').length >= 5, out[0]);
+  assert.ok(out[0].length <= 37 && out[0].split(' ').length >= 4, out[0]);
+});
+
+test('a medium opening with no punctuation also starts early (48 characters are enough)', () => {
+  const c = new SentenceChunker(24);
+  assert.deepEqual(c.feed('That depends entirely on what you are trying to'), []);
+  const out = c.feed(' build');
+  assert.equal(out.length, 1);
+  assert.ok(out[0].length >= 20 && out[0].length <= 37, out[0]);
+  assert.ok('That depends entirely on what you are trying to build'.startsWith(out[0]));
 });

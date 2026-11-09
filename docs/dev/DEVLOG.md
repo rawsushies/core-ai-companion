@@ -35,3 +35,4 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-023 (loop 2):** live cards: timer countdown (and on completion), weather card, calendar card; 'how long left' quick intent; unit + real-app tests.
 - **M-024 (loop 3):** phone media remote (fixed keys, allowlisted op), lyrics card no longer a chatty live region.
 - **M-025 (loop 4):** album art (Windows thumbnail stream, Linux MPRIS artUrl via file/https, capped, data: URL; overlay CSP allows data: images only); fake playerctl fixture; real-app test of the song card; last e2e test made robust to chat trimming. Windows art reading untested on real Windows.
+- **M-026 (loop 5):** first-chunk threshold 70 to 48 chars (cut 20-36); Kokoro cost measured as about 0.7 s fixed + 11 ms/char (21 chars 862 ms, 59 chars 1308 ms, 104 chars 1846 ms).

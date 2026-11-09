@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Voice starts sooner on long openings
+- When a reply opens with a long sentence without a comma, the first few words are now spoken on their own as soon
+  as 48 characters have arrived (was 70). Measured with the voice model: each spoken chunk costs about 0.7 s plus
+  about 11 ms per character, so this starts the voice about 0.25–0.45 s sooner on those replies.
+
 ### Album art on the song card
 - The now-playing and lyrics card shows the album cover: from the Windows media session's thumbnail (read once per
   track), or from the player's art link on Linux (local file, or https fetched only while the card is open, at most
