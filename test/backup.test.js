@@ -92,7 +92,7 @@ test('old backups are pruned, labelled snapshots are kept', () => {
 
 test('cloud folders are found where the apps keep them', () => {
   const home = '/home/u';
-  const have = new Set(['/home/u/Dropbox', 'C:\\Users\\u\\OneDrive']);
+  const have = new Set([path.join(home, 'Dropbox'), 'C:\\Users\\u\\OneDrive']); // built like the code builds them (backslashes on Windows)
   const r = BK.cloudFolders({ home, platform: 'linux', env: { OneDrive: 'C:\\Users\\u\\OneDrive' }, exists: (p) => have.has(p) });
   assert.deepStrictEqual(r.map((x) => x.name), ['OneDrive', 'Dropbox']);
   assert.ok(r[0].suggested.endsWith('COre Backups'));
