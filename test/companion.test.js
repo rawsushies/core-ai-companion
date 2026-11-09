@@ -21,6 +21,7 @@ function companion(extra = {}) {
     confirmPair: async () => true,
     onMessage: (text, d) => sent.push([text, d.name]),
     onStop: () => sent.push(['STOP']),
+    onMedia: (a) => sent.push(['MEDIA', a]),
     getFeed: (since) => ({ events: [{ seq: since + 1, role: 'core', text: 'hello from COre' }], status: { busy: false } }),
     ...extra,
   });
@@ -57,7 +58,10 @@ test('pair, sync, send and stop, all sealed with the device key', async () => {
     assert.ok(!JSON.stringify(s.body).includes('hello'), 'answers are encrypted');
     await api('send', { text: 'hi from the phone' });
     await api('stop');
-    assert.deepStrictEqual(sent, [['hi from the phone', 'Test phone'], ['STOP']]);
+    await api('media', { action: 'next' });
+    const bad = C.open((await api('media', { action: 'rm -rf' })).body, key);
+    assert.strictEqual(bad.ok, false, 'only the fixed media keys');
+    assert.deepStrictEqual(sent, [['hi from the phone', 'Test phone'], ['STOP'], ['MEDIA', 'next']]);
   } finally { c.stop(); }
 });
 

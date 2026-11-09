@@ -39,7 +39,7 @@
   }
 
   function show(which) {
-    for (const id of ['pair', 'unpaired', 'log', 'composer']) $(id).hidden = true;
+    for (const id of ['pair', 'unpaired', 'log', 'composer', 'media']) $(id).hidden = true;
     for (const id of which) $(id).hidden = false;
     $('stop').hidden = !which.includes('log');
   }
@@ -154,7 +154,7 @@
     const k = store.get('key');
     if (!deviceId || !k) { show(['unpaired']); status('Not paired', 'off'); return; }
     key = unb64(k);
-    show(['log', 'composer']);
+    show(['log', 'media', 'composer']);
     sync();
   }
 
@@ -167,6 +167,9 @@
   });
   $('input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !matchMedia('(pointer: coarse)').matches) { e.preventDefault(); $('composer').requestSubmit(); } });
   $('stop').addEventListener('click', () => call('stop').catch(() => {}));
+  for (const b of document.querySelectorAll('[data-media]')) {
+    b.addEventListener('click', () => { b.disabled = true; call('media', { action: b.dataset.media }).catch(() => {}).finally(() => { b.disabled = false; }); });
+  }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && key) sync(); });
 
   const m = /#pair=([\w-]+)\.([\w-]+)/.exec(location.hash);

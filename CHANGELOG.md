@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Phone media remote
+- The phone companion has previous / play-pause / next / volume buttons that press the PC's media keys (fixed keys
+  only, like the music skill; respects the music switch).
+- Screen readers no longer announce every lyric line of the lyrics card.
+
 ### Live cards beside the orb
 - Setting a timer shows a live countdown card for a few seconds; "how long left?" brings it back instantly
   (no brain). When a timer ends, a "Time's up" card shows next to the reminder.

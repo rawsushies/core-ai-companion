@@ -33,3 +33,9 @@ textarea { width: 100%; resize: none; border: 0; background: transparent; color:
 textarea::placeholder { color: var(--muted); }
 .send { flex: none; width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--emerald); color: var(--void); display: grid; place-items: center; }
 .send:active { background: var(--mint); }
+
+/* Media remote: fixed keys on the PC (previous, play/pause, next, volume). */
+.media { display: flex; justify-content: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); background: var(--void); position: sticky; bottom: 63px; }
+.media button { width: 48px; height: 40px; border-radius: 12px; border: 1px solid #18382a; background: var(--smoke); color: var(--ink); font: 600 18px/1 inherit; display: grid; place-items: center; }
+.media button:active { border-color: var(--edge); }
+.media button:disabled { opacity: 0.5; }

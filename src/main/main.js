@@ -835,6 +835,11 @@ function ensureCompanion() {
     },
     onMessage: (text, device) => { handleUserText(text, { typed: true, remote: true }); toolAudit(`phone ${device.name}: message`); },
     onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
+    onMedia: (action) => {
+      if (config.data.skills.music === false) return;
+      const cmd = SK.musicCommand(action, process.platform);
+      if (cmd) require('child_process').execFile(cmd.file, cmd.args, { timeout: 6000, windowsHide: true }, () => {});
+    },
     getFeed: phoneFeed,
   });
   return companion;

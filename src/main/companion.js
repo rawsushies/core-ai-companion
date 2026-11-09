@@ -80,7 +80,7 @@ const STATIC = {
 class Companion {
   // opts: { port, host (optional address override), staticDir, naclFile, iconFile, devices: [{ id, name, key: Uint8Array, ctr, created, lastSeen }],
   //         saveDevices(list), confirmPair({ name, code }) -> Promise<bool>, onMessage(text, device),
-  //         onStop(device), getFeed(since) -> { events, status }, now() }
+  //         onStop(device), onMedia(action, device), getFeed(since) -> { events, status }, now() }
   constructor(opts) {
     this.o = opts;
     this.devices = new Map((opts.devices || []).map((d) => [d.id, { ...d }]));
@@ -225,6 +225,12 @@ class Companion {
       if (!text) return this._send(res, 200, seal({ ok: false, error: 'empty' }, d.key));
       this.o.onMessage(text, { id: d.id, name: d.name });
     } else if (m.op === 'stop') this.o.onStop({ id: d.id, name: d.name });
+    else if (m.op === 'media') {
+      // Fixed media keys only (the same list as the music skill).
+      const action = String(m.action || '');
+      if (!['play', 'pause', 'toggle', 'next', 'previous', 'louder', 'quieter', 'mute'].includes(action) || !this.o.onMedia) reply = { ok: false, error: 'unknown' };
+      else this.o.onMedia(action, { id: d.id, name: d.name });
+    }
     else reply = { ok: false, error: 'unknown' };
     return this._send(res, 200, seal({ ...reply, ctr: m.ctr }, d.key));
   }
