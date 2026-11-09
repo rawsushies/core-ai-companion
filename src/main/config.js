@@ -85,6 +85,7 @@ const DEFAULTS = {
   tools: {
     projectRoot: '', // a folder the user shared with COre's cores, read-only ('' = none)
     enabled: true, // let the cores read it
+    allowWrites: false, // let cores PROPOSE file changes; each one is applied only when you click Apply
   },
   skills: {
     weather: true,

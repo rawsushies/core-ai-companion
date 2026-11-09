@@ -258,6 +258,73 @@
   }, true);
   document.addEventListener('mousedown', (e) => { if (!menu.contains(e.target) && e.target !== toBtn && !toBtn.contains(e.target)) closeMenu(); });
 
+  // ---------------------------------------------------------- proposed file changes
+  // A core proposed a whole file: show the diff; nothing is written until the
+  // user clicks Apply. Applied changes can be undone.
+  const proposals = new Map(); // id -> card parts
+  api.onProposal((p) => {
+    stickToBottom(() => {
+      const c = coreOf(p.author);
+      const row = document.createElement('div');
+      row.className = `row core by-${c.id} proposal-row`;
+      row.style.setProperty('--core', c.color);
+      const card = document.createElement('div');
+      card.className = 'msg core proposal';
+      const head = document.createElement('div');
+      head.className = 'prop-head';
+      const title = document.createElement('div');
+      title.className = 'prop-title';
+      title.textContent = `${c.name} proposes ${p.isNew ? 'a new file' : 'a change'}`;
+      const file = document.createElement('div');
+      file.className = 'prop-file';
+      const name = document.createElement('code'); name.textContent = p.rel;
+      const stats = document.createElement('span'); stats.className = 'prop-stats';
+      const add = document.createElement('span'); add.className = 'plus'; add.textContent = `+${p.added}`;
+      const rem = document.createElement('span'); rem.className = 'minus'; rem.textContent = `−${p.removed}`;
+      stats.append(add, rem);
+      file.append(name, stats);
+      head.append(title, file);
+      const det = document.createElement('details');
+      const sum = document.createElement('summary'); sum.textContent = 'Show changes';
+      const pre = document.createElement('pre'); pre.className = 'diff';
+      for (const l of p.preview || []) {
+        const line = document.createElement('div');
+        line.className = l.t === '+' ? 'd-add' : l.t === '-' ? 'd-del' : l.t === '@' ? 'd-gap' : 'd-ctx';
+        line.textContent = `${l.t === '@' ? '' : l.t}${l.t === '@' ? '…' : ' '}${l.t === '@' ? '' : l.s}`;
+        pre.append(line);
+      }
+      det.append(sum, pre);
+      const bar = document.createElement('div');
+      bar.className = 'prop-bar';
+      const status = document.createElement('span'); status.className = 'prop-status'; status.textContent = 'Not applied';
+      const apply = button('Apply', 'primary-sm', () => { apply.disabled = true; reject.disabled = true; status.textContent = 'Applying…'; api.proposal(p.id, 'apply'); });
+      const reject = button('Reject', 'ghost', () => { apply.disabled = true; reject.disabled = true; api.proposal(p.id, 'reject'); });
+      apply.setAttribute('aria-label', `Apply change to ${p.rel}`);
+      reject.setAttribute('aria-label', `Reject change to ${p.rel}`);
+      bar.append(status, reject, apply);
+      card.append(head, det, bar);
+      row.append(avatar(c.id), card);
+      log.appendChild(row);
+      proposals.set(p.id, { status, apply, reject, bar, rel: p.rel });
+      trim();
+    });
+    reportSize();
+  });
+  api.onProposalUpdate(({ id, state, message }) => {
+    const c = proposals.get(id);
+    if (!c) return;
+    if (state === 'applied') {
+      c.status.textContent = 'Applied ✓';
+      c.apply.remove(); c.reject.remove();
+      const undo = button('Undo', 'ghost', () => { undo.disabled = true; api.proposal(id, 'undo'); });
+      undo.setAttribute('aria-label', `Undo change to ${c.rel}`);
+      c.bar.append(undo);
+    } else if (state === 'rejected') { c.status.textContent = 'Rejected'; c.apply.remove(); c.reject.remove(); }
+    else if (state === 'undone') { c.status.textContent = 'Undone'; c.bar.querySelectorAll('button').forEach((b) => b.remove()); }
+    else if (state === 'error') { c.status.textContent = message || 'Failed'; c.status.classList.add('err'); c.bar.querySelectorAll('button').forEach((b) => { b.disabled = true; }); }
+    reportSize();
+  });
+
   api.onCores((list) => { if (Array.isArray(list) && list.length) { cores = list; setRecipient(recipient); } });
   api.onRecipient((id) => { setRecipient(id); input.focus(); });
 

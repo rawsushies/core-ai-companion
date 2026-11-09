@@ -26,6 +26,7 @@ const { ScreenWatch } = require('./watch');
 const { refinePoint } = require('./pointing');
 const SK = require('./skills');
 const { ProjectTools } = require('./tools');
+const { ChangeManager, extractProposals } = require('./changes');
 const { toneKey } = require('./brain/persona');
 const { CrashLog } = require('./crashlog');
 const { smokeTarget, SmokeTest } = require('./smoke');
@@ -1170,15 +1171,45 @@ function projectTools() {
   return new ProjectTools({ root: t.projectRoot, enabled: t.enabled !== false });
 }
 
+function toolAudit(entry) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+  } catch {}
+}
+
+let changes = null;
+function changeManager() {
+  if (!changes) changes = new ChangeManager({ getTools: projectTools, backupDir: path.join(app.getPath('userData'), 'change-backups'), log: toolAudit });
+  return changes;
+}
+
+// A core's reply may propose whole files (```lang file=PATH). Offer each as a
+// diff card; nothing is written until the user clicks Apply.
+function offerProposals(reply, coreId) {
+  const props = extractProposals(reply);
+  if (!props.length) return;
+  const who = coreById(coreId) ? coreById(coreId).name : 'COre';
+  if (!(config.data.tools && config.data.tools.allowWrites === true)) {
+    addTranscript('system', `${who} proposed changes to ${props.length} file${props.length > 1 ? 's' : ''}. To review and apply them, turn on Settings → Projects → "Let cores propose changes".`, { author: coreId, kind: 'progress' });
+    return;
+  }
+  for (const pr of props) {
+    try {
+      const p = changeManager().prepare(pr, coreId);
+      toDock('dock:proposal', { id: p.id, author: coreId, rel: p.rel, isNew: p.isNew, added: p.added, removed: p.removed, preview: p.preview });
+    } catch (err) {
+      addTranscript('system', `${who}'s change to ${pr.path} can't be offered: ${err.message}`, { author: coreId, kind: 'error' });
+    }
+  }
+}
+
 // Every tool call is visible in the chat and written to logs/tools.log.
 function runToolTag(item, coreId) {
   const r = projectTools().run(item);
   const name = coreById(coreId) ? coreById(coreId).name : 'COre';
-  try {
-    const dir = path.join(app.getPath('userData'), 'logs');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), core: coreId, tool: item.tool, arg: String(item.arg).slice(0, 200), ok: r.ok, ...(r.ok ? {} : { error: r.error }) })}\n`);
-  } catch {}
+  toolAudit({ core: coreId, tool: item.tool, arg: String(item.arg).slice(0, 200), ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
   addTranscript('system', r.ok ? `${name} ${r.summary}` : `${name} couldn't ${item.tool} ${item.arg}: ${r.error}`, { author: coreId, kind: r.ok ? 'progress' : 'error' });
   return r.ok ? `${item.tool} ${item.arg}:\n${r.text}` : `${item.tool} ${item.arg} failed: ${r.error}`;
 }
@@ -1488,6 +1519,7 @@ function askCore(coreId, text, { task } = {}) {
       // (or the whole answer if that's all there is).
       const details = full.split(/\n\s*\n/).slice(1).join('\n\n').trim();
       addTranscript('core', details || full || '(no answer)', { author: c.id, ...(task ? { task: task.id } : {}) });
+      offerProposals(full, c.id);
       if (truncated) addTranscript('system', `${c.name}'s answer was cut off (${error}).`, { author: c.id, kind: 'error' });
       toClone(c, 'state', 'idle');
       floor.request(c.id, () => speakForClone(c, CL.spokenSummary(full) || 'Done.'));
@@ -1864,6 +1896,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       },
     });
     if (reply) addTranscript('core', reply);
+    if (reply) offerProposals(reply, 'prime');
     if (truncated) {
       // The brain dropped mid-answer: keep what was said, say so, offer to continue.
       const id = require('crypto').randomUUID();
@@ -2065,6 +2098,28 @@ function wireIpc() {
   });
   ipcMain.on('dock:setting', (e, { key, value } = {}) => { if (fromDock(e)) applySetting(key, value); });
   ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
+  ipcMain.on('dock:proposal', (e, { id, action } = {}) => {
+    if (!fromDock(e)) return;
+    const cm = changeManager();
+    try {
+      if (action === 'apply') {
+        const ch = cm.apply(String(id));
+        const who = coreById(ch.core) ? coreById(ch.core).name : 'COre';
+        addTranscript('system', `${who}'s change applied: ${ch.rel} (${ch.isNew ? 'new file' : `+${ch.added} −${ch.removed}`}).`, { author: ch.core, kind: 'progress' });
+        toDock('dock:proposal-update', { id, state: 'applied' });
+      } else if (action === 'reject') {
+        cm.reject(String(id));
+        toDock('dock:proposal-update', { id, state: 'rejected' });
+      } else if (action === 'undo') {
+        const ch = cm.undo(String(id));
+        addTranscript('system', `Undid the change to ${ch.rel}.`, { author: ch.core, kind: 'progress' });
+        toDock('dock:proposal-update', { id, state: 'undone' });
+      }
+    } catch (err) {
+      addTranscript('system', err.message, { kind: 'error' });
+      toDock('dock:proposal-update', { id, state: 'error', message: err.message });
+    }
+  });
   ipcMain.on('dock:openSettings', (e) => { if (fromDock(e)) openSettings(); });
   const fromSettings = (e) => isFrom(settingsWin, e);
   ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), secrets: settingsSecrets(), version: app.getVersion() } : null));

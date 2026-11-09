@@ -48,5 +48,8 @@ contextBridge.exposeInMainWorld('dock', {
   onSettings: on('dock:settings'),
   onCores: on('dock:cores'),
   onRecipient: on('dock:recipient'),
+  onProposal: on('dock:proposal'),
+  onProposalUpdate: on('dock:proposal-update'),
+  proposal: (id, action) => ipcRenderer.send('dock:proposal', { id, action }),
   onBusy: on('dock:busy'),
 });

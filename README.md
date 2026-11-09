@@ -96,8 +96,9 @@ at something, the smoke finger snaps onto the nearest button or label. Summon it
 
 **Project reading (read-only).** Share one folder in Settings → Projects and COre and its cores can list,
 read and search it to answer from your actual files. Nothing outside the folder is reachable, `.env`, keys
-and credential files are never read, nothing is ever written or run, and every access shows in the chat and
-in `logs/tools.log`.
+and credential files are never read, nothing is ever run, and every access shows in the chat and in
+`logs/tools.log`. Optionally (off by default) cores can **propose** file changes: you see a diff card and
+nothing is written until you click Apply. Every applied change can be undone.
 
 **Skills.** Notes, timers and reminders, weather (free Open-Meteo; set your city), music control
 (play/pause/next/volume), opening apps from a safe list, web search buttons, and your calendar via a private

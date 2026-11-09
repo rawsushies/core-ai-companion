@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Approved file changes (you click Apply)
+- With Settings → Projects → "Let cores propose changes" on (off by default), a core can propose a whole file:
+  it writes the new file in a code block tagged `file=path`. The chat shows a card with the file, +/− counts
+  and a red/green diff. **Nothing is written until you click Apply**, and Reject throws it away.
+- Apply refuses if the file changed since the proposal (so your edits are never overwritten), backs the
+  original up, and writes atomically. Every applied change has **Undo**, which also refuses if you edited the
+  file afterwards.
+- New files only inside existing folders of the shared project. Same containment and secret rules as
+  reading, text only, size-capped. No deleting, renaming or running anything. Every write, rejection and
+  undo goes into `logs/tools.log`.
+
 ### Cores can read your project (read-only, with permission)
 - Share one project folder in Settings → Projects (system folder picker; Stop sharing at any time). COre and
   its cores can then list, read and search it with `[[list]]`, `[[read]]` and `[[find]]`, and answer from

@@ -221,3 +221,18 @@ body.large-text .msg.system { font-size: 13.5px; }
   .ring, .orb-opt, .orb-opt .avatar, .to .to-orb { transition: none; }
   .ring.spin-in { animation: none; }
 }
+
+/* Proposed file changes: a diff card, applied only on click. */
+.msg.proposal { min-width: 220px; }
+.prop-title { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--core); }
+.prop-file { display: flex; align-items: center; gap: 8px; margin: 3px 0 4px; }
+.prop-file code { font-size: 12px; background: rgba(0, 0, 0, 0.35); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+.prop-stats .plus { color: #6dffa8; font-weight: 600; margin-right: 6px; } .prop-stats .minus { color: #ff8f99; font-weight: 600; }
+.proposal details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+.proposal pre.diff { margin: 4px 0; padding: 6px 0; max-height: 170px; overflow: auto; background: rgba(0, 0, 0, 0.45); border-radius: 8px; font: 11.5px/1.45 "Cascadia Code", Consolas, monospace; }
+.diff > div { padding: 0 8px; white-space: pre; }
+.diff .d-add { background: rgba(77, 255, 154, 0.12); color: #b8ffd4; }
+.diff .d-del { background: rgba(255, 93, 108, 0.12); color: #ffc2c8; }
+.diff .d-ctx { color: #8ea597; } .diff .d-gap { color: #5c7266; }
+.prop-bar { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.prop-status { flex: 1; font-size: 11.5px; color: var(--muted); } .prop-status.err { color: #ffb3bb; }

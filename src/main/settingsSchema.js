@@ -84,6 +84,7 @@ const SECTIONS = [
     fields: [
       { key: 'tools.projectRoot', label: 'Project folder COre may read (never change)', type: 'folder', optional: true },
       { key: 'tools.enabled', label: 'Let COre and its cores read it', type: 'toggle' },
+      { key: 'tools.allowWrites', label: 'Let cores propose changes (you review a diff and approve each one)', type: 'toggle' },
     ],
   },
   {
