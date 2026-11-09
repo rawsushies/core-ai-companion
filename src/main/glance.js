@@ -168,42 +168,11 @@ function quickIntent(text) {
 // Windows: one long-lived PowerShell reads the system media session
 // (GlobalSystemMediaTransportControls) once a second and prints a JSON line.
 // Fixed script, nothing from the model goes into it.
-const WIN_SCRIPT = String.raw`
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation${'`'}1' })[0]
-function Await($op, $type) { $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op)); $null = $t.Wait(5000); $t.Result }
-$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
-$lastKey = ''
-$mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
-while ($true) {
-  $o = @{ none = $true }
-  $s = $null; if ($mgr) { $s = $mgr.GetCurrentSession() }
-  if ($s) {
-    $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
-    $tl = $s.GetTimelineProperties(); $pi = $s.GetPlaybackInfo()
-    $o = @{ title = $p.Title; artist = $p.Artist; album = $p.AlbumTitle; pos = [int64]$tl.Position.TotalMilliseconds; dur = [int64]$tl.EndTime.TotalMilliseconds; upd = $tl.LastUpdatedTime.ToUnixTimeMilliseconds(); playing = ([int]$pi.PlaybackStatus -eq 4); app = $s.SourceAppUserModelId }
-    # Album art: read once per track (the thumbnail stream), at most 600 KB.
-    $key = "$($p.Title)|$($p.Artist)"
-    if ($p.Thumbnail -and $key -ne $lastKey) {
-      $lastKey = $key
-      try {
-        $st = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
-        $size = [uint32]$st.Size
-        if ($size -gt 0 -and $size -lt 600000) {
-          $rd = New-Object Windows.Storage.Streams.DataReader($st.GetInputStreamAt(0))
-          $null = Await ($rd.LoadAsync($size)) ([uint32])
-          $bytes = New-Object byte[] $size
-          $rd.ReadBytes($bytes)
-          $o.art = [Convert]::ToBase64String($bytes)
-          $o.artType = $st.ContentType
-        }
-      } catch {}
-    }
-  }
-  [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress)); [Console]::Out.Flush()
-  Start-Sleep -Milliseconds 1000
-}`;
+// The script is a plain file shipped with the app (src/main/ps/media-session.ps1), run
+// with -File: no encoded commands and no execution-policy bypass, which antivirus
+// heuristics rightly treat as suspicious.
+const WIN_SCRIPT_FILE = require('path').join(__dirname, 'ps', 'media-session.ps1');
+const WIN_SCRIPT = require('fs').readFileSync(WIN_SCRIPT_FILE, 'utf8');
 
 // Normalise one reading into { title, artist, album, posMs, durMs, playing, at } or null.
 function normalise(raw, now = Date.now()) {
@@ -239,8 +208,7 @@ class MediaReader extends EventEmitter {
   start() {
     if (this.proc || this.timer || !this.supported) return;
     if (this.platform === 'win32') {
-      const enc = Buffer.from(WIN_SCRIPT, 'utf16le').toString('base64');
-      this.proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      this.proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', WIN_SCRIPT_FILE], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
       let buf = '';
       this.proc.stdout.on('data', (d) => {
         buf += d.toString('utf8');

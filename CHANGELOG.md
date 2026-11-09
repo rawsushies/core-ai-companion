@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fewer antivirus false alarms
+- The song card and the desktop agent run their PowerShell helpers as plain script files that ship with the app
+  (`src/main/ps/`), instead of encoded commands with the execution-policy bypass. Antivirus heuristics flag that
+  pattern, and AVG quarantined COre.
+- README: how to restore COre if an antivirus removes it.
+
 ## 11.0.0 — Agent, phone app, cards and a new chat
 
 ### Memory in your Google account (optional)

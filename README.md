@@ -45,6 +45,18 @@ recognition (~80 MB) and voice (~90 MB) models once. Both then run offline on yo
 > **Black box behind the orb?** Some graphics drivers can't draw transparent windows on the GPU. COre notices
 > and restarts in *safe graphics mode*. You can also pick it in Settings → Look → Graphics mode, or in the tray menu.
 
+### If your antivirus removes COre
+
+The installer isn't code-signed yet, so some antivirus programs (AVG, Avast and others) quarantine `COre.exe` as a
+false positive.
+
+1. Open your antivirus quarantine (AVG: **Menu → Quarantine**), select COre, and choose **Restore and add
+   exception**.
+2. Or add an exception for the install folder `%LOCALAPPDATA%\Programs\COre`, then run the installer again.
+3. Your settings and memory are safe in `%APPDATA%\COre`. Uninstalling or quarantining doesn't touch them.
+
+You can also report the false positive to your antivirus vendor (AVG: avg.com/false-positive-file-form).
+
 ## Use
 
 | Do this | And COre… |
