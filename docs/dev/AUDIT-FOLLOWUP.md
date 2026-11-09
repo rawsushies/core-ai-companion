@@ -57,3 +57,19 @@ Every number below was measured in this environment (Linux, Xvfb, software rende
 - A real phone on a real Wi-Fi, and the Windows firewall prompt.
 - The installer-based release updater, until a gated release is published (needs release approval).
 - Archicad, Revit and UIA against the real applications.
+
+## Improvement loop log (PR #2)
+
+Each loop: audit → fix → test → plan → build the most urgent item first.
+
+| Loop | Priority found | Done |
+|---|---|---|
+| 1 | P0: phone keys in backups (plain text on keyring-less Linux). P1: phone clock-skew retry loop. P2: scrolling over chat gaps | All fixed with tests; real-app e2e suite added to CI |
+| 2 | Older features never driven end to end | e2e for memory, timers, Meiosis, file proposals, history (no bugs found); live cards for timer, weather, calendar |
+| 3 | Lyrics announced line by line to screen readers | Fixed; phone media remote |
+| 4 | Linux media path untested; no album art | Album art (Windows + Linux), fake player in e2e |
+| 5 | Voice start on long openings | First chunk earlier (measured 0.25–0.45 s sooner); dependency audit |
+
+### Accepted risks
+- `npm audit`: 0 production vulnerabilities. 6 moderate ones in build tooling (minimatch inside electron-builder),
+  only reachable through our own build file patterns. The suggested fix is a major downgrade, so it's left as is.
