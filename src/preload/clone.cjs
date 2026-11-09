@@ -47,4 +47,5 @@ contextBridge.exposeInMainWorld('core', {
   onAssemble: on('assemble'),
   onRelocate: () => noop,
   onSpeaker: () => noop,
+  onRender: on('render'),
 });

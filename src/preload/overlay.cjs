@@ -44,4 +44,5 @@ contextBridge.exposeInMainWorld('core', {
   onRelocate: on('relocate'),
   onSpeaker: on('speaker'),
   onGlance: on('glance'),
+  onRender: on('render'),
 });

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Zero cost when you're not looking
+- Hidden (Ctrl+Alt+H), screen locked or PC asleep: COre and its helpers draw no frames at all. Measured in safe
+  graphics mode: **53% → 1.7%** CPU. Before, the hidden window kept rendering in the background.
+- Nobody at the PC for 5 minutes: the idle smoke slows to 4 fps until you're back.
+- On battery: idle is capped at 10 fps and animations at 30 fps.
+
 ### Phone companion (off by default)
 - Chat with COre from your phone's browser on the same Wi-Fi: see the chat and COre's status, send messages, stop it
   talking. Settings → Phone → **Pair a phone** shows a QR code; scan it, compare the 6-digit code on both screens,

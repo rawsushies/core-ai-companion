@@ -1096,13 +1096,43 @@ function createTrayMenu() {
 }
 
 let orbHidden = false;
+
+// ---------------------------------------------------------------- render mode (CPU / GPU)
+// Hidden, locked or asleep: no frames at all. Nobody at the PC for 5 minutes:
+// ambient idle (4 fps). On battery: idle at 10 fps and active frames at 30.
+const renderState = { locked: false, idleSec: 0, battery: false };
+let lastRenderMode = '';
+function pushRenderMode(force) {
+  const m = {
+    paused: orbHidden || renderState.locked,
+    ambient: renderState.idleSec >= 300 && !current && !listening,
+    battery: renderState.battery,
+  };
+  const key = JSON.stringify(m);
+  if (key === lastRenderMode && !force) return;
+  lastRenderMode = key;
+  toOverlay('render', m);
+  for (const c of clones.values()) toClone(c, 'render', m);
+}
+function watchPower() {
+  try { renderState.battery = powerMonitor.isOnBatteryPower(); } catch {}
+  for (const [ev, fn] of [
+    ['lock-screen', () => { renderState.locked = true; }], ['unlock-screen', () => { renderState.locked = false; }],
+    ['suspend', () => { renderState.locked = true; }], ['resume', () => { renderState.locked = false; }],
+    ['on-battery', () => { renderState.battery = true; }], ['on-ac', () => { renderState.battery = false; }],
+  ]) powerMonitor.on(ev, () => { fn(); pushRenderMode(); });
+  setInterval(() => {
+    try { renderState.idleSec = powerMonitor.getSystemIdleTime(); } catch {}
+    pushRenderMode();
+  }, 15000).unref();
+}
 function toggleOrb() {
   if (!overlay) return;
   orbHidden = !orbHidden;
   if (orbHidden) {
     // Dissolve into smoke first, then hide.
     toOverlay('dissolve');
-    setTimeout(() => { if (orbHidden && overlay && !overlay.isDestroyed()) overlay.hide(); }, 650);
+    setTimeout(() => { if (orbHidden && overlay && !overlay.isDestroyed()) { overlay.hide(); pushRenderMode(); } }, 650);
     if (dock && dock.isVisible()) dock.hide();
     for (const c of clones.values()) if (c.win && !c.win.isDestroyed()) c.win.hide(); // helpers hide too
     const key = prettyKey(config.data.hotkeys.hide);
@@ -1112,6 +1142,7 @@ function toggleOrb() {
     }
     trayTooltip();
   } else {
+    pushRenderMode(); // frames back on before it reassembles
     overlay.showInactive();
     toOverlay('assemble');
     for (const c of clones.values()) if (c.win && !c.win.isDestroyed()) { c.win.showInactive(); toClone(c, 'assemble'); }
@@ -2560,6 +2591,7 @@ function wireIpc() {
   // (loading it earlier could collide with a safe-graphics restart).
   ipcMain.once('overlay:ready', (e) => {
     if (!fromOverlay(e)) return;
+    pushRenderMode(true);
     if (smoke) { smoke.mark('overlay-ready'); return; }
     // COre started fine after an update: the update is good, stop watching it.
     if (state.get('updateVerify')) { state.set('updateVerify', null); state.flush(); }
@@ -2857,6 +2889,7 @@ app.whenReady().then(async () => {
   plugins = SK.loadPlugins(path.join(userData, 'skills'));
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
+  watchPower();
   setInterval(checkAutoBackup, 3600_000).unref();
   reminders = new Reminders({ store: state, onFire: onReminder });
 

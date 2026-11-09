@@ -561,9 +561,23 @@
     if (body.arms.some((a) => a.extend > 0.02)) r.push('arms');
     return r;
   }
+  // Render mode from main: paused while hidden / locked / asleep, ambient
+  // (very slow idle) while nobody is at the PC, capped on battery.
+  let renderMode = { paused: false, ambient: false, battery: false };
+  let sleeping = false;
+  window.__coreRender = () => ({ ...renderMode, sleeping }); // test hooks
+  window.__coreSetRender = (m) => setRenderMode(m);
+  function setRenderMode(m) {
+    renderMode = { paused: !!(m && m.paused), ambient: !!(m && m.ambient), battery: !!(m && m.battery) };
+    if (!renderMode.paused && sleeping) { sleeping = false; lastDraw = 0; requestAnimationFrame(frame); }
+  }
+
   function frame(now) {
+    if (renderMode.paused) { sleeping = true; clearTimeout(idleTimer); return; } // no frames at all
     // Idle: draw at idleFps to keep GPU and desktop compositing light.
-    const idleFps = (cfg.orb && cfg.orb.idleFps) || 30;
+    let idleFps = (cfg.orb && cfg.orb.idleFps) || 30;
+    if (renderMode.ambient) idleFps = Math.min(idleFps, 4);
+    else if (renderMode.battery) idleFps = Math.min(idleFps, 10);
     if (!isActive() && now - lastDraw < 1000 / idleFps - 2) {
       // Sleep until the next idle frame instead of spinning on rAF: a pending
       // rAF keeps the compositor producing frames at the display rate.
@@ -572,7 +586,7 @@
       return;
     }
     // Active frames are capped too on light profiles (safe graphics, battery).
-    const maxFps = (cfg.orb && cfg.orb.maxFps) || 0;
+    const maxFps = Math.min((cfg.orb && cfg.orb.maxFps) || 999, renderMode.battery ? 30 : 999) % 999;
     if (maxFps && isActive() && now - lastDraw < 1000 / maxFps - 2) {
       requestAnimationFrame(frame);
       return;
@@ -904,6 +918,7 @@
       bridge.onConfig(applyConfig);
       bridge.onSpeaker((sp) => { cfg.speaker = sp; });
       if (bridge.onGlance) bridge.onGlance(setGlance);
+      if (bridge.onRender) bridge.onRender(setRenderMode);
       bridge.onDockVisible((v) => { dockVisible = !!v; });
       bridge.onStage((st) => { if (st) stage = { ...st }; });
       bridge.onCursor((c) => {
