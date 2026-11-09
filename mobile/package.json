@@ -1,6 +1,6 @@
 {
   "name": "core-mobile",
-  "version": "0.1.0",
+  "version": "11.0.0",
   "private": true,
   "description": "COre for Android: talks to COre on your PC over Wi-Fi, or to Gemini when you're away.",
   "scripts": {

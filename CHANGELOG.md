@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 11.0.0 — Agent, phone app, cards and a new chat
 
 ### Memory in your Google account (optional)
 - Settings → **Cloud**: connect your Google account and COre keeps its memory in your Drive's private app folder.
