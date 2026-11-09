@@ -66,5 +66,5 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
 - Themes/skins (colours, styles), languages, accessibility, performance profiles, crash reporting (local),
   onboarding tour.
 
-## 🔨 v10.0.0 — Release
+## ✅ v10.0.0 — Release
 - Full audit, performance pass, docs, signed installer, release notes.

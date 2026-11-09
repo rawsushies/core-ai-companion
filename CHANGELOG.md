@@ -1,5 +1,16 @@
 # Changelog
 
+## 10.0.0 — Release
+- Full audit across every system at once (chat, voice, gestures, shapes, skills, helpers, hands-free,
+  settings), in the real app and in the packaged build. No page errors, an empty crash log, and about 1% CPU
+  in total while idle.
+- New README covering everything COre can do, privacy, settings and development.
+- Release notes attached to the GitHub release; optional code signing for the Windows installer (add
+  `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD` repository secrets).
+- Bugs found and fixed on the way to 10.0.0: a cough could pass as a wake phrase; the first watch-mode offer
+  could be swallowed; a skill follow-up could cut the previous reply's chat text; a plugin hint could echo back
+  as a tag; a finished helper lost its colour; drags with a fast release weren't detected as tosses.
+
 ## 9.0.0 — Polish
 - Themes: pick COre's smoke colour: Emerald (classic), Ice, Ember, Violet, Gold, Rose or Moonlight. It
   applies instantly.

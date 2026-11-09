@@ -2,53 +2,29 @@
 
 ![COre states](assets/states.png)
 
-A desktop companion that lives on your screen as a **sphere of glowing green smoke**: thousands of particles
-flowing over a shell, gathering into drifting filaments and resonating together.
-It talks, listens, looks at your screen when you ask, reaches out **smoke tendrils to point** at things,
-resonates while it speaks, trails smoke when it moves, and **changes colour** when something needs your attention.
-It speaks with a **deep robotic machine voice** (sarcastic by default, adjustable), has a **chat block under the orb**
-for normal Claude-style typed conversations, and **updates itself** from GitHub.
+A desktop companion that lives on your screen as a **sphere of glowing smoke**. It talks with a deep robotic
+voice (sarcastic by default), listens, looks at your screen when you ask, points at things with smoke hands,
+gestures, forms emoji out of its smoke, chats when things are quiet, splits into helper copies to multitask,
+and updates itself.
 
-Its brain is **Claude through your own Claude Code login** — no API key. If Claude is unavailable it
-falls back to a **free local model** (Ollama) or any OpenAI-compatible endpoint (DeepSeek, OpenRouter, LM Studio).
+Its brain is **Claude through your own Claude Code login**, so it needs no API key. Free fallbacks (Gemini,
+Groq, OpenRouter, a local Ollama model, or any OpenAI-compatible endpoint) take over when Claude is unavailable.
 
-| State | Look |
-|---|---|
-| Idle | green smoke strands drifting over a hollow sphere, slowly turning |
-| Listening | cyan, ripples with your voice |
-| Thinking | violet, faster swirl |
-| Speaking | the shell resonates in waves with the words, flow speeds up and brightens |
-| Explaining / pointing | smoke arms end in smoke hands: an open hand with five flexing fingers, or an index finger that lands exactly on the target |
-| Moving | the cloud lags behind its centre like smoke |
-| Notification | colour change and pulsing halo: blue info, lime success, amber warning, red urgent |
+## Install
 
-## Install on Windows (easiest)
+### Windows installer (recommended)
 
-> **Black box behind the orb or chat?** Some graphics drivers can't do transparent windows on the GPU. COre detects
-> this and restarts itself in *safe graphics mode* automatically; you can also pick it yourself in the chat's
-> ⚙ → Display → Graphics (or the tray icon → Graphics). ⚙ → **Copy diagnostics** copies your GPU details for
-> troubleshooting.
+Download **COre-Setup-x.y.z.exe** from [Releases](https://github.com/rawsushies/core-ai-companion/releases)
+and run it. You get Start-menu and desktop shortcuts and a normal uninstaller (Windows Settings → Apps, or
+COre's Settings → Maintenance → Uninstall). Installed copies update themselves from Releases.
 
-1. Unzip the folder somewhere permanent, for example `C:\Users\<you>\COre`.
-2. Double-click **Install COre.bat**. It installs Node.js (via winget) and Claude Code if they are missing,
-   installs COre, puts a **COre** shortcut on your Desktop, helps you log in to Claude once, and starts COre.
-3. Next time, double-click **COre** on the Desktop (or **Start COre.bat**).
+For the Claude brain, install [Claude Code](https://docs.claude.com/en/docs/claude-code) and log in once.
+COre's chat shows a **Log in to Claude** button if you aren't logged in.
 
-## Install manually
+### From source
 
-You need **Node.js 20+** and, for the Claude brain, **Claude Code** logged in once.
-
-```bash
-npm install -g @anthropic-ai/claude-code
-```
-
-```bash
-claude
-```
-
-Inside Claude Code type `/login`, finish the login, then exit. (The native Claude Code installer works too.)
-
-Then, in this folder:
+You need **Node.js 20+**. On Windows you can unzip the folder and double-click **Install COre.bat** instead:
+it installs Node.js and Claude Code if they're missing and puts a shortcut on your Desktop.
 
 ```bash
 npm install
@@ -58,166 +34,133 @@ npm install
 npm start
 ```
 
-`npm install` also downloads the Electron runtime. The first time you talk, COre downloads a small
-speech-recognition model (Whisper base, ~80 MB) that then runs locally.
+Source copies update themselves from the `main` branch. The first time you talk, COre downloads its speech
+recognition (~80 MB) and voice (~90 MB) models once. Both then run offline on your PC.
+
+> **Black box behind the orb?** Some graphics drivers can't draw transparent windows on the GPU. COre notices
+> and restarts in *safe graphics mode*. You can also pick it in Settings → Look → Graphics mode, or in the tray menu.
 
 ## Use
 
-| Hotkey | Does |
+| Do this | And COre… |
 |---|---|
-| `Ctrl+Alt+Space` | Talk. Press again to stop early. Pressing while COre talks interrupts it. |
-| `Ctrl+Alt+S` | Talk about your screen (COre gets a screenshot and can point at things) |
-| `Ctrl+Alt+C` | Show / hide the chat block under the orb |
-| `Ctrl+Alt+H` | Hide / show COre (a notification tells you it's hidden) |
+| `Ctrl+Alt+Space` | listens; press again to stop early (or set "press again to send" in Settings) |
+| Press and hold the orb | listens while you hold, sends when you let go |
+| "Hey COre" (optional) | wakes hands-free; "Hey COre, what time is it?" works in one breath |
+| `Ctrl+Alt+S` | talks about your screen (gets a screenshot, can point at things) |
+| `Ctrl+Alt+C` | shows/hides the chat under the orb |
+| `Ctrl+Alt+H` | hides/shows COre (it dissolves into smoke) |
+| Type in the chat | answers like a normal Claude chat (markdown, code), read aloud as it goes |
+| Drag / click the orb | moves it / toggles the chat |
 
-- **Chat block:** type under the orb and COre answers like a normal Claude chat (full detail, lists, code blocks),
-  in the same conversation as your voice chats. Only the opening of typed replies is read aloud (toggle in ⚙).
-- **Drag** the orb anywhere; it remembers the spot and the chat follows. **Click** it to show or hide the chat.
-- **Hover** or click acknowledges a notification colour.
-- When COre looks at your screen it captures the monitor your mouse is on and also gets the list of every open
-  window (minimised ones too), so it knows what's running even when it isn't visible.
-- Phrases like "look at this", "what's on my screen", "where is the…" also share a screenshot automatically
-  (turn off with `screen.autoShareOnDeixis`).
-- Tray icon: talk, new conversation, settings, quit.
+All shortcuts can be changed in **Settings** (tray menu → Settings…, or ⚙ → All settings… in the chat).
 
-## Memory, reminders and actions
+## What it can do
 
-- **Memory:** tell COre about yourself and it remembers across conversations (any brain). It shows
-  "🧠 Remembered: …" in the chat when it saves something. See or delete everything in ⚙ → Memory.
-- **Reminders and timers:** "remind me in 20 minutes to stretch", "set a 5 minute timer", "remind me at 7pm to
-  call mom". They survive restarts and fire with COre's voice, an amber glow and a Windows notification. Cancel
-  them in ⚙ → Reminders.
-- **One-click actions:** COre can offer to open a website or copy text. It shows a button in the chat and only
-  acts when you click it.
-- **Clipboard:** "explain what I copied", "fix the text in my clipboard".
-- **Moods:** COre's smoke reacts to its replies (happy, amused, curious, annoyed, excited, sad, calm).
-- **Presence:** the orb leans toward your cursor when you come near, and greets you on the first launch of the
-  day (turn off with `personality.greeting: false`).
+**Talk and listen.** Kokoro neural voice through a robot effects chain (ring mod, flanger, detuned double),
+with words revealed in step with the audio. Pick the tone (sarcastic, dramatic, calm, cheerful,
+professional), voice, pitch, robot amount and **reply language**. Speech recognition is local Whisper.
 
-## Brains
+**Hands-free (optional).** Turn on "Hey COre" in Settings → Voice or the tray. A tiny detector only passes
+short phrases after a pause to the local speech model; nothing leaves your PC. Talk over COre to interrupt it
+(barge-in). **Conversation mode** keeps listening for a few seconds after each spoken reply.
 
-With Claude, COre keeps one Claude Code session running in the background, so replies start in about a second
-(no start-up per message). It keeps the conversation across restarts; ⚙ → New chat starts fresh.
+**Body language.** 30 gestures made of the same smoke arms: wave, thumbs up/down, shrug, count to five,
+clap, facepalm, point in four directions, beckon, stop, OK, peace, rock, heart hands, think, salute, fist pump,
+celebrate, juggle, hug, magic, flex, bow, nod, shake, spin, bounce. COre picks them while it talks.
 
-COre tries brains in order and skips the ones that aren't connected. Open ⚙ in the chat block → **Brain**:
+**Shape-shifting.** The smoke forms shapes with matching sounds: a laughing face that giggles, a heart that
+hums, a check mark that dings, a frown that sighs, plus stars, arrows, music notes, a light bulb, Zzz, and any
+one to three letters or digits.
 
-- **Claude** (default, no API key): uses Claude Code on your PC. Signing in to the Claude desktop app does not
-  sign in Claude Code; press **Log in to Claude** once and finish the login in your browser.
-- **Google Gemini** — free API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Can see screenshots.
-- **Groq** — free API key from [console.groq.com/keys](https://console.groq.com/keys). Very fast.
-- **OpenRouter** — key from [openrouter.ai/keys](https://openrouter.ai/keys); COre picks a free (`:free`) model.
-- **Local model (Ollama)** — fully offline and free: **Install Ollama**, then **Download model**.
-- **Custom endpoint** — any OpenAI-compatible API (DeepSeek, LM Studio…) via `brain.openaiCompat` in config.json.
+**Presence.** After a quiet while COre starts a short, relevant conversation. It only does this when you're
+at the computer but paused, never in quiet hours, at most a few times a day, and it backs off when ignored.
+Pet it, tickle it, poke it (double click) or toss it across the screen, and it reacts. Ask for **trivia, a
+riddle or 20 questions**.
 
-Keys are encrypted with your Windows account (DPAPI) before they're saved. If a provider renames its models,
-COre asks it for its model list and switches automatically.
+**Helpers ("Many COres").** Ask for several things at once, or type `/clone <task>`. COre splits off up to 3
+helper copies in a meiosis-style burst. Each has its own colour, voice, conversation and spot on screen,
+away from COre, the chat and each other. Helpers queue to speak so voices never overlap, and their results land
+in the chat. Click a finished helper (or `/merge`) to fold it back in.
 
-## Voice and personality
+**Screen partner.** When an error dialog, crash report or "(Not Responding)" window appears, COre offers a
+**Take a look** button. It notices from window titles only; a screenshot is taken when you click. When it points
+at something, the smoke finger snaps onto the nearest button or label. Summon it on another monitor and it moves there.
 
-COre's voice is a local neural voice ([Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX),
-downloaded once, ~90 MB, runs offline) played through a robotic effects chain: pitched down, a detuned doubled
-layer, ring modulation, a metallic comb flanger, a little grit and a chest/presence EQ. The orb resonates with the
-real audio. It is an original machine voice, not a copy of any actor's voice.
+**Skills.** Notes, timers and reminders, weather (free Open-Meteo; set your city), music control
+(play/pause/next/volume), opening apps from a safe list, web search buttons, and your calendar via a private
+ICS link. Lookups come back as a spoken answer. **Plugins:** put JSON files in COre's data folder under
+`skills/`, for example:
 
-Open ⚙ in the chat block to change, instantly:
-
-- **Tone:** Sarcastic (default), Dramatic, Calm, Cheerful, Professional.
-- **Voice:** Onyx (deep, default), Fenrir (gravelly), Michael, Adam, Eric, George, Lewis, or your system voice.
-- **Pitch:** semitones (default -3 = deeper).
-- **Robot:** 0% clean to 100% full machine (default 45%).
-- `voice.quality` in config.json: `"fast"` (default, 4-bit voice model, about 3x quicker) or `"best"` (8-bit).
-
-If the voice model can't load (e.g. offline on first run), COre falls back to your system voice.
-
-## Updates
-
-COre checks [rawsushies/core-ai-companion](https://github.com/rawsushies/core-ai-companion) every 6 hours (and on
-⚙ → Check updates). When the `version` in that repo's `package.json` is newer, it downloads the new code, keeps
-your settings and installed packages, reinstalls packages only if they changed, and restarts itself. If you
-installed with `git clone`, it uses `git pull`. Change or turn off with `update.source` / `update.enabled`.
-
-## Settings
-
-Panel menu → **Open settings file** edits `config.json`, then **Reload settings**. Highlights:
-
-```jsonc
-{
-  "brain": {
-    "provider": "claude-cli",          // or "ollama" / "openai-compat"
-    "fallback": "ollama",              // used if the primary fails before speaking; "" to disable
-    "claude": { "model": "haiku" },    // "sonnet" / "opus" are smarter but slower
-    "ollama": { "model": "qwen2.5:7b", "visionModel": "" },   // e.g. "qwen2.5vl:7b" to let it see screenshots
-    "openaiCompat": { "baseUrl": "https://api.deepseek.com/v1", "model": "deepseek-chat", "apiKey": "" }
-  },
-  "voice": { "voiceName": "", "lang": "", "rate": 1.05, "pitch": 0.85, "sttLanguage": "" },
-  "orb": { "style": "smoke", "radius": 60, "particles": 24000, "renderScale": 1 }
-}
+```json
+{ "name": "wiki", "description": "search Wikipedia", "url": "https://en.wikipedia.org/wiki/Special:Search?search={q}" }
 ```
 
-- **Free local brain:** install [Ollama](https://ollama.com), run `ollama pull qwen2.5:7b`, and it is used automatically as the fallback (or set it as `provider`).
-- **Voice:** COre speaks with your operating system's voices. On Windows, extra/natural voices come from Settings → Time & language → Speech. Set `voice.voiceName` to part of a voice name (e.g. `"Aria"`, `"Indonesia"`). If no voice exists it shows captions silently.
-- **Language:** COre replies in the language you speak. Set `voice.sttLanguage` (e.g. `"indonesian"`) if auto-detect mishears you; `voice.sttModel: "onnx-community/whisper-small"` is more accurate but slower.
-- **Look:** `orb.style` is `"smoke"` (default) or `"liquid"` (the older glossy black blob). `orb.particles`
-  controls density (12000 for slow GPUs, 50000+ for a thicker cloud); `orb.radius` its size.
-- **Slow GPU:** lower `orb.renderScale` to `0.7` and `orb.particles` to `12000`.
-- **Performance:** COre's window only covers the area around the orb (it grows while pointing and shrinks back),
-  and draws at `orb.idleFps` (default 30) when nothing is happening, so the desktop stays smooth.
+**Memory, clipboard, moods.** COre remembers facts about you across conversations (see or delete them in
+⚙ → Memory), can work with what you copied ("explain what I copied"), and its smoke shows moods.
 
-## Notifications from anything
+**Make it yours.** Seven smoke colours, size, density, performance profiles (Battery saver / Balanced / Best
+quality), reduced motion (follows Windows), larger chat text, captions on or off, start with Windows.
 
-COre listens on `127.0.0.1:47321` for attention requests. Copy the token from the panel menu
-(**Copy notification token**), then from any script:
+**Notifications from anything.** COre listens on `127.0.0.1:47321` (token in the panel menu):
 
 ```bash
 curl -X POST http://127.0.0.1:47321/notify -H "Authorization: Bearer YOUR_TOKEN" -H "content-type: application/json" -d '{"title":"Build finished","level":"success"}'
 ```
 
-PowerShell:
+## Brains
 
-```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:47321/notify -Headers @{Authorization="Bearer YOUR_TOKEN"} -ContentType "application/json" -Body '{"title":"Backup failed","level":"urgent","speak":true}'
-```
+COre tries brains in order and skips any that aren't connected (chat ⚙ → Brain, or Settings → Brain):
 
-`level` is `info`, `success`, `warn` or `urgent`; `"speak": true` reads the title aloud.
-COre cannot read other apps' system notifications by itself (operating systems don't allow that), so
-hook the tools you care about into this endpoint.
+- **Claude** (default): Claude Code on your PC, kept running in the background so replies start in about a
+  second. Haiku by default; Sonnet or Opus in Settings.
+- **Google Gemini**, **Groq**, **OpenRouter**: free API keys (links in ⚙ → Brain). Keys are encrypted with your
+  OS account before they're saved.
+- **Local model (Ollama)**: fully offline. Press **Install Ollama**, then **Download model**.
+- **Custom endpoint**: any OpenAI-compatible API (DeepSeek, LM Studio…) via `brain.openaiCompat` in `config.json`.
 
 ## Privacy and safety
 
-- The microphone is opened only while COre is listening, and closed right after. Speech recognition and the voice run locally.
-- Screenshots are taken only on `Ctrl+Alt+S`, the panel's "Show my screen" box, or a "look at this" phrase.
-  They are saved in COre's own workspace folder (last 5 kept) and sent to the brain you configured.
-- The Claude brain runs `claude -p` with **only the read-only `Read` tool** enabled, inside COre's workspace,
-  with `--restricted` when your Claude Code supports it. COre never uses `--dangerously-skip-permissions`
-  and cannot run commands on your PC.
-- The notification endpoint listens on localhost only and requires the per-install token.
+- **Microphone:** opened only while COre listens, unless you turn on hands-free. Then it stays open, but only
+  short phrases are checked, on your PC, for "Hey COre". Speech recognition and the voice are local.
+- **Screen:** screenshots happen only on `Ctrl+Alt+S`, a "look at this" phrase, or a **Take a look** click. They're
+  sent to the brain you chose; the last 5 stay in COre's workspace folder. Watch mode reads window titles only.
+- **Claude:** COre runs `claude -p` with **no tools** in its persistent session (the per-message fallback may
+  only `Read` the screenshot file), inside its own workspace, `--restricted` where supported. It never uses
+  `--dangerously-skip-permissions` and cannot run commands.
+- **Skills:** nothing runs a command built from the model's words. Apps and media keys come from fixed lists,
+  links open only when you click, and plugins are data (https link templates), not code. Each skill can be
+  switched off.
+- **Crash reports** are written to COre's own logs folder and never uploaded.
+- The notification endpoint is localhost-only and needs the per-install token.
+
+## Settings and maintenance
+
+Everything is in the **Settings** window: General, Look, Voice, Brain, Accessibility, Skills, Privacy, and
+**Maintenance** (check for updates, copy diagnostics, open data/crash-log folders, replay the tour, restart,
+reset, uninstall). Settings are saved in `config.json` in COre's data folder.
 
 ## How it works
 
 ```
- hotkey / panel ──► main process (Electron)
-                     ├─ Whisper STT + Kokoro TTS (worker threads, local)
-                     ├─ chat dock window under the orb (streamed markdown replies)
-                     ├─ updater (GitHub ► download ► apply ► restart)
-                     ├─ Brain: Claude Code CLI  ─┐ fallback: Ollama / OpenAI-compatible
-                     │   stream ► tag parser ► sentence chunker ► [say | gesture | end]
-                     ├─ screen capture ─► ./shots/*.png (Claude reads it)
-                     └─ notify server 127.0.0.1:47321
-                                │ IPC
- overlay window (transparent, always on top, click-through except over the orb)
-   ├─ motion.js     springs: body, lagging tail, two arms
-   ├─ orb-smoke.js  WebGL2 GPU particles (transform feedback): flow on a sphere + pull to noise
-   │                zero-lines = filaments; arm streams; fading trail buffer; mip bloom
-   ├─ orb-gl.js     "liquid" style: raymarched SDF blob
-   ├─ voice.js      rendered Kokoro audio ► robot effects chain ► analyser ► resonance (OS voice fallback)
-   └─ listen.js   mic + energy VAD ► 16 kHz PCM
+ hotkeys / chat / wake phrase ─► main process (Electron)
+   ├─ Brain chain: Claude Code CLI (persistent) ► Gemini / Groq / OpenRouter / Ollama / custom
+   │    stream ► tag parser ► sentence chunker ► [say | gesture | form | skill | clone | end]
+   ├─ Whisper STT + Kokoro TTS (worker threads, local)    ├─ skills (notes, weather, music, apps…)
+   ├─ presence (chit-chat), watch mode, reminders, memory ├─ helper clones + speech floor
+   ├─ settings window, updater (source: GitHub main; installer: Releases)
+   └─ notify server 127.0.0.1:47321
+                     │ IPC
+ overlay window (transparent, always on top, click-through except over the orb; moves, never resizes while idle)
+   ├─ orb-smoke.js  WebGL2 transform-feedback particles: flow on a sphere, filaments, smoke hands with
+   │                moving fingers, shapes from a 64×32 target texture, trails, bloom
+   ├─ motion.js / gestures.js / shapes.js / interactions.js
+   ├─ voice.js      Kokoro audio ► robot chain ► analyser ► resonance; synthesized giggles/hums
+   └─ listen.js / wake.js   mic + energy VAD ► 16 kHz PCM
 ```
 
-The model controls the body with silent tags: `[[point X,Y]]` (screenshot pixels) and `[[explain]]`.
-
-The smoke orb uses simplex noise with analytic gradients by Ian McEwan and Stefan Gustavson
-(ashima/webgl-noise, MIT). The liquid style uses signed-distance-field techniques from
-Inigo Quilez's articles (smooth minimum, exact round cone).
+The smoke uses simplex noise with analytic gradients by Ian McEwan and Stefan Gustavson (ashima/webgl-noise,
+MIT). The liquid style uses signed-distance-field techniques from Inigo Quilez's articles.
 
 ## Develop
 
@@ -229,7 +172,15 @@ npm test
 npm run check
 ```
 
-Open `src/renderer/overlay/index.html` in Chrome to play with the orb without Electron
-(keys: P point at cursor, E explain, T talk, L listen, K think, N notification colours, drag it).
-Append `?pose=point` / `explain` / `speaking` / `attention&level=urgent` / `move` for fixed poses,
-`&r=120` for size, `&bg=light` for a light wallpaper, `&style=liquid` for the old look.
+```bash
+npm run dist
+```
+
+`npm run dist` builds the Windows installer (run it on Windows; GitHub Actions builds and publishes it when
+the version changes on `main`). To sign it, add `WINDOWS_CSC_LINK` (base64 .pfx) and `WINDOWS_CSC_KEY_PASSWORD`
+secrets to the repository.
+
+Open `src/renderer/overlay/index.html` in Chrome to play with the orb without Electron. Keys: P point, E explain,
+T talk, L listen, K think, N notification colours, G next gesture, F next shape, 1–7 moods. Fixed poses for
+screenshots: `?pose=point|explain|speaking|attention|move|gesture&g=wave|form&shape=laugh`, plus `&r=120` for
+size and `&bg=light` for a light wallpaper.
