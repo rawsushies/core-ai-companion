@@ -1421,6 +1421,7 @@ function pushGlance() {
   const t = glance.track;
   const out = { kind: glance.what, waiting: !t };
   if (t) Object.assign(out, { title: t.title, artist: t.artist, posMs: t.posMs, durMs: t.durMs, playing: t.playing, at: t.at });
+  if (glance.art && !glance.artSent) { out.art = glance.art; glance.artSent = true; }
   if (glance.what === 'lyrics') {
     const L = glance.lyrics;
     out.note = glance.note || (!L ? 'Finding the lyrics…' : L.instrumental ? 'Instrumental' : !L.synced && !L.plain ? 'No lyrics found for this song.' : '');
@@ -1431,6 +1432,22 @@ function pushGlance() {
     }
   }
   toOverlay('glance', out);
+}
+
+// Album art once per track: from the media session (Windows) or the player's
+// art URL (Linux). Sent to the overlay once, as a small data: URL.
+function loadArt(track) {
+  const key = glance.key;
+  glance.art = null;
+  glance.artSent = false;
+  const done = (url) => {
+    if (!glance || glance.key !== key || !url) return;
+    glance.art = url;
+    glance.artSent = false;
+    pushGlance();
+  };
+  if (track.artData) done(track.artData);
+  else if (track.artUrl) GL.artFromUrl(track.artUrl, (u, o) => require('electron').net.fetch(u, o)).then(done, () => {});
 }
 
 function loadLyrics(track) {
@@ -1464,6 +1481,7 @@ function onGlanceMedia(m) {
   else if (!glanceIdleSince) glanceIdleSince = Date.now();
   else if (Date.now() - glanceIdleSince > 60000) { hideGlance(); return; }
   if (changed && glance.what === 'lyrics') loadLyrics(m);
+  if (changed) loadArt(m);
   pushGlance();
 }
 
@@ -1473,7 +1491,7 @@ function showGlance(req) {
   if (req.what === 'card') { glanceCard(req.card.title, req.card.lines); return; }
   if (req.what === 'timer') { glanceCountdown(req.at, req.text); return; }
   const prev = glance && glance.what !== 'card' ? glance : null;
-  glance = { what: req.what, track: prev ? prev.track : null, key: prev ? prev.key : null, lyrics: null, linesSent: false, note: '' };
+  glance = { what: req.what, track: prev ? prev.track : null, key: prev ? prev.key : null, lyrics: null, linesSent: false, note: '', art: prev ? prev.art : null, artSent: false };
   if (glance.track && req.what === 'lyrics') loadLyrics(glance.track);
   if (!glanceReader) {
     const reader = new GL.MediaReader();

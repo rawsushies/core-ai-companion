@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Album art on the song card
+- The now-playing and lyrics card shows the album cover: from the Windows media session's thumbnail (read once per
+  track), or from the player's art link on Linux (local file, or https fetched only while the card is open, at most
+  600 KB, images only).
+- The Linux media reading is now tested end to end with a stand-in player.
+
 ### Phone media remote
 - The phone companion has previous / play-pause / next / volume buttons that press the PC's media keys (fixed keys
   only, like the music skill; respects the music switch).

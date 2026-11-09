@@ -97,6 +97,35 @@ async function fetchLyrics({ title, artist, album, durMs }, fetchImpl) {
   return r;
 }
 
+// ------------------------------------------------------------------ album art
+
+// A small data: URL for the card from a file:// or https:// art URL (Linux MPRIS).
+// Images only, at most 600 KB.
+async function artFromUrl(url, fetchImpl, readFile = require('fs').promises.readFile) {
+  const u = String(url || '');
+  const typeOf = (name, ct) => {
+    const m = /^image\/(png|jpeg|webp|gif)/i.exec(ct || '') || /\.(png|jpe?g|webp|gif)$/i.exec(name);
+    if (!m) return null;
+    return `image/${m[1].toLowerCase().replace('jpg', 'jpeg')}`;
+  };
+  if (/^file:\/\//i.test(u)) {
+    const p = require('url').fileURLToPath(u);
+    const type = typeOf(p);
+    if (!type) return null;
+    const buf = await readFile(p);
+    return buf.length && buf.length <= 600000 ? `data:${type};base64,${buf.toString('base64')}` : null;
+  }
+  if (/^https:\/\//i.test(u) && fetchImpl) {
+    const res = await fetchImpl(u, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const type = typeOf(new URL(u).pathname, res.headers.get('content-type')) || (res.headers.get('content-type') || '').startsWith('image/') && 'image/jpeg';
+    if (!type) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length && buf.length <= 600000 ? `data:${type};base64,${buf.toString('base64')}` : null;
+  }
+  return null;
+}
+
 // ------------------------------------------------------------------ cards
 
 // [[do glance Title; line; line]] (or | between parts) -> { title, lines } (plain text only).
@@ -145,6 +174,7 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation${'`'}1' })[0]
 function Await($op, $type) { $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op)); $null = $t.Wait(5000); $t.Result }
 $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+$lastKey = ''
 $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 while ($true) {
   $o = @{ none = $true }
@@ -153,6 +183,23 @@ while ($true) {
     $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
     $tl = $s.GetTimelineProperties(); $pi = $s.GetPlaybackInfo()
     $o = @{ title = $p.Title; artist = $p.Artist; album = $p.AlbumTitle; pos = [int64]$tl.Position.TotalMilliseconds; dur = [int64]$tl.EndTime.TotalMilliseconds; upd = $tl.LastUpdatedTime.ToUnixTimeMilliseconds(); playing = ([int]$pi.PlaybackStatus -eq 4); app = $s.SourceAppUserModelId }
+    # Album art: read once per track (the thumbnail stream), at most 600 KB.
+    $key = "$($p.Title)|$($p.Artist)"
+    if ($p.Thumbnail -and $key -ne $lastKey) {
+      $lastKey = $key
+      try {
+        $st = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+        $size = [uint32]$st.Size
+        if ($size -gt 0 -and $size -lt 600000) {
+          $rd = New-Object Windows.Storage.Streams.DataReader($st.GetInputStreamAt(0))
+          $null = Await ($rd.LoadAsync($size)) ([uint32])
+          $bytes = New-Object byte[] $size
+          $rd.ReadBytes($bytes)
+          $o.art = [Convert]::ToBase64String($bytes)
+          $o.artType = $st.ContentType
+        }
+      } catch {}
+    }
   }
   [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress)); [Console]::Out.Flush()
   Start-Sleep -Milliseconds 1000
@@ -169,7 +216,13 @@ function normalise(raw, now = Date.now()) {
   if (playing && upd > 0 && now > upd && now - upd < 6 * 3600e3) pos += now - upd;
   const dur = Math.max(0, Number(raw.dur) || 0);
   if (dur) pos = Math.min(pos, dur);
-  return { title: String(raw.title).slice(0, 200), artist: String(raw.artist || '').slice(0, 200), album: String(raw.album || '').slice(0, 200), posMs: Math.round(pos), durMs: Math.round(dur), playing, at: now };
+  const out = { title: String(raw.title).slice(0, 200), artist: String(raw.artist || '').slice(0, 200), album: String(raw.album || '').slice(0, 200), posMs: Math.round(pos), durMs: Math.round(dur), playing, at: now };
+  if (typeof raw.art === 'string' && raw.art.length < 820000 && /^[A-Za-z0-9+/=]+$/.test(raw.art)) {
+    const type = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(raw.artType || '') ? raw.artType.toLowerCase() : 'image/jpeg';
+    out.artData = `data:${type};base64,${raw.art}`;
+  }
+  if (typeof raw.artUrl === 'string' && /^(file|https):\/\//i.test(raw.artUrl) && raw.artUrl.length < 2000) out.artUrl = raw.artUrl;
+  return out;
 }
 
 class MediaReader extends EventEmitter {
@@ -204,10 +257,10 @@ class MediaReader extends EventEmitter {
       this.proc.on('error', () => { this.proc = null; this._emit(null); });
     } else {
       // Linux: playerctl (MPRIS), polled while a card is open.
-      const poll = () => execFile('playerctl', ['metadata', '--format', '{{status}}\t{{position}}\t{{mpris:length}}\t{{artist}}\t{{album}}\t{{title}}'], { timeout: 1500 }, (err, out) => {
+      const poll = () => execFile('playerctl', ['metadata', '--format', '{{status}}\t{{position}}\t{{mpris:length}}\t{{mpris:artUrl}}\t{{artist}}\t{{album}}\t{{title}}'], { timeout: 1500 }, (err, out) => {
         if (err) return this._emit(null);
-        const [status, pos, len, artist, album, ...title] = String(out).trim().split('\t');
-        this._emit(normalise({ title: title.join('\t'), artist, album, pos: Number(pos) / 1000, dur: Number(len) / 1000, playing: status === 'Playing' }));
+        const [status, pos, len, artUrl, artist, album, ...title] = String(out).replace(/\r?\n$/, '').split('\t');
+        this._emit(normalise({ title: title.join('\t'), artist, album, artUrl, pos: Number(pos) / 1000, dur: Number(len) / 1000, playing: status === 'Playing' }));
       });
       poll();
       this.timer = setInterval(poll, 1500);
@@ -225,4 +278,4 @@ class MediaReader extends EventEmitter {
   }
 }
 
-module.exports = { parseLrc, lineIndex, cleanTitle, cleanArtist, fetchLyrics, parseCard, quickIntent, normalise, MediaReader, WIN_SCRIPT };
+module.exports = { artFromUrl, parseLrc, lineIndex, cleanTitle, cleanArtist, fetchLyrics, parseCard, quickIntent, normalise, MediaReader, WIN_SCRIPT };

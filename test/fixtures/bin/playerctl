@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+// Stand-in for playerctl (Linux media sessions) in end-to-end tests.
+// FAKE_PLAYER: JSON { status, posUs, lenUs, artUrl, artist, album, title }
+const p = JSON.parse(process.env.FAKE_PLAYER || '{}');
+const args = process.argv.slice(2);
+if (args[0] !== 'metadata') process.exit(0);
+if (!p.title) { process.stderr.write('No players found\n'); process.exit(1); }
+process.stdout.write([p.status || 'Playing', p.posUs || 0, p.lenUs || 0, p.artUrl || '', p.artist || '', p.album || '', p.title].join('\t') + '\n');

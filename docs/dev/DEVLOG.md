@@ -34,3 +34,4 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-022 (loop 1):** P0 phone keys scrubbed from backups and kept on restore; P1 phone clock-skew retry loop fixed (server reports clock vs replay and its time; phone retries once); P2 whole chat panel takes the mouse; new real-app e2e suite (10 tests, about 19 s) added to CI.
 - **M-023 (loop 2):** live cards: timer countdown (and on completion), weather card, calendar card; 'how long left' quick intent; unit + real-app tests.
 - **M-024 (loop 3):** phone media remote (fixed keys, allowlisted op), lyrics card no longer a chatty live region.
+- **M-025 (loop 4):** album art (Windows thumbnail stream, Linux MPRIS artUrl via file/https, capped, data: URL; overlay CSP allows data: images only); fake playerctl fixture; real-app test of the song card; last e2e test made robust to chat trimming. Windows art reading untested on real Windows.

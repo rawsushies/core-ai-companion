@@ -49,7 +49,6 @@ Every number below was measured in this environment (Linux, Xvfb, software rende
   relay (design in `RESEARCH-PHASE5-6.md`).
 - **Native Android app.** It would remove the plain-HTTP page limit. The web app proves pairing and revocation first.
 - **Windows UI Automation and Revit.** Research only. Archicad is a read-only proof of concept against a mock.
-- **Album art in the glance card.** Media sessions provide a thumbnail; showing it needs a safe image path.
 - **Cloud backup without a sync app** (direct Google Drive or OneDrive API). Deliberately not built: OAuth and
   tokens add risk, and a synced folder already works.
 

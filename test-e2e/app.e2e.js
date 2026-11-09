@@ -31,6 +31,9 @@ test.before(async () => {
   userData = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-ud-'));
   project = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-proj-'));
   fs.writeFileSync(path.join(project, 'readme.txt'), 'old readme\n');
+  const cover = path.join(userData, 'cover.png');
+  fs.writeFileSync(cover, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
+  const player = JSON.stringify({ status: 'Playing', posUs: 64000000, lenUs: 201000000, artUrl: require('url').pathToFileURL(cover).href, artist: 'The Smoke Choir', album: 'Signals', title: 'Midnight Signal' });
   const script = path.join(userData, 'fake-script.json');
   fs.writeFileSync(script, JSON.stringify([
     { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
@@ -45,12 +48,14 @@ test.before(async () => {
     update: { enabled: false },
     phone: { host: '127.0.0.1', port: 0 },
     tools: { projectRoot: project, enabled: true, allowWrites: true },
+    skills: { lyrics: false }, // no network in tests
   }));
   fs.writeFileSync(path.join(userData, 'state.json'), JSON.stringify({ onboarded: true }));
   app = await electron.launch({
     args: ['--no-sandbox', ROOT, `--user-data-dir=${userData}`],
     cwd: ROOT,
-    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script },
+    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_PLAYER: player,
+      PATH: `${path.join(ROOT, 'test', 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}` },
     timeout: 60000,
   });
   const find = async (part) => {
@@ -109,6 +114,15 @@ test('the glance card opens and closes beside the orb', async () => {
   await send('show me the lyrics');
   await overlay.waitForFunction(() => window.__coreGlance && window.__coreGlance() && !window.__coreGlance().hidden, null, { timeout: 5000 });
   assert.strictEqual((await overlay.evaluate(() => window.__coreGlance())).kind, 'lyrics');
+  await send('hide that');
+  await overlay.waitForFunction(() => window.__coreGlance() === null, null, { timeout: 5000 });
+});
+
+test('what is playing: the card shows the song, artist and album art (Linux media session)', { skip: process.platform !== 'linux' }, async () => {
+  await send("what's playing");
+  await overlay.waitForFunction(() => { const g = window.__coreGlance(); return g && g.title === 'Midnight Signal'; }, null, { timeout: 8000 });
+  await overlay.waitForFunction(() => { const a = document.querySelector('.g-art'); return a && !a.hidden && a.src.startsWith('data:image/png'); }, null, { timeout: 5000 });
+  assert.strictEqual(await overlay.textContent('.g-sub'), 'The Smoke Choir');
   await send('hide that');
   await overlay.waitForFunction(() => window.__coreGlance() === null, null, { timeout: 5000 });
 });
@@ -257,7 +271,11 @@ test('no renderer errors were thrown', () => {
 });
 
 test('chat still works after everything above', async () => {
-  const before = (await logText()).length;
-  await send('one more');
-  await dock.waitForFunction((n) => document.getElementById('log').innerText.length > n, before, { timeout: 15000 });
+  await send('one more message please');
+  // The chat trims old messages when it's full, so look for the new ones, not a longer log.
+  await dock.waitForFunction(() => {
+    const items = [...document.querySelectorAll('#log .msg')];
+    const i = items.findIndex((m) => m.innerText.includes('one more message please'));
+    return i >= 0 && items.slice(i + 1).some((m) => m.classList.contains('core') && /Smoke says hi/.test(m.innerText));
+  }, null, { timeout: 15000 });
 });

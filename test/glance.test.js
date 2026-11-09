@@ -119,3 +119,25 @@ test('asking how long is left is a quick intent', () => {
   assert.deepStrictEqual(GL.quickIntent('how long left?'), { kind: 'timers' });
   assert.deepStrictEqual(GL.quickIntent('show my timers'), { kind: 'timers' });
 });
+
+test('album art: local files and https become small data URLs, anything else is refused', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { pathToFileURL } = require('url');
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'core-art-')), 'cover.png');
+  fs.writeFileSync(f, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  assert.match(await GL.artFromUrl(pathToFileURL(f).href), /^data:image\/png;base64,iVBORw==/);
+  const big = path.join(path.dirname(f), 'big.jpg');
+  fs.writeFileSync(big, Buffer.alloc(700000));
+  assert.strictEqual(await GL.artFromUrl(pathToFileURL(big).href), null);
+  const txt = path.join(path.dirname(f), 'notes.txt');
+  fs.writeFileSync(txt, 'x');
+  assert.strictEqual(await GL.artFromUrl(pathToFileURL(txt).href), null);
+  const fake = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
+  assert.match(await GL.artFromUrl('https://i.scdn.co/image/abc', fake), /^data:image\/jpeg;base64,AQID$/);
+  assert.strictEqual(await GL.artFromUrl('http://insecure/x.png', fake), null);
+  const n = GL.normalise({ title: 'T', art: 'iVBORw==', artType: 'image/png' });
+  assert.strictEqual(n.artData, 'data:image/png;base64,iVBORw==');
+  assert.strictEqual(GL.normalise({ title: 'T', art: 'not base64!' }).artData, undefined);
+});

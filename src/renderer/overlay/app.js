@@ -192,7 +192,7 @@
   // updates when the line or the second changes, never per frame.
   const glanceEl = document.getElementById('glance');
   const gq = (c) => glanceEl.querySelector(c);
-  const GE = { kicker: gq('.g-kicker'), title: gq('.g-title'), sub: gq('.g-sub'), lyrics: gq('.g-lyrics'), prev: gq('.g-prev'), cur: gq('.g-cur'), next: gq('.g-next'), list: gq('.g-list'), bar: gq('.g-bar'), fill: gq('.g-bar i') };
+  const GE = { art: gq('.g-art'), kicker: gq('.g-kicker'), title: gq('.g-title'), sub: gq('.g-sub'), lyrics: gq('.g-lyrics'), prev: gq('.g-prev'), cur: gq('.g-cur'), next: gq('.g-next'), list: gq('.g-list'), bar: gq('.g-bar'), fill: gq('.g-bar i') };
   let glance = null;
   let glanceLines = null;
   let glancePlain = null;
@@ -241,7 +241,9 @@
       return;
     }
     const sameTrack = glance && glance.kind === g.kind && glance.title === g.title && glance.artist === g.artist;
-    if (!sameTrack) { glanceLines = null; glancePlain = null; glanceIdx = -2; }
+    if (!sameTrack) { glanceLines = null; glancePlain = null; glanceIdx = -2; GE.art.hidden = true; GE.art.removeAttribute('src'); }
+    if (typeof g.art === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,/.test(g.art)) { GE.art.src = g.art; GE.art.hidden = false; }
+    if (g.kind === 'card' || g.kind === 'timer') GE.art.hidden = true;
     if (g.lines !== undefined) { glanceLines = g.lines; glanceIdx = -2; }
     if (g.plain !== undefined) glancePlain = g.plain;
     glance = g;
