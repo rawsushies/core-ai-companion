@@ -32,8 +32,19 @@ function reply(text) {
   out({ type: 'system', subtype: 'init', session_id: sid, model: 'fake' });
   // FAKE_CLAUDE_REPLY: fixed reply for UI tests; {core} becomes the specialist's name.
   const core = (/\[core ([^\]]+)\]/.exec(text) || [])[1] || 'COre';
-  const r = process.env.FAKE_CLAUDE_REPLY ? process.env.FAKE_CLAUDE_REPLY.replace(/\{core\}/g, core).replace(/\\n/g, '\n') : `You said: ${text.trim()}. [[explain]] Done.`;
-  const pieces = r.match(/.{1,7}/g);
+  // FAKE_CLAUDE_SCRIPT: a JSON file of [{ match: regex, reply }]; the first rule
+  // whose regex matches the prompt wins, otherwise FAKE_CLAUDE_REPLY.
+  let scripted = null;
+  if (process.env.FAKE_CLAUDE_SCRIPT) {
+    try {
+      for (const rule of JSON.parse(fs.readFileSync(process.env.FAKE_CLAUDE_SCRIPT, 'utf8'))) {
+        if (new RegExp(rule.match, 'i').test(text)) { scripted = rule.reply; break; }
+      }
+    } catch {}
+  }
+  const base = scripted || process.env.FAKE_CLAUDE_REPLY;
+  const r = base ? base.replace(/\{core\}/g, core).replace(/\\n/g, '\n') : `You said: ${text.trim()}. [[explain]] Done.`;
+  const pieces = r.match(/[\s\S]{1,7}/g) || [''];
   const delay = Number(process.env.FAKE_CLAUDE_DELAY || 0);
   let i = 0;
   const next = () => {

@@ -22,12 +22,21 @@ let dock;
 let overlay;
 let home;
 let userData;
+let project;
 const errors = [];
 
 test.before(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-home-'));
   fs.mkdirSync(path.join(home, 'Dropbox'));
   userData = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-ud-'));
+  project = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-proj-'));
+  fs.writeFileSync(path.join(project, 'readme.txt'), 'old readme\n');
+  const script = path.join(userData, 'fake-script.json');
+  fs.writeFileSync(script, JSON.stringify([
+    { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
+    { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
+    { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
+  ]));
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
     orb: { graphics: 'software' },
     brain: { claude: { command: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js') }, fallbacks: [] },
@@ -35,12 +44,13 @@ test.before(async () => {
     presence: { chitchat: false },
     update: { enabled: false },
     phone: { host: '127.0.0.1', port: 0 },
+    tools: { projectRoot: project, enabled: true, allowWrites: true },
   }));
   fs.writeFileSync(path.join(userData, 'state.json'), JSON.stringify({ onboarded: true }));
   app = await electron.launch({
     args: ['--no-sandbox', ROOT, `--user-data-dir=${userData}`],
     cwd: ROOT,
-    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1' },
+    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script },
     timeout: 60000,
   });
   const find = async (part) => {
@@ -71,6 +81,12 @@ async function send(text) {
   await dock.evaluate(() => { const i = document.getElementById('input'); i.focus(); });
   await dock.fill('#input', text);
   await dock.press('#input', 'Enter');
+}
+
+// Quick settings open / closed, whatever state an earlier test left them in.
+async function quickSettings(open) {
+  const isOpen = await dock.evaluate(() => !document.getElementById('settings').hidden);
+  if (isOpen !== open) await dock.click(open ? '#gear' : '#settings-back');
 }
 
 const logText = () => dock.evaluate(() => document.getElementById('log').innerText);
@@ -123,7 +139,7 @@ test('notes in the chat are plain text, not bubbles', async () => {
 
 let settings;
 test('every Settings section renders without errors', async () => {
-  await dock.click('#gear');
+  await quickSettings(true);
   await dock.click('#all-settings');
   for (let i = 0; i < 80 && !settings; i++) { settings = app.windows().find((p) => p.url().includes('/settings/')); if (!settings) await wait(250); }
   assert.ok(settings, 'settings window opened');
@@ -179,6 +195,57 @@ test('a phone pairs, chats and is locked out after removal', async () => {
   assert.strictEqual(list.devices[0].name, 'E2E phone');
   await settings.evaluate((id) => window.settingsApi.action(`revokePhone:${id}`), deviceId);
   assert.strictEqual((await api('sync', { since: 0 })).status, 401);
+});
+
+test('memory: a remembered fact shows in quick settings and can be forgotten', async () => {
+  await send('please remember my tea preference');
+  await dock.waitForFunction(() => /Remembered: the user likes green tea/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  await quickSettings(true);
+  await dock.waitForFunction(() => document.getElementById('memory-list').innerText.includes('green tea'), null, { timeout: 5000 });
+  await dock.click('#memory-list button[aria-label^="Forget:"]');
+  await dock.waitForFunction(() => !document.getElementById('memory-list').innerText.includes('green tea'), null, { timeout: 5000 });
+  await quickSettings(false);
+});
+
+test('timers: a skill tag sets a reminder that shows in quick settings', async () => {
+  await send('set a tea timer please');
+  await dock.waitForFunction(() => /Timer set: tea/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  await quickSettings(true);
+  await dock.waitForFunction(() => document.getElementById('reminder-list').innerText.includes('tea'), null, { timeout: 5000 });
+  assert.ok(await dock.isVisible('#reminder-list'), 'the reminders card is shown when there is one');
+  await quickSettings(false);
+});
+
+test('Meiosis: @Scout splits off and answers with its own name', async () => {
+  await send('@Scout compare two databases');
+  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-scout .who-name')].some((n) => n.textContent === 'Scout'), null, { timeout: 20000 });
+  const reply = await dock.evaluate(() => [...document.querySelectorAll('.row.by-scout .msg')].map((m) => m.innerText).join(' '));
+  assert.match(reply, /Smoke says hi/);
+  let clone = null;
+  for (let i = 0; i < 40 && !clone; i++) { clone = app.windows().find((p) => /clone/.test(p.url()) || /clone=/.test(p.url())); if (!clone) await wait(250); }
+  assert.ok(clone || app.windows().length >= 4, 'a helper window exists');
+});
+
+test('approved file changes: Forge proposes, nothing is written until Apply, Undo restores', async () => {
+  await send('@Forge rewrite the readme');
+  await dock.waitForSelector('.msg.proposal', { timeout: 20000 });
+  assert.strictEqual(fs.readFileSync(path.join(project, 'readme.txt'), 'utf8'), 'old readme\n', 'not written before Apply');
+  await dock.click('.msg.proposal button:has-text("Apply")');
+  await dock.waitForFunction(() => /Applied/.test(document.querySelector('.msg.proposal').innerText), null, { timeout: 5000 });
+  assert.match(fs.readFileSync(path.join(project, 'readme.txt'), 'utf8'), /new readme from forge/);
+  await dock.click('.msg.proposal button:has-text("Undo")');
+  await dock.waitForFunction(() => /Undone|undone/.test(document.querySelector('.msg.proposal').innerText), null, { timeout: 5000 });
+  assert.strictEqual(fs.readFileSync(path.join(project, 'readme.txt'), 'utf8'), 'old readme\n');
+});
+
+test('the History panel shows the conversation', async () => {
+  await quickSettings(true);
+  await dock.click('#open-panel');
+  let panel = null;
+  for (let i = 0; i < 40 && !panel; i++) { panel = app.windows().find((p) => p.url().includes('/panel/')); if (!panel) await wait(250); }
+  assert.ok(panel, 'history panel opened');
+  await panel.waitForFunction(() => document.getElementById('log').innerText.includes('which local database'), null, { timeout: 5000 });
+  await quickSettings(false);
 });
 
 test('no renderer errors were thrown', () => {
