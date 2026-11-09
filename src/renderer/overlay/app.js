@@ -555,6 +555,7 @@
   function react(kind) {
     const now = performance.now();
     reactions.push(kind);
+    if (reactions.length > 50) reactions.shift();
     const quietVoice = voice.speaking || voice.busy;
     if (kind === 'pet') {
       mood = { name: 'happy', since: now };

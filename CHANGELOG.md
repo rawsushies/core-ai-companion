@@ -1,5 +1,20 @@
 # Changelog
 
+## 10.3.0 — New look, fewer loose ends
+- New brand: a logo made of smoke filaments, new app and tray icons, a wordmark where the orb is the "O",
+  README banner, social preview, promo images for every major format, and a brand guide (docs/BRAND.md).
+- Fixed: hiding COre left its helper clones floating on screen; helpers now hide and reappear with it, and a
+  helper made while COre is hidden stays hidden too.
+- Fixed: "Hey COre" or the talk hotkey while COre was hidden listened with no visible orb; COre now
+  reassembles first.
+- Fixed: quitting or restarting (including after an update) while helpers were working left their Claude
+  processes running in the background.
+- Fixed: unplugging the monitor COre lived on (or dropping the resolution) could leave it off-screen; it now
+  comes back to a visible spot.
+- Fixed: Reset kept your saved notes. It now forgets them along with memory and history.
+- The tray tooltip now tells you when hands-free is listening for "Hey COre".
+- Two small lists no longer grow forever in sessions that run for weeks.
+
 ## 10.2.0 — A voice with feelings
 - Emotion-driven voice: when COre's mood changes, its voice follows. It speaks a little faster and brighter
   when excited or happy, slower and lower when sad, softer when calm. The chat text stays in step.

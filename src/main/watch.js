@@ -43,6 +43,7 @@ class ScreenWatch {
       if (this.offered.has(t) && now - this.offered.get(t) < 10 * 60_000) continue; // same thing: once per 10 min
       if (now - this.lastOffer < 60_000 || !this.isQuiet()) continue; // at most one offer a minute
       this.offered.set(t, now);
+      if (this.offered.size > 200) this.offered.delete(this.offered.keys().next().value); // runs for weeks
       this.lastOffer = now;
       this.onProblem(t);
       return t;

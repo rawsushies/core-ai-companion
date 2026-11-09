@@ -689,7 +689,7 @@ function applyLive(key, value) {
   if (key.startsWith('a11y.')) { toOverlay('config', overlayConfig()); toDock('dock:settings', dockSettings()); }
   if (key.startsWith('hotkeys.')) registerHotkeys();
   if (key.startsWith('voice.') || key.startsWith('orb.')) toOverlay('config', overlayConfig());
-  if (key === 'voice.wakeWord') { if (value) stt.warm(); if (tray) createTrayMenu(); }
+  if (key === 'voice.wakeWord') { if (value) stt.warm(); if (tray) { createTrayMenu(); trayTooltip(); } }
   if (key === 'voice.kokoroVoice' || key === 'voice.engine') { if (config.data.voice.engine === 'kokoro') tts.warm(); }
   if (key.startsWith('brain.')) {
     try {
@@ -750,7 +750,7 @@ async function settingsAction(name) {
       config.save = () => {}; // nothing may write the old settings back
       state.flush = () => {};
       state.set = () => {};
-      removeUserData(['config.json', 'state.json', 'memory.json', 'claude-workspace']);
+      removeUserData(['config.json', 'state.json', 'memory.json', 'notes.json', 'claude-workspace']);
       setTimeout(restartApp, 300);
       return { message: 'Reset. Restarting fresh…' };
     case 'uninstall': {
@@ -830,7 +830,7 @@ function togglePanel(force) {
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(ROOT, 'assets', 'tray.png'));
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
-  tray.setToolTip('COre');
+  trayTooltip();
   createTrayMenu();
   // Clicking the tray icon brings COre back if hidden, otherwise opens the chat.
   tray.on('click', () => { if (orbHidden) toggleOrb(); else setDockVisible(true, true); });
@@ -883,17 +883,19 @@ function toggleOrb() {
     toOverlay('dissolve');
     setTimeout(() => { if (orbHidden && overlay && !overlay.isDestroyed()) overlay.hide(); }, 650);
     if (dock && dock.isVisible()) dock.hide();
+    for (const c of clones.values()) if (c.win && !c.win.isDestroyed()) c.win.hide(); // helpers hide too
     const key = prettyKey(config.data.hotkeys.hide);
     // Make it obvious COre was hidden on purpose, and how to get it back.
     if (Notification.isSupported()) {
       new Notification({ title: 'COre is hidden', body: `Press ${key} (or use the tray icon) to bring COre back.`, silent: true }).show();
     }
-    if (tray) tray.setToolTip(`COre (hidden — ${key} to show)`);
+    trayTooltip();
   } else {
     overlay.showInactive();
     toOverlay('assemble');
+    for (const c of clones.values()) if (c.win && !c.win.isDestroyed()) { c.win.showInactive(); toClone(c, 'assemble'); }
     if (dockVisible && dock) { positionDock(); dock.showInactive(); }
-    if (tray) tray.setToolTip('COre');
+    trayTooltip();
   }
 }
 
@@ -1323,7 +1325,7 @@ function spawnClone(task) {
   c.win.setIgnoreMouseEvents(true, { forward: true });
   c.win.loadFile(path.join(RENDERER, 'overlay', 'index.html'), { query: { clone: id } });
   c.win.once('ready-to-show', () => {
-    c.win.showInactive();
+    if (!orbHidden) c.win.showInactive(); // shown with COre later if it's hidden now
     // Meiosis: COre stretches and pushes apart while the helper condenses
     // out of its smoke and drifts to its own spot.
     toOverlay('speak:item', { type: 'gesture', name: 'gesture', gesture: 'split' });
@@ -1395,6 +1397,14 @@ function mergeClone(id) {
     toOverlay('speak:item', { type: 'gesture', name: 'gesture', gesture: 'merge' });
     setTimeout(() => { if (c.win && !c.win.isDestroyed()) c.win.destroy(); }, 600);
   });
+}
+
+// Helpers still working: stop their brain processes, or they'd outlive COre.
+function stopHelpers() {
+  for (const c of clones.values()) {
+    try { c.ac.abort(); } catch {}
+    if (c.brain) for (const p of c.brain.chain) if (p.dispose) p.dispose();
+  }
 }
 
 function mergeAllClones() {
@@ -1648,6 +1658,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
 // mode (gives up quietly after a few seconds), { wake } woken by "Hey COre".
 function startListening(withScreen, extra = {}) {
   if (presence) presence.noteInteraction();
+  if (orbHidden) toggleOrb(); // you can't talk to smoke you can't see
   if (listening) {
     toOverlay('listen:stop'); // second press: stop and send what we have
     return;
@@ -1661,6 +1672,12 @@ function startListening(withScreen, extra = {}) {
   toOverlay('listen:start', { withScreen, ...extra, hold });
 }
 
+function trayTooltip() {
+  if (!tray) return;
+  const hk = prettyKey(config.data.hotkeys.hide);
+  tray.setToolTip(orbHidden ? `COre (hidden — ${hk} to show)` : config.data.voice.wakeWord ? 'COre · listening for "Hey COre"' : 'COre');
+}
+
 function setHandsFree(on) {
   config.data.voice.wakeWord = !!on;
   config.save();
@@ -1669,7 +1686,7 @@ function setHandsFree(on) {
   addTranscript('system', on
     ? 'Hands-free is on: say "Hey COre" any time. It is detected on this PC; nothing is sent anywhere until you talk to me.'
     : 'Hands-free is off. The microphone only opens when you press the talk key.');
-  if (tray) createTrayMenu();
+  if (tray) { createTrayMenu(); trayTooltip(); }
 }
 
 let sttNoticeShown = false;
@@ -1981,6 +1998,7 @@ async function restartApp() {
   app.isQuitting = true;
   try {
     if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
+    stopHelpers();
     await Promise.race([
       Promise.all([stt && stt.dispose(), tts && tts.dispose()]),
       new Promise((r) => setTimeout(r, 4000)),
@@ -2144,6 +2162,16 @@ app.whenReady().then(async () => {
     if (!overlay || overlay.isDestroyed()) return;
     applyStage(stage || initialStage());
     toOverlay('config', overlayConfig());
+    // The orb's spot may now be off-screen (monitor unplugged, resolution
+    // dropped): bring it back to a visible home.
+    const v = viewSize();
+    if (orbBounds.x < 0 || orbBounds.y < 0 || orbBounds.x > v.w || orbBounds.y > v.h) {
+      const h = homeNow();
+      applyStage(initialStage());
+      toOverlay('relocate', h);
+      orbBounds = { ...orbBounds, x: h.x, y: h.y };
+      dockAnchor = { x: h.x, y: h.y, r: orbBounds.r };
+    }
     if (dockVisible) positionDock();
   };
   for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(ev, refit);
@@ -2197,6 +2225,7 @@ app.on('will-quit', () => {
   if (updater) updater.stop();
   if (reminders) reminders.stop();
   if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
+  stopHelpers();
   if (state) state.flush();
 });
 
