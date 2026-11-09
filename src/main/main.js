@@ -126,7 +126,8 @@ let floor = null;
 let lastReaction = 0;
 let notes = null;
 let plugins = [];
-let turnSkills = null; // skill lookups started during the current turn
+let turnSkills = null;
+let turnVia = 'chat'; // where the current turn came from (memory provenance) // skill lookups started during the current turn
 let followUpPending = false; // conversation mode: listen again when this spoken reply ends
 const actions = new Map(); // one-click actions offered in the chat: id -> { kind, value }
 // Spoken questions: the chat reveals each sentence as it is spoken, then the
@@ -1064,8 +1065,9 @@ function handleActionTag(item) {
   if (item.name === 'clone') { spawnClone(item.task); return true; }
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
-    const r = memory.remember(item.text);
+    const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
     if (r && r.created) toDock('dock:message', { role: 'system', text: `🧠 Remembered: ${r.item.text}` });
+    else if (r && r.replaced) toDock('dock:message', { role: 'system', text: `🧠 Updated: ${r.item.text} (was: ${r.replaced})` });
     toDock('dock:memory', memory.list());
     return true;
   }
@@ -1569,6 +1571,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   }
   const mySkills = [];
   turnSkills = mySkills;
+  turnVia = internal ? 'COre' : typed ? 'chat' : 'voice';
   if (typed || internal) followUpPending = false;
   if (!internal) {
     if (/^\/clone\s+\S/i.test(text)) { spawnClone(text.replace(/^\/clone\s+/i, '')); return; }
@@ -1864,6 +1867,7 @@ function wireIpc() {
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
+  ipcMain.on('dock:memoryEdit', (e, { id, text } = {}) => { if (fromDock(e) && memory) { memory.edit(String(id), String(text || '')); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { memory.forget(String(id)); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
   ipcMain.handle('dock:reminders', (e) => (fromDock(e) && reminders ? reminders.items : []));

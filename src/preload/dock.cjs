@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('dock', {
   onBrain: on('dock:brain'),
   memory: () => ipcRenderer.invoke('dock:memory'),
   memoryForget: (id) => ipcRenderer.send('dock:memoryForget', id),
+  memoryEdit: (id, text) => ipcRenderer.send('dock:memoryEdit', { id, text }),
   memoryClear: () => ipcRenderer.send('dock:memoryClear'),
   reminders: () => ipcRenderer.invoke('dock:reminders'),
   reminderCancel: (id) => ipcRenderer.send('dock:reminderCancel', id),

@@ -56,6 +56,16 @@
 - Conversation history for Gemini/Groq/OpenRouter/Ollama is bounded by size as well as count, so long pastes
   can't overflow small local models. Ollama keeps the model loaded between turns instead of reloading it.
 
+### Memory that stays consistent
+- A new fact about the same thing replaces the old one instead of contradicting it ("lives in Bandung"
+  supersedes "lives in Jakarta"; favourites are per thing). The old value is kept in the fact's history and
+  COre says "🧠 Updated: … (was: …)". Detection is deliberately conservative: only facts clearly about you.
+- Project facts: `[[remember #Tower the client wants a glass facade]]` is kept per project and comes up when
+  that project is mentioned.
+- Every fact records when and where it came from (voice, chat, or you).
+- Edit facts in place in the chat's memory panel (✎), next to Forget. Hover a fact to see its date, source
+  and earlier wording.
+
 ### Problems are no longer silent
 - If something unexpected breaks inside COre, it now says so once in the chat (and tints the orb if it keeps
   happening) instead of only writing to the crash log.

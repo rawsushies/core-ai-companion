@@ -125,3 +125,7 @@ textarea::-webkit-scrollbar-button { display: none; }
 /* Accessibility: larger chat text. */
 body.large-text .msg, body.large-text textarea, body.large-text input { font-size: 15.5px; }
 body.large-text .msg.system { font-size: 13.5px; }
+
+/* Memory rows: project tag and inline edit. */
+.item.memory .tag { color: var(--accent); }
+.mem-edit { flex: 1; min-width: 0; background: rgba(0,0,0,0.35); color: inherit; border: 1px solid rgba(125,255,176,0.3); border-radius: 6px; padding: 3px 6px; font: inherit; }

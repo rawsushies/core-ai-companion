@@ -233,6 +233,47 @@
     return row;
   }
 
+  // A remembered fact: project tag, where it came from, what it replaced,
+  // and inline editing (Electron has no prompt()).
+  function memoryRow(m) {
+    const row = document.createElement('div');
+    row.className = 'item memory';
+    if (m.project) { const p = document.createElement('span'); p.className = 'when tag'; p.textContent = m.project; row.append(p); }
+    const t = document.createElement('span');
+    t.textContent = m.text;
+    const via = m.source && m.source.via ? `from ${m.source.via}` : '';
+    const when = new Date(m.updatedAt || m.ts).toLocaleDateString();
+    const was = m.history && m.history.length ? ` · was: ${m.history.map((h) => h.text).join(' → ')}` : '';
+    t.title = `${when}${via ? ` · ${via}` : ''}${was}`;
+    const edit = button('✎', 'x', () => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = m.text;
+      input.maxLength = 300;
+      input.className = 'mem-edit';
+      let finished = false; // Enter then blur must not save twice
+      const done = (save) => {
+        if (finished) return;
+        finished = true;
+        const v = input.value.trim();
+        if (save && v && v !== m.text) { t.textContent = v; api.memoryEdit(m.id, v); }
+        input.replaceWith(t);
+      };
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') done(true); if (ev.key === 'Escape') { ev.stopPropagation(); done(false); } });
+      input.addEventListener('blur', () => done(true));
+      t.replaceWith(input);
+      input.focus();
+      input.select();
+    });
+    edit.title = 'Edit';
+    edit.setAttribute('aria-label', `Edit: ${m.text}`);
+    const x = button('✕', 'x', () => api.memoryForget(m.id));
+    x.title = 'Forget';
+    x.setAttribute('aria-label', `Forget: ${m.text}`);
+    row.append(t, edit, x);
+    return row;
+  }
+
   function empty(msg) {
     const e = document.createElement('div');
     e.className = 'empty';
@@ -257,7 +298,7 @@
     memoryList.textContent = '';
     memoryCount.textContent = list && list.length ? `${list.length} saved` : '';
     if (!list || !list.length) { memoryList.append(empty('Nothing yet. Tell me about yourself and I will remember.')); return reportSize(); }
-    for (const m of list) memoryList.append(itemRow(m.text, '', () => api.memoryForget(m.id), 'Forget'));
+    for (const m of list) memoryList.append(memoryRow(m));
     reportSize();
   }
 
