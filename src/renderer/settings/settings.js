@@ -11,6 +11,7 @@
   const get = (key) => key.split('.').reduce((o, k) => (o == null ? undefined : o[k]), data.values);
 
   function toast(msg) {
+    document.querySelectorAll('.toast').forEach((x) => x.remove()); // one message at a time
     const t = document.createElement('div');
     t.className = 'toast';
     t.textContent = msg;
@@ -80,20 +81,40 @@
       wrap.append(input, out);
       return wrap;
     }
+    if (field.type === 'actions') {
+      const wrap = document.createElement('span');
+      wrap.className = 'secret folder buttons';
+      for (const [name, text] of field.items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ghost';
+        b.textContent = text;
+        b.addEventListener('click', async () => {
+          if (name === 'restoreBackup' && !confirm('Restore a backup? Your current settings, memories and notes are saved first, then replaced, and COre restarts.')) return;
+          b.disabled = true;
+          const r = await api.action(name);
+          b.disabled = false;
+          if (r && r.values) { data.values = r.values; if (r.secrets) data.secrets = r.secrets; render(); }
+          if (r && r.message) toast(r.message);
+        });
+        wrap.append(b);
+      }
+      return wrap;
+    }
     if (field.type === 'folder') {
       // Folders are chosen with the system picker (in the main process).
       const wrap = document.createElement('span');
       wrap.className = 'secret folder';
       const p = document.createElement('span');
       p.className = 'path';
-      p.textContent = v ? `📁 ${String(v).split(/[\\/]/).filter(Boolean).pop()}` : 'Not shared';
+      p.textContent = v ? String(v).split(/[\\/]/).filter(Boolean).pop() : (field.action ? 'Not set' : 'Not shared');
       p.title = v || '';
       const pick = document.createElement('button');
       pick.type = 'button';
       pick.className = 'ghost';
       pick.textContent = v ? 'Change…' : 'Choose…';
       pick.addEventListener('click', async () => {
-        const r = await api.action('pickProjectFolder');
+        const r = await api.action(field.action || 'pickProjectFolder');
         if (r && r.values) { data.values = r.values; render(); }
         if (r && r.message) toast(r.message);
       });
@@ -102,7 +123,7 @@
         const stop = document.createElement('button');
         stop.type = 'button';
         stop.className = 'ghost';
-        stop.textContent = 'Stop sharing';
+        stop.textContent = field.action ? 'Clear' : 'Stop sharing';
         stop.addEventListener('click', async () => { await save(field, ''); render(); });
         wrap.append(stop);
       }

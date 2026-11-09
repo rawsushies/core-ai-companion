@@ -97,8 +97,23 @@ const SECTIONS = [
       { key: 'skills.apps', label: 'Open apps from a safe list', type: 'toggle' },
       { key: 'skills.calendar', label: 'Read my calendar', type: 'toggle' },
       { key: 'skills.archicad', label: 'Read my open Archicad project (count elements; never changes it)', type: 'toggle' },
+      { key: 'skills.glance', label: 'Show cards beside COre (now playing, lyrics, short lists)', type: 'toggle' },
+      { key: 'skills.lyrics', label: 'Look up lyrics on lrclib.net when I ask (sends the song title and artist)', type: 'toggle' },
+      { key: 'skills.quick', label: 'Answer short requests instantly, without the brain (time, music keys)', type: 'toggle' },
       // secret: stored encrypted (like API keys), never shown back or logged.
       { key: 'skills.calendarUrl', label: 'Private calendar feed link (ICS, from Google / Outlook calendar settings)', type: 'text', maxLength: 500, optional: true, pattern: '^(https|webcal)://\\S+$', secret: 'calendar' },
+    ],
+  },
+  {
+    id: 'backup',
+    title: 'Backup',
+    fields: [
+      { key: 'backup.folder', label: 'Backup folder (pick one OneDrive, Google Drive or Dropbox syncs for cloud backups)', type: 'folder', optional: true, action: 'pickBackupFolder' },
+      { key: 'backup.actions', label: 'Settings, memories, notes, reminders and plugins. Never API keys.', type: 'actions', items: [['useCloudFolder', 'Use my cloud folder'], ['backupNow', 'Back up now'], ['restoreBackup', 'Restore…']] },
+      { key: 'backup.auto', label: 'Back up automatically', type: 'select', options: [['0', 'Never'], ['24', 'Every day'], ['168', 'Every week']] },
+      { key: 'backup.keep', label: 'Backups to keep', type: 'range', min: 3, max: 30, step: 1 },
+      // secret: stored encrypted with this PC's account, never written into a backup.
+      { key: 'backup.passphrase', label: 'Passphrase to encrypt backups (recommended for cloud folders; you need it to restore them)', type: 'text', maxLength: 200, optional: true, secret: 'backup' },
     ],
   },
   {

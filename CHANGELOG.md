@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Backups (local or cloud folder)
+- Settings → Backup keeps copies of your settings, memories, notes, reminders, chat state and plugins in any
+  folder. **Use my cloud folder** finds OneDrive, Google Drive, Dropbox or iCloud Drive and uses a `COre Backups`
+  folder inside it, so your cloud app syncs the backups. COre itself never talks to a cloud service.
+- Automatic backups every day or week (default: daily, once a folder is chosen); the newest 3–30 are kept.
+- An optional passphrase encrypts each backup (AES-256-GCM, key from scrypt). The passphrase is stored encrypted
+  on this PC and never goes into a backup.
+- Never in a backup: API keys, the calendar link, the notification token.
+- **Restore…** checks the backup (format, checksum, passphrase), saves your current data first as a
+  `pre-restore` snapshot, keeps this PC's keys, and restarts.
+- Settings messages no longer stack on top of each other.
+
 ### Glance: a card beside the orb
 - "What's playing?" shows the current song, artist and progress next to COre. "Show me the lyrics" shows the
   synced lyrics, with the line being sung in Emerald. "Hide that" closes it. COre can also show any short list or

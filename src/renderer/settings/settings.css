@@ -57,3 +57,6 @@ code, kbd, .hotkey { font-family: 'COre Mono', Consolas, monospace; }
 /* Brand: the real mark and tight display tracking. */
 .brand { letter-spacing: -0.03em; }
 .mark { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; border: 1px solid #1d3327; background: #05070a; }
+
+.secret.buttons { flex-wrap: wrap; justify-content: flex-end; }
+.toast { background: #0b1f15; border-color: #18382a; max-width: min(520px, 80vw); text-align: center; }

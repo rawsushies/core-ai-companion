@@ -111,6 +111,10 @@ requests like the time or "next song" are answered instantly, without the brain.
 { "name": "wiki", "description": "search Wikipedia", "url": "https://en.wikipedia.org/wiki/Special:Search?search={q}" }
 ```
 
+**Backups.** Settings → Backup keeps copies of your settings, memories, notes and plugins in a folder you choose.
+Pick a OneDrive, Google Drive or Dropbox folder and they're cloud backups. API keys are never included, and a
+passphrase can encrypt them.
+
 **Memory, clipboard, moods.** COre remembers facts about you across conversations (see or delete them in
 ⚙ → Memory), can work with what you copied ("explain what I copied"), and its smoke shows moods.
 

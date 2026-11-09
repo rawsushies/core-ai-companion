@@ -768,6 +768,34 @@ function removeUserData(names) {
   }
 }
 
+// ---------------------------------------------------------------- backups
+const BK = require('./backup');
+
+function flushData() {
+  try { config.save(); } catch {}
+  try { state.flush(); } catch {}
+}
+
+function runBackup(kind) {
+  const b = config.data.backup || {};
+  if (!b.folder) return { ok: false, error: 'Choose a backup folder first (Settings, Backup).' };
+  try {
+    flushData();
+    const r = BK.createBackup({ dataDir: app.getPath('userData'), destDir: b.folder, passphrase: getSecret('backup'), appVersion: app.getVersion(), keep: b.keep || 10 });
+    state.set('lastBackup', new Date().toISOString());
+    return { ok: true, ...r };
+  } catch (err) {
+    if (kind === 'auto') console.error(`[core] automatic backup failed: ${err.message}`);
+    return { ok: false, error: `Backup failed: ${err.message}` };
+  }
+}
+
+// Automatic backups: checked at start and every hour; cheap when not due.
+function checkAutoBackup() {
+  const b = config.data.backup || {};
+  if (b.folder && BK.isDue(state.get('lastBackup'), Number(b.auto) || 0)) runBackup('auto');
+}
+
 async function settingsAction(name) {
   switch (name) {
     case 'update':
@@ -781,6 +809,42 @@ async function settingsAction(name) {
       if (r.canceled || !r.filePaths[0]) return { message: 'Nothing changed.' };
       const res = changeSetting('tools.projectRoot', r.filePaths[0]);
       return { message: res.ok ? `COre can now read ${path.basename(r.filePaths[0])} (never change it).` : res.error, values: res.values, secrets: res.secrets };
+    }
+    case 'pickBackupFolder': {
+      const r = await dialog.showOpenDialog(settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined, { title: 'Where should COre keep its backups?', properties: ['openDirectory', 'createDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return { message: 'Nothing changed.' };
+      const res = changeSetting('backup.folder', r.filePaths[0]);
+      return { message: res.ok ? `Backups go to ${path.basename(r.filePaths[0])}.` : res.error, values: res.values, secrets: res.secrets };
+    }
+    case 'useCloudFolder': {
+      const found = BK.cloudFolders({ home: app.getPath('home') });
+      if (!found.length) return { message: 'No OneDrive, Google Drive, Dropbox or iCloud Drive folder found on this PC. Choose any folder instead.' };
+      try { fs.mkdirSync(found[0].suggested, { recursive: true }); } catch (err) { return { message: `Could not create the folder: ${err.message}` }; }
+      const res = changeSetting('backup.folder', found[0].suggested);
+      return { message: res.ok ? `Backups go to ${found[0].name}, in COre Backups. ${getSecret('backup') ? '' : 'Tip: set a passphrase so the cloud copy is encrypted.'}`.trim() : res.error, values: res.values, secrets: res.secrets };
+    }
+    case 'backupNow': {
+      const r = runBackup('manual');
+      return { message: r.ok ? `Backed up ${r.count} files${r.encrypted ? ', encrypted' : ''}.` : r.error };
+    }
+    case 'restoreBackup': {
+      const dir = config.data.backup.folder;
+      const r = await dialog.showOpenDialog(settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined, { title: 'Restore a COre backup', defaultPath: dir || app.getPath('home'), properties: ['openFile'], filters: [{ name: 'COre backups', extensions: ['json'] }] });
+      if (r.canceled || !r.filePaths[0]) return { message: 'Nothing restored.' };
+      let b;
+      try { b = BK.readBackup(r.filePaths[0], getSecret('backup')); } catch (err) {
+        return { message: err.code === 'NEED_PASSPHRASE' || err.code === 'BAD_PASSPHRASE' ? `${err.message} Set it under Backup, then try again.` : err.message };
+      }
+      try {
+        flushData();
+        const res = BK.restoreBackup({ dataDir: app.getPath('userData'), backup: b, snapshotDir: path.join(app.getPath('userData'), 'backups'), appVersion: app.getVersion() });
+        // Nothing may write the old in-memory data back before the restart.
+        config.save = () => {}; state.flush = () => {}; state.set = () => {};
+        setTimeout(restartApp, 600);
+        return { message: `Restored ${res.restored.length} files from ${new Date(b.created).toLocaleString()}. Restarting… (your previous data was saved first)` };
+      } catch (err) {
+        return { message: `Nothing was restored: ${err.message}` };
+      }
     }
     case 'logs':
       fs.mkdirSync(crashLog.dir, { recursive: true });
@@ -2685,6 +2749,8 @@ app.whenReady().then(async () => {
     }
   }
   plugins = SK.loadPlugins(path.join(userData, 'skills'));
+  setTimeout(checkAutoBackup, 60_000);
+  setInterval(checkAutoBackup, 3600_000).unref();
   reminders = new Reminders({ store: state, onFire: onReminder });
 
   // Only COre's own overlay may use the microphone.
