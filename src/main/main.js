@@ -14,6 +14,8 @@ const { SpeechToText } = require('./stt');
 const { TextToSpeech, OrderedVoicePipeline } = require('./tts');
 const { startNotifyServer } = require('./notifyServer');
 const { Updater } = require('./updater');
+const { Memory } = require('./memory');
+const { Reminders } = require('./reminders');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -75,6 +77,9 @@ let dockAnchor = null; // { x, y, r } orb resting spot, overlay coordinates
 let dockVisible = true;
 let dockHeight = 60;
 let currentPipeline = null;
+let memory = null;
+let reminders = null;
+const actions = new Map(); // one-click actions offered in the chat: id -> { kind, value }
 // Spoken questions: the chat reveals each sentence as it is spoken, then the
 // full formatted answer once COre stops talking. { spokenAny, finished, reply }
 let syncTurn = null;
@@ -85,12 +90,15 @@ let listening = null; // { withScreen }
 let orbBounds = { x: 0, y: 0, r: 60 };
 let orbDragging = false;
 let overlayInteractive = false;
+let cursorWasNear = false;
+let cursorTick = 0;
 let cursorTimer = null;
 let workDir;
 const APP_STARTED = Date.now();
 let lastShot = null;
 
 const transcript = [];
+const CLIPBOARD_RE = /(clipboard|what i('ve| have)? copied|i (just )?copied|the copied|(yang|tadi) (aku |saya |gue )?(copy|salin)|di clipboard)/i;
 const DEIXIS = /(look at|see (this|that|my)|on (my|the) screen|what('?s| is) (this|that)\b|this (button|error|window|code|page|thing|message)|my screen|point (at|to)|where (is|do|should|can)|lihat (ini|itu|layar)|di layar|layar (saya|aku|gue)|yang ini|ini apa)/i;
 
 // ---------------------------------------------------------------- helpers
@@ -418,6 +426,12 @@ function updateHitTest() {
   const dx = p.x - b.x - orbBounds.x;
   const dy = p.y - b.y - orbBounds.y;
   const over = orbDragging || Math.hypot(dx, dy) < orbBounds.r * 1.45; // the visible smoke, not just the core
+  // Presence: tell the orb when the cursor is nearby so it can notice you.
+  const near = Math.hypot(dx, dy) < orbBounds.r * 7;
+  if (near || cursorWasNear) {
+    if (++cursorTick % 3 === 0 || near !== cursorWasNear) toOverlay('cursor', near ? { x: p.x - b.x, y: p.y - b.y } : null);
+    cursorWasNear = near;
+  }
   if (over !== overlayInteractive) {
     overlayInteractive = over;
     overlay.setIgnoreMouseEvents(!over, { forward: true });
@@ -766,6 +780,108 @@ function mapPoint(shot, x, y) {
   };
 }
 
+// ---------------------------------------------------------------- memory, reminders, actions
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return sameDay ? t : `${d.toLocaleDateString([], { weekday: 'short' })} ${t}`;
+}
+
+// Tags that act instead of animating. Returns true when handled here.
+function handleActionTag(item) {
+  if (item.name === 'remember') {
+    if (!memory || config.data.memory.enabled === false) return true;
+    const r = memory.remember(item.text);
+    if (r && r.created) toDock('dock:message', { role: 'system', text: `🧠 Remembered: ${r.item.text}` });
+    toDock('dock:memory', memory.list());
+    return true;
+  }
+  if (item.name === 'forget') {
+    const gone = memory && memory.forget(item.text);
+    if (gone) toDock('dock:message', { role: 'system', text: `🧠 Forgot: ${gone.text}` });
+    toDock('dock:memory', memory ? memory.list() : []);
+    return true;
+  }
+  if (item.name === 'remind') {
+    const r = reminders.add(item.when, item.text);
+    toDock('dock:message', { role: 'system', text: r ? `⏰ Reminder at ${fmtTime(r.at)}: ${r.text}` : `⏰ I couldn't understand the time "${item.when}".` });
+    toDock('dock:reminders', reminders.items);
+    return true;
+  }
+  if (item.name === 'open' || item.name === 'copy') {
+    const id = require('crypto').randomUUID();
+    actions.set(id, { kind: item.name, value: item.name === 'open' ? item.url : item.text });
+    let label;
+    if (item.name === 'open') {
+      let host = item.url;
+      try { host = new URL(item.url).host; } catch {}
+      label = `Open ${host}`;
+    } else {
+      label = `Copy “${item.text.length > 40 ? `${item.text.slice(0, 40)}…` : item.text}”`;
+    }
+    toDock('dock:action', { id, kind: item.name, label });
+    return true;
+  }
+  return false;
+}
+
+// Runs only when the user clicks the button in the chat.
+function runAction(id) {
+  const a = actions.get(id);
+  if (!a) return;
+  actions.delete(id);
+  if (a.kind === 'open' && /^https?:\/\//i.test(a.value)) shell.openExternal(a.value);
+  if (a.kind === 'copy') Promise.resolve(require('electron').clipboard.writeText(a.value)).catch(() => {});
+}
+
+function onReminder(r, missed) {
+  toOverlay('attention', { level: 'warn', title: 'Reminder' });
+  addTranscript('notice', `⏰ ${missed ? `Missed while I was off (${fmtTime(r.at)}): ` : ''}${r.text}`);
+  toDock('dock:reminders', reminders.items);
+  if (Notification.isSupported()) new Notification({ title: 'COre reminder', body: r.text }).show();
+  speakLine(missed ? `You missed a reminder while I was off: ${r.text}` : `Reminder: ${r.text}`);
+}
+
+// A short greeting on the first launch of the day. Built in, so it costs no
+// Claude usage and works offline.
+const GREETINGS = {
+  sarcastic: {
+    morning: ['Morning. I have been awake for exactly as long as you have.', 'Good morning. Coffee first, existential questions later.'],
+    afternoon: ['Afternoon. Productive day so far, or are we pretending?', 'Oh, hello again. Shall we do something clever?'],
+    evening: ['Evening. Still working? Bold.', 'Good evening. Let us make the most of the dark.'],
+    night: ['Up late, I see. I will not judge. Much.', 'It is the middle of the night. Naturally, here we are.'],
+  },
+  dramatic: {
+    morning: ['A new day dawns. I am ready.'], afternoon: ['The afternoon awaits our command.'],
+    evening: ['Night falls, and I remain at your side.'], night: ['The world sleeps. We do not.'],
+  },
+  calm: {
+    morning: ['Good morning. Take your time.'], afternoon: ['Good afternoon. I am here when you need me.'],
+    evening: ['Good evening. How was your day?'], night: ['It is late. Be kind to yourself tonight.'],
+  },
+  cheerful: {
+    morning: ['Good morning! Let us make today great!'], afternoon: ['Hey there! Hope your day is going well!'],
+    evening: ['Good evening! What are we up to?'], night: ['Hi, night owl! What can I do for you?'],
+  },
+  professional: {
+    morning: ['Good morning. Ready when you are.'], afternoon: ['Good afternoon. How can I help?'],
+    evening: ['Good evening. How can I help?'], night: ['Good evening. How can I help?'],
+  },
+};
+
+function greetIfFirstToday() {
+  if (config.data.personality.greeting === false) return;
+  const today = new Date().toDateString();
+  if (state.get('lastGreet') === today) return;
+  state.set('lastGreet', today);
+  const h = new Date().getHours();
+  const part = h < 5 ? 'night' : h < 12 ? 'morning' : h < 18 ? 'afternoon' : h < 22 ? 'evening' : 'night';
+  const set = (GREETINGS[config.data.personality.tone] || GREETINGS.sarcastic)[part];
+  speakLine(set[Math.floor(Math.random() * set.length)]);
+}
+
 // ---------------------------------------------------------------- turns
 
 function abortCurrent() {
@@ -777,8 +893,9 @@ function abortCurrent() {
     currentPipeline.cancel();
     currentPipeline = null;
   }
+  // A finished spoken answer interrupted mid-speech still shows in full.
+  toDock('dock:done', syncTurn && syncTurn.finished ? { text: syncTurn.reply } : {});
   syncTurn = null;
-  toDock('dock:done', {});
   toDock('dock:busy', false);
 }
 
@@ -847,6 +964,23 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
     }
   }
 
+  // Context for the model: relevant memories, and the clipboard when asked about it.
+  // (Never let a context problem stop the message itself.)
+  const contextBlocks = [];
+  try {
+    if (memory && config.data.memory.enabled !== false) {
+      const mem = memory.contextFor(text);
+      if (mem) contextBlocks.push(mem);
+    }
+    if (CLIPBOARD_RE.test(text)) {
+      // Electron 45+: clipboard.readText() returns a Promise (older: a string).
+      const clip = String((await Promise.resolve(require('electron').clipboard.readText())) || '').trim();
+      contextBlocks.push(clip ? `[Clipboard]\n${clip.slice(0, 4000)}` : '[Clipboard] (empty)');
+    }
+  } catch (err) {
+    console.error('[core] context failed:', err.message);
+  }
+
   const ac = new AbortController();
   current = ac;
   const speak = !typed || config.data.voice.speakTyped !== false;
@@ -862,6 +996,7 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
       text,
       shot,
       typed,
+      context: contextBlocks.join('\n\n'),
       signal: ac.signal,
       onText: (t) => { if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t); },
       onItem: (item) => {
@@ -871,6 +1006,7 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
           pipeline.push({ ...item, ...mapPoint(shot, item.x, item.y) });
           return;
         }
+        if (item.type === 'gesture' && handleActionTag(item)) return;
         pipeline.push(item);
       },
       onStatus: (s) => {
@@ -1009,6 +1145,12 @@ function wireIpc() {
   });
   ipcMain.on('dock:setting', (e, { key, value } = {}) => { if (fromDock(e)) applySetting(key, value); });
   ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
+  ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
+  ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { memory.forget(String(id)); toDock('dock:memory', memory.list()); } });
+  ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
+  ipcMain.handle('dock:reminders', (e) => (fromDock(e) && reminders ? reminders.items : []));
+  ipcMain.on('dock:reminderCancel', (e, id) => { if (fromDock(e) && reminders) { reminders.cancel(String(id)); toDock('dock:reminders', reminders.items); } });
+  ipcMain.on('dock:runAction', (e, id) => { if (fromDock(e)) runAction(String(id)); });
   ipcMain.handle('dock:brainStatus', (e) => (fromDock(e) ? refreshBrainStatus() : null));
   ipcMain.on('dock:loginClaude', (e) => { if (fromDock(e)) loginClaude(); });
   ipcMain.on('dock:setupLocal', (e) => { if (fromDock(e)) setupLocalModel(); });
@@ -1101,7 +1243,7 @@ function wireIpc() {
   });
   ipcMain.on('panel:copyToken', (e) => {
     if (!fromPanel(e)) return;
-    require('electron').clipboard.writeText(config.data.notify.token);
+    Promise.resolve(require('electron').clipboard.writeText(config.data.notify.token)).catch(() => {});
     addTranscript('system', 'Notification token copied to the clipboard.');
   });
 }
@@ -1192,7 +1334,7 @@ async function diagnostics() {
 
 async function copyDiagnostics() {
   const d = await diagnostics();
-  require('electron').clipboard.writeText(JSON.stringify(d, null, 2));
+  await Promise.resolve(require('electron').clipboard.writeText(JSON.stringify(d, null, 2)));
   addTranscript('system', 'Diagnostics copied to the clipboard. Paste them to whoever is helping you.');
 }
 
@@ -1275,6 +1417,8 @@ app.whenReady().then(async () => {
     },
   });
   dockVisible = state.get('dockVisible') !== false;
+  memory = new Memory(path.join(userData, 'memory.json'));
+  reminders = new Reminders({ store: state, onFire: onReminder });
 
   // Only COre's own overlay may use the microphone.
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
@@ -1304,6 +1448,8 @@ app.whenReady().then(async () => {
   registerHotkeys();
   await startNotify();
   updater.start(relaunchAfterUpdate);
+  reminders.start();
+  setTimeout(greetIfFirstToday, 3500);
 
   const hk = config.data.hotkeys;
   if (SAFE_GRAPHICS && GRAPHICS === 'auto' && !state.get('safeGraphicsAnnounced')) {
@@ -1334,6 +1480,7 @@ app.on('will-quit', () => {
     if (tts) tts.dispose();
   }
   if (updater) updater.stop();
+  if (reminders) reminders.stop();
   if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
   if (state) state.flush();
 });

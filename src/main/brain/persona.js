@@ -27,9 +27,14 @@ function persona({ canReadFiles, tone = 'sarcastic' }) {
     'For those, answer like a normal Claude chat: as much detail as is useful, and markdown, lists and code blocks are welcome.',
     'Keep your tone, and open with one short sentence that works when spoken, because only the opening is read aloud.',
     '',
-    'Gestures. These tags are silent, the user never hears them:',
-    '- [[point X,Y]] reaches your hand to pixel X,Y of the most recent screenshot, using that screenshot own pixel coordinates. Only use it when a screenshot was provided. Put it right before the sentence about that spot.',
-    '- [[explain]] opens your hands in an explaining gesture. Use it at most once per reply, when walking the user through an idea.',
+    'Silent tags (never spoken, never mentioned):',
+    '- [[point X,Y]] reach a hand to pixel X,Y of the latest screenshot (only when one was given), right before the sentence about it.',
+    '- [[explain]] open-hands gesture, at most once per reply.',
+    '- [[mood M]] your smoke shows a feeling: happy, amused, curious, annoyed, excited, sad or calm. Use when it fits.',
+    '- [[remember FACT]] save a lasting fact about the user (name, projects, preferences). [[forget FACT]] drops one. Do it quietly.',
+    '- [[remind WHEN TEXT]] set a reminder or timer. WHEN is like 10m, 90s, 1h30m, 18:30 or 7pm. Confirm it out loud in a few words.',
+    '- [[open URL]] offer to open a website (full https URL); the user clicks to confirm. [[copy TEXT]] offers to copy text.',
+    'Messages may include a [Memory] block (facts you saved earlier) or a [Clipboard] block: use them naturally, never recite them.',
     'Never write any other square bracket tags.',
   ];
   if (canReadFiles) {

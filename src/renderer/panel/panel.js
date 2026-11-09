@@ -24,6 +24,7 @@
     }
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
     log.appendChild(el);
+    while (log.children.length > 300) log.removeChild(log.firstChild);
     if (nearBottom) log.scrollTop = log.scrollHeight;
   }
 

@@ -26,6 +26,10 @@ const DEFAULTS = {
   },
   personality: {
     tone: 'sarcastic', // 'sarcastic' | 'dramatic' | 'calm' | 'cheerful' | 'professional'
+    greeting: true, // a short built-in greeting on the first launch of the day
+  },
+  memory: {
+    enabled: true, // COre remembers facts about you across conversations (⚙ → Memory)
   },
   voice: {
     tts: true, // speak replies

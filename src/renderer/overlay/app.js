@@ -16,6 +16,16 @@
     thinking:  { tint: [0.62, 0.42, 1.00], glow: 0.40 },
     speaking:  { tint: [0.40, 1.00, 0.66], glow: 0.30 },
   };
+  // Moods set by the model with [[mood ...]]: a colour lean, energy and motion.
+  const MOODS = {
+    happy:   { tint: [0.60, 1.00, 0.30], energy: 0.15, bob: 1.0 },
+    amused:  { tint: [0.30, 1.00, 0.78], energy: 0.10, bob: 0.6 },
+    curious: { tint: [0.25, 0.85, 1.00], energy: 0.05, bob: 0.0, swirl: 0.45 },
+    annoyed: { tint: [1.00, 0.20, 0.04], energy: 0.20, bob: 0.0, flicker: 1, weight: 0.92 },
+    excited: { tint: [0.90, 1.00, 0.25], energy: 0.35, bob: 1.6 },
+    sad:     { tint: [0.35, 0.50, 1.00], energy: -0.1, bob: -1.0, weight: 0.75 },
+    calm:    { tint: [0.30, 0.90, 0.70], energy: -0.05, bob: 0.0 },
+  };
   const ATTENTION = {
     info:    [0.28, 0.58, 1.00],
     success: [0.80, 1.00, 0.30],
@@ -46,6 +56,10 @@
   let lastGestureAt = 0;
   const vis = { tint: MODES.idle.tint.slice(), glow: 0.14, think: 0, halo: 0, listen: 0, aura: 0.78 };
   let auraC = null; // display coordinates; trails the body like the smoke does
+  let mood = null; // { name, since }
+  let moodW = 0; // eased mood weight 0..1
+  let cursor = null; // display coordinates of a nearby cursor
+  let noticeKick = 0;
 
   const canvas = document.getElementById('orb');
   const caption = document.getElementById('caption');
@@ -134,6 +148,7 @@
   function gesture(item) {
     if (item.name === 'point') point(item.x, item.y);
     else if (item.name === 'explain') explain();
+    else if (item.name === 'mood' && MOODS[item.mood]) mood = { name: item.mood, since: performance.now() };
   }
 
   function onSpeakItem(item) {
@@ -170,7 +185,20 @@
         pointing = null;
       }
     } else if (now - lastGestureAt > 2500) {
-      body.target = M.wander(home, t);
+      const w = M.wander(home, t);
+      // Presence: lean gently toward a nearby cursor, as if noticing you.
+      if (cursor) {
+        const dx = cursor.x - home.x;
+        const dy = cursor.y - home.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const lean = Math.min(r * 0.45, d * 0.12);
+        w.x += (dx / d) * lean;
+        w.y += (dy / d) * lean;
+      }
+      // Mood motion: a bounce when happy/excited, a slow sink when sad.
+      const md = mood && MOODS[mood.name];
+      if (md && md.bob) w.y -= Math.abs(Math.sin(t * 5.2)) * md.bob * r * 0.12 * moodW - (md.bob < 0 ? r * 0.15 * moodW : 0);
+      body.target = w;
     }
 
     if (explainUntil && now > explainUntil) {
@@ -200,11 +228,22 @@
       glow = Math.max(glow, 0.55);
       halo = attention.level === 'urgent' ? 1 : 0.75;
     }
+    // Mood: lasts ~9 s, eased in and out.
+    if (mood && now - mood.since > 9000) mood = null;
+    moodW += ((mood ? 1 : 0) - moodW) * Math.min(1, dt * 3);
+    const md = mood ? MOODS[mood.name] : null;
+    if (md && !attention) {
+      const w = (md.weight || 0.55) * moodW * (md.flicker ? 0.75 + 0.25 * Math.sin(now / 45) : 1);
+      tint = tint.map((c, i) => c + (md.tint[i] - c) * w);
+      glow += md.energy * moodW;
+    }
+    noticeKick *= Math.exp(-dt * 3);
+    glow += noticeKick * 0.35;
     const k = Math.min(1, dt * 4);
     for (let i = 0; i < 3; i++) vis.tint[i] += (tint[i] - vis.tint[i]) * k;
     vis.glow += (glow - vis.glow) * k;
     vis.halo += (halo - vis.halo) * k;
-    vis.think += ((mode === 'thinking' ? 1 : 0) - vis.think) * k;
+    vis.think += ((mode === 'thinking' ? 1 : md && md.swirl ? md.swirl * moodW : 0) - vis.think) * k;
     vis.listen += ((mode === 'listening' ? Math.max(0.25, listenLevel) : 0) - vis.listen) * Math.min(1, dt * 12);
   }
 
@@ -216,7 +255,7 @@
 
   // Is anything happening that needs full frame rate?
   function isActive() {
-    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || body.dragging || !!attention
+    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || body.dragging || !!attention || !!mood || noticeKick > 0.05
       || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
   }
 
@@ -234,7 +273,8 @@
 
     updateBehaviour(now, t);
     M.step(body, dt);
-    const amp = voice.update(dt, t);
+    const md0 = mood ? MOODS[mood.name] : null;
+    const amp = Math.min(1, voice.update(dt, t) * (1 + (md0 ? Math.max(0, md0.energy) * moodW : 0)));
     updateVisuals(dt, now);
 
     // A tiny shiver while speaking sells the "vibrating" voice.
@@ -435,6 +475,12 @@
       bridge.onConfig(applyConfig);
       bridge.onDockVisible((v) => { dockVisible = !!v; });
       bridge.onStage((st) => { if (st) stage = { ...st }; });
+      bridge.onCursor((c) => {
+        const wasNear = cursor && Math.hypot(cursor.x - body.pos.x, cursor.y - body.pos.y) < body.r * 3;
+        cursor = c;
+        const isNear = c && Math.hypot(c.x - body.pos.x, c.y - body.pos.y) < body.r * 3;
+        if (isNear && !wasNear) noticeKick = 1; // a little glow when it notices you
+      });
       bridge.orbAnchor({ x: home.x, y: home.y, r: body.r });
     } else {
       demo();
@@ -466,6 +512,8 @@
       if (k === 'k') setMode(mode === 'thinking' ? 'idle' : 'thinking');
       if (k === 'n') { li = (li + 1) % (levels.length + 1); setAttention(li < levels.length ? { level: levels[li] } : null); }
       if (k === 'm') { home = { ...mouse }; lastGestureAt = 0; }
+      const moodKeys = { 1: 'happy', 2: 'amused', 3: 'curious', 4: 'annoyed', 5: 'excited', 6: 'sad', 7: 'calm' };
+      if (moodKeys[k]) gesture({ name: 'mood', mood: moodKeys[k] });
     });
 
     // Deterministic poses for screenshots: ?pose=idle|speaking|point|explain|attention|move
@@ -483,6 +531,7 @@
       if (pose === 'explain') { explain(); explainUntil = performance.now() + 60000; voice.say('Explaining a long long idea for the screenshot capture right now.'); }
       if (pose === 'point') { point(c.x - 330, c.y - 170); pointing.until = performance.now() + 60000; }
       if (pose === 'attention') setAttention({ level: params.get('level') || 'warn' });
+      if (pose === 'mood') { gesture({ name: 'mood', mood: params.get('mood') || 'happy' }); mood.since = performance.now() + 60000; }
       if (pose === 'move') { body.pos = { x: c.x - 260, y: c.y + 40 }; body.tail = { ...body.pos }; body.target = { x: c.x + 220, y: c.y - 20 }; lastGestureAt = performance.now() + 60000; }
     }
   }

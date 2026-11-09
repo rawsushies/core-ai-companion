@@ -80,6 +80,20 @@ speech-recognition model (Whisper base, ~80 MB) that then runs locally.
   (turn off with `screen.autoShareOnDeixis`).
 - Tray icon: talk, new conversation, settings, quit.
 
+## Memory, reminders and actions
+
+- **Memory:** tell COre about yourself and it remembers across conversations (any brain). It shows
+  "🧠 Remembered: …" in the chat when it saves something. See or delete everything in ⚙ → Memory.
+- **Reminders and timers:** "remind me in 20 minutes to stretch", "set a 5 minute timer", "remind me at 7pm to
+  call mom". They survive restarts and fire with COre's voice, an amber glow and a Windows notification. Cancel
+  them in ⚙ → Reminders.
+- **One-click actions:** COre can offer to open a website or copy text. It shows a button in the chat and only
+  acts when you click it.
+- **Clipboard:** "explain what I copied", "fix the text in my clipboard".
+- **Moods:** COre's smoke reacts to its replies (happy, amused, curious, annoyed, excited, sad, calm).
+- **Presence:** the orb leans toward your cursor when you come near, and greets you on the first launch of the
+  day (turn off with `personality.greeting: false`).
+
 ## Brains
 
 With Claude, COre keeps one Claude Code session running in the background, so replies start in about a second

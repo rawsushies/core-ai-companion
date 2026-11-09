@@ -33,4 +33,5 @@ contextBridge.exposeInMainWorld('core', {
   onConfig: on('config'),
   onDockVisible: on('dock:visible'),
   onStage: on('stage'),
+  onCursor: on('cursor'),
 });

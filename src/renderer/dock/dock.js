@@ -89,7 +89,11 @@
   function setSettingsOpen(open) {
     settings.hidden = !open;
     shell.classList.toggle('settings-open', open);
-    if (open) api.brainStatus().then(renderBrain);
+    if (open) {
+      api.brainStatus().then(renderBrain);
+      api.memory().then(renderMemory);
+      api.reminders().then(renderReminders);
+    }
     else input.focus();
     reportSize();
   }
@@ -199,6 +203,72 @@
   document.getElementById('banner-login').addEventListener('click', () => api.loginClaude());
   document.getElementById('banner-more').addEventListener('click', () => setSettingsOpen(true));
   api.onBrain(renderBrain);
+
+  // ---------------------------------------------------------- reminders & memory
+  const reminderList = document.getElementById('reminder-list');
+  const memoryList = document.getElementById('memory-list');
+  const memoryCount = document.getElementById('memory-count');
+
+  function itemRow(text, when, onRemove, label) {
+    const row = document.createElement('div');
+    row.className = 'item';
+    if (when) { const w = document.createElement('span'); w.className = 'when'; w.textContent = when; row.append(w); }
+    const t = document.createElement('span');
+    t.textContent = text;
+    const x = button('✕', 'x', onRemove);
+    x.title = label;
+    x.setAttribute('aria-label', `${label}: ${text}`);
+    row.append(t, x);
+    return row;
+  }
+
+  function empty(msg) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = msg;
+    return e;
+  }
+
+  function fmtWhen(ts) {
+    const d = new Date(ts);
+    const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return d.toDateString() === new Date().toDateString() ? t : `${d.toLocaleDateString([], { weekday: 'short' })} ${t}`;
+  }
+
+  function renderReminders(list) {
+    reminderList.textContent = '';
+    if (!list || !list.length) { reminderList.append(empty('None. Ask me: "remind me in 20 minutes to stretch".')); return reportSize(); }
+    for (const r of list) reminderList.append(itemRow(r.text, fmtWhen(r.at), () => api.reminderCancel(r.id), 'Cancel reminder'));
+    reportSize();
+  }
+
+  function renderMemory(list) {
+    memoryList.textContent = '';
+    memoryCount.textContent = list && list.length ? `${list.length} saved` : '';
+    if (!list || !list.length) { memoryList.append(empty('Nothing yet. Tell me about yourself and I will remember.')); return reportSize(); }
+    for (const m of list) memoryList.append(itemRow(m.text, '', () => api.memoryForget(m.id), 'Forget'));
+    reportSize();
+  }
+
+  document.getElementById('memory-clear').addEventListener('click', () => {
+    if (confirm('Forget everything COre remembers about you?')) api.memoryClear();
+  });
+  api.onMemory(renderMemory);
+  api.onReminders(renderReminders);
+
+  // One-click actions COre offers (open a site, copy text). Nothing happens
+  // until the user clicks.
+  api.onAction(({ id, label }) => {
+    stickToBottom(() => {
+      const wrap = document.createElement('div');
+      wrap.className = 'action';
+      const b = button(label, '', () => { api.runAction(id); b.disabled = true; b.textContent = `${label} ✓`; });
+      wrap.append(b);
+      log.appendChild(wrap);
+      trim();
+    });
+    reportSize();
+  });
 
   api.onMessage(({ role, text }) => {
     if (role === 'core-start') { startStream(); return; }

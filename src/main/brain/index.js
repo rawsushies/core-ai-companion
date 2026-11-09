@@ -99,7 +99,8 @@ class Brain {
   // {kind:'provider'|'tool'|'fallback', ...} for the panel.
   // typed: the message came from the chat box (normal-chat answer, only the
   // opening is spoken). onText receives the reply text as it streams.
-  async ask({ text, shot, typed = false, signal, onItem, onText, onStatus = () => {} }) {
+  // context: extra blocks for the model ([Memory], [Clipboard]), appended to the message.
+  async ask({ text, shot, typed = false, context = '', signal, onItem, onText, onStatus = () => {} }) {
     // Providers without a key are skipped quietly instead of failing loudly.
     const providers = this.chain.filter((p) => !p.available || p.available());
     const failures = [];
@@ -113,7 +114,7 @@ class Brain {
       try {
         if (p.detect && shot) await p.detect().catch(() => {}); // know whether images can go inline
         await p.ask({
-          prompt: buildPrompt(p, typed ? `[typed] ${text}` : text, shot),
+          prompt: buildPrompt(p, `${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}`, shot),
           tone,
           image: shot && shot.base64 ? { base64: shot.base64, mediaType: shot.mediaType || 'image/png' } : null,
           signal,
