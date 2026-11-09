@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Live cards beside the orb
+- Setting a timer shows a live countdown card for a few seconds; "how long left?" brings it back instantly
+  (no brain). When a timer ends, a "Time's up" card shows next to the reminder.
+- Asking for the weather shows a card with now, today and tomorrow while COre talks about it.
+- Asking about your calendar shows a card with the day's events.
+
 ### Fixed (loop 1 audit)
 - Backups no longer contain paired phones' keys (on Linux without a keyring they were unencrypted), and restoring a
   backup keeps the phones paired with this PC.

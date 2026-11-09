@@ -210,6 +210,10 @@ test('memory: a remembered fact shows in quick settings and can be forgotten', a
 test('timers: a skill tag sets a reminder that shows in quick settings', async () => {
   await send('set a tea timer please');
   await dock.waitForFunction(() => /Timer set: tea/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  await overlay.waitForFunction(() => window.__coreGlance() && window.__coreGlance().kind === 'timer', null, { timeout: 5000 });
+  assert.match((await overlay.evaluate(() => window.__coreGlance())).cur, /^\d+:\d\d$/, 'live countdown');
+  await send('how long left?');
+  await dock.waitForFunction(() => /tea: \d+ minutes left/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
   await quickSettings(true);
   await dock.waitForFunction(() => document.getElementById('reminder-list').innerText.includes('tea'), null, { timeout: 5000 });
   assert.ok(await dock.isVisible('#reminder-list'), 'the reminders card is shown when there is one');

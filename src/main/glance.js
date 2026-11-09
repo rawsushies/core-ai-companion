@@ -129,6 +129,7 @@ function quickIntent(text) {
   if (/^(?:show|open|display|give me)(?: me)?(?: the)? (?:lyrics|lyric)(?: of this song| for this song)?$|^lyrics$|^sing along$/.test(t)) return { kind: 'glance', what: 'lyrics' };
   if (/^(?:what(?:'s| is) (?:playing|this song)|what song is (?:this|playing)|now playing|show (?:me )?(?:what's playing|now playing|the song|the music))$/.test(t)) return { kind: 'glance', what: 'music' };
   if (/^(?:hide|close|dismiss)(?: (?:the|that|it|this))?(?: (?:lyrics|card|glance|song))?$/.test(t)) return { kind: 'glance', what: 'off' };
+  if (/^(?:how (?:long|much time) (?:is )?left|show (?:me )?(?:my |the )?timers?|my timers?|timer status)$/.test(t)) return { kind: 'timers' };
   for (const [re, action] of MUSIC) if (re.test(t)) return { kind: 'music', action };
   return null;
 }

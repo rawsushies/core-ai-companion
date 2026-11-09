@@ -32,3 +32,4 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-020:** idle detail: a random half of the particles while idle (35% when away), eased back on activity; measured 51.6% to 45.5% CPU in safe graphics (6000 particles; full-screen passes dominate there).
 - **M-021:** TTS phrase cache (short clips, bounded) and background pre-rendering of quick-answer lines (real model: about 300 ms to synthesise, 0 ms cached); phone messages never trigger screenshots; audit updated.
 - **M-022 (loop 1):** P0 phone keys scrubbed from backups and kept on restore; P1 phone clock-skew retry loop fixed (server reports clock vs replay and its time; phone retries once); P2 whole chat panel takes the mouse; new real-app e2e suite (10 tests, about 19 s) added to CI.
+- **M-023 (loop 2):** live cards: timer countdown (and on completion), weather card, calendar card; 'how long left' quick intent; unit + real-app tests.

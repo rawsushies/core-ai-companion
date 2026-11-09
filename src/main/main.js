@@ -1401,6 +1401,16 @@ function glanceCard(title, lines, ms = 25000) {
   glanceTimer = setTimeout(hideGlance, ms);
 }
 
+// A live countdown card for a timer, for a few seconds after it's set or asked about.
+function glanceCountdown(at, text, ms = 9000) {
+  if (config.data.skills.glance === false) return;
+  stopGlanceReader();
+  clearTimeout(glanceTimer);
+  glance = { what: 'card' };
+  toOverlay('glance', { kind: 'timer', title: String(text || 'Timer'), endsAt: Number(at), startedAt: Date.now() });
+  glanceTimer = setTimeout(hideGlance, ms);
+}
+
 function pushGlance() {
   if (!glance || glance.what === 'card') return;
   const t = glance.track;
@@ -1456,6 +1466,7 @@ function showGlance(req) {
   if (!req || config.data.skills.glance === false) return;
   if (req.what === 'off') { hideGlance(); return; }
   if (req.what === 'card') { glanceCard(req.card.title, req.card.lines); return; }
+  if (req.what === 'timer') { glanceCountdown(req.at, req.text); return; }
   const prev = glance && glance.what !== 'card' ? glance : null;
   glance = { what: req.what, track: prev ? prev.track : null, key: prev ? prev.key : null, lyrics: null, linesSent: false, note: '' };
   if (glance.track && req.what === 'lyrics') loadLyrics(glance.track);
@@ -1503,7 +1514,10 @@ function quickReply(text, { typed }) {
   const now = new Date();
   if (q.kind === 'time') line = `It's ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
   else if (q.kind === 'date') line = `It's ${now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}.`;
-  else if (q.kind === 'glance') {
+  else if (q.kind === 'timers') {
+    const next = reminders.items.filter((x) => x.at > Date.now()).sort((a, b) => a.at - b.at)[0];
+    if (next) { glanceCountdown(next.at, next.text); line = `${next.text}: ${Math.max(1, Math.round((next.at - Date.now()) / 60000))} minutes left.`; } else line = 'No timers running.';
+  } else if (q.kind === 'glance') {
     if (config.data.skills.glance === false) return false;
     showGlance({ what: q.what });
     line = q.what === 'off' ? null : q.what === 'lyrics' ? QUICK_LINES.lyrics : QUICK_LINES.music_card;
@@ -1590,6 +1604,7 @@ function runAction(id) {
 
 function onReminder(r, missed) {
   toOverlay('attention', { level: 'warn', title: 'Reminder' });
+  if (config.data.skills.glance !== false && !missed) glanceCard("Time's up", [r.text], 15000);
   addTranscript('notice', `⏰ ${missed ? `Missed while I was off (${fmtTime(r.at)}): ` : ''}${r.text}`);
   toDock('dock:reminders', reminders.items);
   if (Notification.isSupported()) new Notification({ title: 'COre reminder', body: r.text }).show();

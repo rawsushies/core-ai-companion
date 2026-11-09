@@ -76,19 +76,33 @@ const WMO = {
   95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'thunderstorm with hail',
 };
 
-async function weather(city, fetchImpl) {
+// Returns { text, card } (card: a short glance card for the orb), or { text } when
+// the place is unknown.
+async function weatherReport(city, fetchImpl) {
   const q = encodeURIComponent(String(city).slice(0, 80));
   const g = await (await fetchImpl(`https://geocoding-api.open-meteo.com/v1/search?name=${q}&count=1&format=json`)).json();
   const place = g && g.results && g.results[0];
-  if (!place) return `No place called ${city} was found.`;
+  if (!place) return { text: `No place called ${city} was found.` };
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}`
     + '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m'
     + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&timezone=auto&forecast_days=2';
   const w = await (await fetchImpl(url)).json();
   const c = w.current || {};
   const d = w.daily || {};
-  const day = (i) => `${WMO[d.weather_code && d.weather_code[i]] || 'mixed'}, ${Math.round(d.temperature_2m_min[i])} to ${Math.round(d.temperature_2m_max[i])} C, ${d.precipitation_probability_max ? d.precipitation_probability_max[i] : 0} percent chance of rain`;
-  return `${place.name}${place.country ? `, ${place.country}` : ''}: now ${Math.round(c.temperature_2m)} C (feels ${Math.round(c.apparent_temperature)} C), ${WMO[c.weather_code] || 'mixed'}, wind ${Math.round(c.wind_speed_10m)} km/h. Today: ${day(0)}. Tomorrow: ${day(1)}.`;
+  const rain = (i) => (d.precipitation_probability_max ? d.precipitation_probability_max[i] : 0);
+  const day = (i) => `${WMO[d.weather_code && d.weather_code[i]] || 'mixed'}, ${Math.round(d.temperature_2m_min[i])} to ${Math.round(d.temperature_2m_max[i])} C, ${rain(i)} percent chance of rain`;
+  const name = `${place.name}${place.country ? `, ${place.country}` : ''}`;
+  const text = `${name}: now ${Math.round(c.temperature_2m)} C (feels ${Math.round(c.apparent_temperature)} C), ${WMO[c.weather_code] || 'mixed'}, wind ${Math.round(c.wind_speed_10m)} km/h. Today: ${day(0)}. Tomorrow: ${day(1)}.`;
+  const short = (i) => `${Math.round(d.temperature_2m_min[i])}–${Math.round(d.temperature_2m_max[i])} °C · ${rain(i)}% rain · ${WMO[d.weather_code && d.weather_code[i]] || 'mixed'}`;
+  const card = {
+    title: `${place.name} · ${Math.round(c.temperature_2m)} °C`,
+    lines: [`${WMO[c.weather_code] || 'Mixed'}, feels ${Math.round(c.apparent_temperature)} °C, wind ${Math.round(c.wind_speed_10m)} km/h`, `Today: ${short(0)}`, `Tomorrow: ${short(1)}`],
+  };
+  return { text, card };
+}
+
+async function weather(city, fetchImpl) {
+  return (await weatherReport(city, fetchImpl)).text;
 }
 
 // ------------------------------------------------------------------ calendar (ICS)
@@ -185,13 +199,14 @@ async function runSkill(name, args, ctx) {
     case 'timer': {
       const m = /^(\S+)\s*(.*)$/.exec(a);
       const r = m && ctx.reminders.add(m[1], m[2] || 'Timer');
-      return r ? { message: `Timer set: ${r.text}` } : { error: `Could not understand the timer ${a}.` };
+      return r ? { message: `Timer set: ${r.text}`, glance: { what: 'timer', at: r.at, text: r.text } } : { error: `Could not understand the timer ${a}.` };
     }
     case 'weather': {
       if (off('weather')) return { error: 'The weather skill is turned off in Settings.' };
       const city = a || cfg.city;
       if (!city) return { result: 'No city is known. Ask the user which city they are in (they can also set it in Settings, Skills).' };
-      return { result: await weather(city, ctx.fetch) };
+      const w = await weatherReport(city, ctx.fetch);
+      return w.card ? { result: w.text, glance: { what: 'card', card: w.card } } : { result: w.text };
     }
     case 'music': {
       if (off('music')) return { error: 'The music skill is turned off in Settings.' };
@@ -225,7 +240,11 @@ async function runSkill(name, args, ctx) {
       }
       const range = /tomorrow/i.test(a) ? 'tomorrow' : /week/i.test(a) ? 'week' : 'today';
       const [from, to] = CAL.rangeFor(range, ctx.now ? ctx.now() : new Date());
-      return { result: CAL.describe(CAL.occurrences(CAL.parseIcs(text), from, to), range) };
+      const list = CAL.occurrences(CAL.parseIcs(text), from, to);
+      const summary = CAL.describe(list, range);
+      const title = range === 'week' ? 'This week' : range === 'tomorrow' ? 'Tomorrow' : 'Today';
+      const lines = list.length ? summary.split('; ').filter(Boolean).slice(0, 6) : ['Nothing on the calendar.'];
+      return { result: summary, glance: { what: 'card', card: { title, lines } } };
     }
     case 'glance': {
       // The card beside the orb: music, lyrics, off, or "Title | line | line".
@@ -254,4 +273,4 @@ async function runSkill(name, args, ctx) {
   }
 }
 
-module.exports = { runSkill, appFor, musicCommand, Notes, loadPlugins, weather, BUILTIN };
+module.exports = { runSkill, appFor, musicCommand, Notes, loadPlugins, weather, weatherReport, BUILTIN };

@@ -248,6 +248,27 @@
     glanceEl.hidden = false;
     glanceEl.dataset.kind = g.kind;
     GE.list.textContent = '';
+    if (g.kind === 'timer') {
+      GE.kicker.textContent = 'Timer';
+      GE.title.textContent = g.title || 'Timer';
+      GE.sub.textContent = '';
+      GE.lyrics.hidden = false;
+      GE.prev.textContent = ''; GE.next.textContent = '';
+      const tick = () => {
+        const left = Math.max(0, g.endsAt - Date.now());
+        const m = Math.floor(left / 60000);
+        const h = Math.floor(m / 60);
+        const sec = Math.floor((left % 60000) / 1000);
+        GE.cur.textContent = left ? (h ? `${h}:${String(m % 60).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`) : "Time's up";
+        const total = Math.max(1, g.endsAt - g.startedAt);
+        GE.fill.style.transform = `scaleX(${Math.min(1, 1 - left / total).toFixed(4)})`;
+      };
+      tick();
+      glanceTimer = setInterval(tick, 1000);
+      GE.bar.hidden = false;
+      requestAnimationFrame(() => glanceEl.classList.add('show'));
+      return;
+    }
     if (g.kind === 'card') {
       GE.kicker.textContent = '';
       GE.title.textContent = g.title || '';

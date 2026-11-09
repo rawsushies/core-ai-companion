@@ -85,3 +85,9 @@ body.demo {
 .g-bar[hidden] { display: none; }
 .g-bar i { display: block; height: 100%; background: #3dff85; transform-origin: 0 50%; transform: scaleX(0); transition: transform 1s linear; }
 @media (prefers-reduced-motion: reduce) { .g-cur.in { animation: none; } .g-bar i { transition: none; } }
+/* Timer: the countdown is the hero. */
+.glance[data-kind="timer"] .g-prev, .glance[data-kind="timer"] .g-next { display: none; }
+.glance[data-kind="timer"] .g-lyrics { margin-top: 4px; }
+.glance[data-kind="timer"] .g-cur { font: 600 30px/1.1 "COre Mono", monospace; color: #7dffb0; letter-spacing: -0.02em; animation: none; }
+.glance[data-kind="timer"] .g-bar i { transition: transform 1s linear; }
+.glance[data-kind="card"] { width: 260px; }
