@@ -17,7 +17,14 @@ Approval to push is not approval to merge, and approval to merge is not approval
 | M-009 Permissioned read-only project access (Phase 4 slice 1) | `e343244` | M-008 | AWAITING USER APPROVAL |
 | M-010 Approved file changes with diff preview, Apply, Undo (Phase 4 slice 2) | `937aff2` | M-009 | AWAITING USER APPROVAL |
 | M-011 Phase 5/6 research + read-only Archicad PoC | `61b8af6` | M-010 | AWAITING USER APPROVAL |
-| M-012 Minimal branded UI: flat chat, bundled brand fonts, brand palette | `f13712d` | M-011 | AWAITING USER APPROVAL |
+| M-012 Minimal branded UI: flat chat, bundled brand fonts, brand palette | `f13712d` | M-011 | PUSHED to review/core-M-012 (PR #1) |
+| M-013 Measured CPU/GPU reductions, latency instrumentation | `4873823` | M-012 | PUSHED (user asked to push) |
+| M-014 Floating bubbles with click-through gaps (superseded by M-015) | `a33d8bc` | M-013 | PUSHED |
+| M-015 Chat redesign to the brand kit, brand audit across windows | `396e426` | M-014 | PUSHED |
+| M-016 Glance card (now playing, lyrics, cards) + instant answers | `28821ea` | M-015 | PUSHED |
+| M-017 Backups to a local or cloud-synced folder | `a8642a2` | M-016 | PUSHED |
+| M-018 Phone companion (LAN, end-to-end encrypted) | `5eb4f49` | M-017 | PUSHED |
+| M-019 No frames while hidden/locked, ambient and battery caps | `eb03f1b` | M-018 | PUSHED |
 
 ## Decisions needed (not code)
 - The published releases v2.0.0 – v10.2.0 are broken (missing installer or blockmap, no `latest.yml`).
@@ -46,3 +53,12 @@ Approval to push is not approval to merge, and approval to merge is not approval
 - The release workflow end to end (needs a tag, which needs your release approval).
 - Archicad, Revit and UI Automation against the real applications. The Android companion is design only.
 - On Linux without a keyring, Electron safeStorage falls back to `plain:` (a Windows/macOS keychain encrypts).
+
+## Update after M-019
+- Everything through M-019 is on `review/core-M-012` (draft PR #1) at the user's request. Nothing is merged,
+  tagged or released. Approval to push is not approval to merge or release.
+- CI on PR #1 passed on Linux and Windows (tests, packaged-app self-test, installer test) up to M-014; later
+  runs are in progress.
+- A stray branch `dev/core-next` was pushed by mistake and can't be deleted from this environment. It holds
+  only commits already on the PR. Please delete it on GitHub.
+- Tests at `eb03f1b`: `npm test` 187 passed, 0 failed. Follow-up audit: `docs/dev/AUDIT-FOLLOWUP.md`.
