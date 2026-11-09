@@ -714,6 +714,14 @@
       bridge.onDissolve(() => { anim.formTarget = 0; });
       bridge.onAssemble(() => { anim.form = 0; anim.formVel = 0; anim.formTarget = 1; });
       bridge.onListenStop(() => listener.stop());
+      // Moved to another monitor: reassemble at the new home.
+      bridge.onRelocate((h) => {
+        if (!h) return;
+        home = { x: h.x, y: h.y };
+        body.pos = { ...home }; body.tail = { ...home }; body.target = { ...home }; body.vel = { x: 0, y: 0 };
+        auraC = null;
+        anim.form = 0; anim.formVel = 0; anim.formTarget = 1;
+      });
       bridge.onSpeechStop(stopAll);
       bridge.onHover((over) => { hoverSince = over ? performance.now() : 0; });
       bridge.onConfig(applyConfig);

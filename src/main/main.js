@@ -21,6 +21,8 @@ const SCHEMA = require('./settingsSchema');
 const { Presence, chitchatPrompt } = require('./presence');
 const CL = require('./clones');
 const { matchWake } = require('./handsfree');
+const { ScreenWatch } = require('./watch');
+const { refinePoint } = require('./pointing');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -133,8 +135,35 @@ function addTranscript(role, text) {
   if (role !== 'core') toDock('dock:message', { role: role === 'notice' ? 'system' : role, text });
 }
 
+// The display COre lives on (follows you to the monitor you use when
+// orb.followDisplay is on). Named for history: it used to be the primary one.
+let orbDisplayId = null;
 function primaryDisplay() {
+  if (orbDisplayId !== null) {
+    const d = screen.getAllDisplays().find((x) => x.id === orbDisplayId);
+    if (d) return d;
+    orbDisplayId = null;
+  }
   return screen.getPrimaryDisplay();
+}
+
+// Summoned from another monitor: reassemble on that one.
+function followCursorDisplay() {
+  if (config.data.orb.followDisplay === false || !overlay || overlay.isDestroyed()) return false;
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  if (d.id === primaryDisplay().id) return false;
+  orbDisplayId = d.id;
+  stage = null;
+  applyStage(initialStage());
+  const cfg = overlayConfig();
+  toOverlay('config', cfg);
+  const h = config.data.orb.home;
+  const home = h && h.x > 0 && h.y > 0 && h.x < d.size.width && h.y < d.size.height ? h : defaultHome();
+  toOverlay('relocate', home);
+  orbBounds = { ...orbBounds, x: home.x, y: home.y };
+  dockAnchor = { x: home.x, y: home.y, r: orbBounds.r };
+  if (dockVisible) positionDock();
+  return true;
 }
 
 function brainStatus() {
@@ -926,8 +955,10 @@ async function captureScreen() {
   const old = fs.readdirSync(dir).filter((f) => f.startsWith('shot-')).sort().slice(0, -5);
   for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
 
+  let bmp = null;
   return {
     path: file,
+    bitmap: () => (bmp || (bmp = { data: img.toBitmap(), width: size.width, height: size.height })), // for smarter pointing
     width: size.width,
     height: size.height,
     base64: data.toString('base64'),
@@ -1003,6 +1034,10 @@ function runAction(id) {
   actions.delete(id);
   if (a.kind === 'open' && /^https?:\/\//i.test(a.value)) shell.openExternal(a.value);
   if (a.kind === 'copy') Promise.resolve(require('electron').clipboard.writeText(a.value)).catch(() => {});
+  if (a.kind === 'look') {
+    const t = String(a.value).replace(/["&|<>^%!]/g, '');
+    handleUserText(`Take a look at my screen. A window called ${t} just appeared. What does it say, and how do I fix it?`, { withScreen: true });
+  }
 }
 
 function onReminder(r, missed) {
@@ -1296,6 +1331,31 @@ function cloneHitTest(p) {
   }
 }
 
+// ---------------------------------------------------------------- screen partner (watch mode)
+
+let watch = null;
+function offerLook(title) {
+  const id = require('crypto').randomUUID();
+  actions.set(id, { kind: 'look', value: title });
+  while (actions.size > 30) actions.delete(actions.keys().next().value);
+  toOverlay('attention', { level: 'warn', title });
+  addTranscript('system', `👀 "${title}" just popped up.`);
+  toDock('dock:action', { id, kind: 'look', label: 'Take a look' });
+  if (config.data.watch && config.data.watch.speak !== false && !current && !listening && !mainSpeaking) {
+    speakLine('Something just popped up that looks like a problem. Want me to take a look? It is in the chat.');
+  }
+}
+
+function startWatch() {
+  watch = new ScreenWatch({
+    listTitles: openWindowTitles,
+    onProblem: offerLook,
+    getConfig: () => config.data.watch || {},
+    isQuiet: () => !current && !listening && !orbHidden,
+  });
+  watch.start();
+}
+
 // ---------------------------------------------------------------- presence
 
 const REACTIONS = {
@@ -1417,7 +1477,9 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
         if (ac.signal.aborted) return;
         if (item.type === 'gesture' && item.name === 'point') {
           if (!shot || !shot.canPoint) return; // nothing real to point at on this monitor
-          pipeline.push({ ...item, ...mapPoint(shot, item.x, item.y) });
+          let { x, y } = item;
+          try { if (shot.bitmap) ({ x, y } = refinePoint(shot.bitmap(), x, y)); } catch {}
+          pipeline.push({ ...item, ...mapPoint(shot, x, y) });
           return;
         }
         if (item.type === 'gesture' && handleActionTag(item)) return;
@@ -1522,9 +1584,9 @@ function registerHotkeys() {
       addTranscript('system', `Invalid hotkey ${prettyKey(accel)}: ${err.message}`);
     }
   };
-  bind(hk.listen, () => startListening(false), 'talk');
-  bind(hk.listenWithScreen, () => startListening(true), 'talk about screen');
-  bind(hk.panel, () => toggleDock(), 'chat');
+  bind(hk.listen, () => { followCursorDisplay(); startListening(false); }, 'talk');
+  bind(hk.listenWithScreen, () => { followCursorDisplay(); startListening(true); }, 'talk about screen');
+  bind(hk.panel, () => { followCursorDisplay(); toggleDock(); }, 'chat');
   bind(hk.hide, toggleOrb, 'hide orb');
 }
 
@@ -1967,6 +2029,8 @@ app.whenReady().then(async () => {
   updater.start(relaunchAfterUpdate);
   reminders.start();
   startPresence();
+  startWatch();
+  if (process.env.CORE_DEBUG_WATCH) setTimeout(() => offerLook(process.env.CORE_DEBUG_WATCH), 9000); // end-to-end tests
   floor = new CL.SpeechFloor({ mainBusy: () => !!current || !!listening || (mainSpeaking && Date.now() - mainSpeakingSince < 60_000) });
   setInterval(() => floor.pump(), 500);
   if (process.env.CORE_DEBUG_CHITCHAT) setTimeout(() => startChitchat({ quietMinutes: 30 }), 9000); // end-to-end tests

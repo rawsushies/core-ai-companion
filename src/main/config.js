@@ -70,8 +70,13 @@ const DEFAULTS = {
     idleFps: 30, // frame rate when nothing is happening (moving/talking always runs at full rate)
     graphics: 'auto', // 'auto' | 'software' (safe mode: fixes black boxes on some drivers) | 'gpu'
     backdrop: 'auto', // 'auto' follows your Windows/macOS light or dark theme; or 'light' / 'dark'
+    followDisplay: true, // move to the monitor you're using when you summon COre
     hideFromCaptures: true, // hide the orb for a moment while COre takes a screenshot
     home: null, // {x, y} remembered after you drag it
+  },
+  watch: {
+    enabled: true, // notice error pop-ups / frozen apps from window titles and offer help (no screenshots)
+    speak: true, // say so out loud (otherwise just the chat and a colour)
   },
   screen: {
     autoShareOnDeixis: true, // phrases like "look at this" / "what's on my screen" attach a screenshot

@@ -45,4 +45,5 @@ contextBridge.exposeInMainWorld('core', {
   onCursor: () => noop,
   onDissolve: on('dissolve'),
   onAssemble: on('assemble'),
+  onRelocate: () => noop,
 });

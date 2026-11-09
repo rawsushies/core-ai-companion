@@ -54,11 +54,11 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
 - Wake word ("Hey COre", on-device), push-to-talk hold mode, barge-in (talk over COre to interrupt),
   continuous conversation mode.
 
-## 🔨 v7.0.0 — Screen partner
+## ✅ v7.0.0 — Screen partner
 - Optional watch mode: COre notices errors/dialogs on screen and offers help; smarter pointing (UI element
   detection), multi-monitor presence.
 
-## ⏳ v8.0.0 — Skills
+## 🔨 v8.0.0 — Skills
 - Plugin/skill system (safe, permissioned): timers, notes, weather, music control, app launcher, web
   search via the brain, calendar integrations.
 

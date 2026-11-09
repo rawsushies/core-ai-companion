@@ -1,5 +1,15 @@
 # Changelog
 
+## 7.0.0 — Screen partner
+- Watch mode: when an error dialog, crash report, failed install or "(Not Responding)" window appears,
+  COre glows, mentions it, and offers a **Take a look** button in the chat. It only reads window titles
+  to notice this; a screenshot is taken only when you click. Rate limited (one offer a minute, the same
+  problem at most every 10 minutes), quiet while you're talking to it, and switchable in Settings → Privacy.
+- Smarter pointing: when COre points at something on a screenshot, the smoke finger snaps onto the nearest
+  button, icon or label instead of landing next to it.
+- Multi-monitor: summon COre with a hotkey on another screen and it reassembles there, so it can point
+  at what you're looking at (Settings → Look → Move to the screen I'm using).
+
 ## 6.0.0 — Hands-free
 - "Hey COre": an optional wake phrase, detected entirely on this PC (Settings → Voice, or tray →
   Hands-free). A cheap sound detector only passes short phrases that follow a pause to the local speech

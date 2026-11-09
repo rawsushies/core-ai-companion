@@ -34,6 +34,7 @@ const SECTIONS = [
       { key: 'orb.renderScale', label: 'Render quality', type: 'range', min: 0.5, max: 1, step: 0.05, restart: true },
       { key: 'orb.idleFps', label: 'Idle frame rate', type: 'range', min: 15, max: 60, step: 5, unit: 'fps' },
       { key: 'orb.backdrop', label: 'Backdrop', type: 'select', options: [['auto', 'Follow Windows theme'], ['dark', 'Dark wallpaper look'], ['light', 'Light wallpaper look']] },
+      { key: 'orb.followDisplay', label: 'Move to the screen I\'m using when I call COre', type: 'toggle' },
       { key: 'orb.graphics', label: 'Graphics mode', type: 'select', options: [['auto', 'Automatic'], ['software', 'Safe mode (fixes black boxes)'], ['gpu', 'Force GPU']], restart: true },
     ],
   },
@@ -70,6 +71,8 @@ const SECTIONS = [
     title: 'Privacy',
     fields: [
       { key: 'memory.enabled', label: 'Remember things about me', type: 'toggle' },
+      { key: 'watch.enabled', label: 'Notice error pop-ups and offer help (reads window titles only)', type: 'toggle' },
+      { key: 'watch.speak', label: 'Say it out loud when something pops up', type: 'toggle' },
       { key: 'screen.autoShareOnDeixis', label: 'Look at my screen when I say "look at this"', type: 'toggle' },
       { key: 'orb.hideFromCaptures', label: 'Hide COre from its own screenshots', type: 'toggle' },
       { key: 'notify.enabled', label: 'Accept notifications from other programs', type: 'toggle', restart: true },
