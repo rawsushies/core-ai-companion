@@ -103,7 +103,9 @@
   uniform vec2  uArmP[8];
   uniform vec4  uArmR[2];
   uniform float uArmOn[2];
-  uniform float uArmMode[2]; // 0 = pointing (index finger out), 1 = open explaining hand
+  uniform float uArmMode[2]; // 0 = pointing (index finger out), 1 = open explaining hand, 2 = gesture hand
+  uniform float uFing[10];   // gesture hands: finger extension 0..1, thumb..pinky, per arm
+  uniform float uRoll[2];    // gesture hands: extra rotation (right-hand terms)
   // Animations: uForm 0 = scattered cloud .. 1 = formed sphere (assemble /
   // dissolve); uPulse = shockwave (origin x, y, age s, strength); uSpin = extra
   // swirl around the vertical axis; uInhale = shell drawn inward (listening).
@@ -117,8 +119,17 @@
 
   // Finger layout: angle (radians, relative to the arm direction) and length
   // (fraction of hand size). Thumb first.
-  void fingerSpec(int f, float mode, out float ang, out float len) {
-    if (mode > 0.5) {           // open hand
+  void fingerSpec(int f, float mode, float ext, out float ang, out float len) {
+    if (mode > 1.5) {           // gesture hand: open layout, each finger curls by ext
+      float oa, ol;
+      if (f == 0) { oa = -1.15; ol = 0.7; }
+      else if (f == 1) { oa = -0.42; ol = 0.9; }
+      else if (f == 2) { oa = 0.0; ol = 0.96; }
+      else if (f == 3) { oa = 0.4; ol = 0.86; }
+      else { oa = 0.8; ol = 0.66; }
+      ang = oa * mix(0.75, 1.0, ext);
+      len = mix(0.2, ol, ext);
+    } else if (mode > 0.5) {    // open hand
       if (f == 0) { ang = -1.08; len = 0.55; }
       else if (f == 1) { ang = -0.48; len = 0.86; }
       else if (f == 2) { ang = 0.0; len = 0.96; }
@@ -166,7 +177,7 @@
       float mode = uArmMode[arm];
       float side = arm == 0 ? -1.0 : 1.0;
       float grow = clamp(uArmOn[arm], 0.0, 1.0);
-      float hs = uR * 0.5 * grow;                       // hand size
+      float hs = uR * (mode > 1.5 ? 0.64 : 0.5) * grow; // hand size (gesture hands read bigger)
       vec2 tip = uArmP[arm * 4 + 3];
       vec2 adir = normalize(tip - uArmP[arm * 4 + 2] + vec2(1e-4));
       // Pointing: the index fingertip lands on the target, so the palm sits
@@ -204,16 +215,19 @@
         // Fingers: smoke flows from the knuckle to the fingertip.
         int fi = int(floor(h2.y * 4.999));
         float fang, flen;
-        fingerSpec(fi, mode, fang, flen);
-        float flex = mode > 0.5 ? sin(uTime * 2.6 + float(fi) * 1.3) * 0.12 : sin(uTime * 3.0) * 0.03;
-        vec2 fdir = rot2(adir, side * (fang + flex));
+        float fext = uFing[arm * 5 + fi];
+        fingerSpec(fi, mode, fext, fang, flen);
+        float flex = mode > 1.5 ? sin(uTime * 2.6 + float(fi) * 1.3) * 0.05 * fext
+                   : mode > 0.5 ? sin(uTime * 2.6 + float(fi) * 1.3) * 0.12 : sin(uTime * 3.0) * 0.03;
+        float roll = mode > 1.5 ? uRoll[arm] : 0.0;
+        vec2 fdir = rot2(adir, side * (fang + flex + roll));
         vec2 fperp = vec2(-fdir.y, fdir.x);
         float rate = 0.9 + 0.6 * h2.z;
         float t = fract(seed * 29.1 + uTime * rate);
         wrapped = t < fract(seed * 29.1 + (uTime - uDt) * rate);
         vec2 knuckle = palm + fdir * hs * 0.3;
         float L = flen * hs;
-        float curl = (mode > 0.5 ? 0.12 : (fi == 1 ? 0.02 : 0.35)) * L;
+        float curl = (mode > 1.5 ? mix(0.4, 0.1, fext) : mode > 0.5 ? 0.12 : (fi == 1 ? 0.02 : 0.35)) * L;
         float width = hs * 0.055 * (1.0 - 0.55 * t);
         vec2 jit = (hash31(seed * 91.7).xy - 0.5) * width * 2.0;
         target = vec3(knuckle + fdir * L * t + fperp * side * curl * sin(t * 3.14159) + jit,
@@ -498,6 +512,8 @@
       this.armR = new Float32Array(8);
       this.armOn = new Float32Array(2);
       this.armMode = new Float32Array(2);
+      this.fing = new Float32Array(10).fill(1);
+      this.roll = new Float32Array(2);
       this.lastT = null;
       this.trails = null;
       this.resize();
@@ -545,7 +561,9 @@
       for (let i = 0; i < 2; i++) {
         const g = s.arms[i];
         this.armOn[i] = g ? g.on : 0;
-        this.armMode[i] = g && g.mode === 'explain' ? 1 : 0;
+        this.armMode[i] = !g ? 0 : g.mode === 'gesture' ? 2 : g.mode === 'explain' ? 1 : 0;
+        this.roll[i] = g ? g.roll || 0 : 0;
+        for (let f = 0; f < 5; f++) this.fing[i * 5 + f] = g && g.fingers ? g.fingers[f] : 1;
         for (let k = 0; k < 4; k++) {
           this.armP[i * 8 + k * 2] = g ? g.pts[k].x : 0;
           this.armP[i * 8 + k * 2 + 1] = g ? g.pts[k].y : 0;
@@ -569,6 +587,8 @@
       gl.uniform4fv(su.uArmR, this.armR);
       gl.uniform1fv(su.uArmOn, this.armOn);
       gl.uniform1fv(su.uArmMode, this.armMode);
+      gl.uniform1fv(su.uFing, this.fing);
+      gl.uniform1fv(su.uRoll, this.roll);
       gl.uniform1f(su.uForm, s.form === undefined ? 1 : s.form);
       const pl = s.pulse;
       gl.uniform4f(su.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);

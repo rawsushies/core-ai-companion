@@ -28,13 +28,13 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
 - Settings window (all options in a UI, not config.json): brains, voice, look, hotkeys, privacy, startup.
 - Start with Windows (optional), single-click "Quit/Restart/Reset" maintenance tools.
 
-## 🔨 v2.0.0 — Body language
+## ✅ v2.0.0 — Body language
 - Gesture library: 20+ cheap hand/body animations (wave, thumbs up, shrug, count on fingers, clap, facepalm,
   point up/down/left/right, beckon, stop palm, OK sign, peace, heart hands, thinking chin, salute, spin,
   bow, nod, shake, celebrate, juggle…), all from the same particle arms (no extra GPU work).
 - `[[gesture name]]` tag + automatic gestures from the reply's meaning.
 
-## ⏳ v3.0.0 — Shape-shifting
+## 🔨 v3.0.0 — Shape-shifting
 - COre forms shapes/emoji out of its smoke (laughing face, heart, check mark, question mark, star, sun,
   moon, music note, arrows, numbers/letters…) with matching voice expression (giggle, hum, sigh).
 - `[[form laugh]]` tag; particle targets sampled from tiny vector glyphs (cheap).

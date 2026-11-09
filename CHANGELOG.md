@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0 — Body language
+- 30 gestures, all made from COre's own smoke arms and body, so they cost nothing extra on the GPU:
+  wave, thumbs up/down, shrug, count to five, clap, facepalm, point up/down/left/right, beckon, stop,
+  OK, peace, rock, heart hands, think, salute, fist pump, celebrate, juggle, hug, magic, flex, bow,
+  nod, shake, spin and bounce.
+- Smoke hands now have individually moving fingers (each finger curls and straightens).
+- COre picks gestures while it talks (`[[gesture NAME]]`), and when it doesn't, adds one that fits
+  what it's saying now and then: a wave for hello, a shrug for "no idea", a count for "second…".
+- Idle fidgets: every so often COre juggles, flexes, ponders or waves on its own.
+
 ## 1.0.0 — Real app
 - Settings window (tray → Settings…, or ⚙ → All settings… in the chat): every option in one place,
   grouped into General, Look, Voice, Brain and Privacy. Changes apply instantly where possible; the

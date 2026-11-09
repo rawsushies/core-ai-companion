@@ -12,11 +12,13 @@
 // closes is released as plain text.
 const MAX_TAG_LEN = 2100; // room for a [[copy ...]] snippet
 const MOODS = new Set(['happy', 'amused', 'curious', 'annoyed', 'excited', 'sad', 'calm']);
+const Gestures = require('../../renderer/overlay/gestures');
 
 // Tags (all silent):
 //   [[point X,Y]]            reach a hand to a screenshot pixel
 //   [[explain]]              open-hands gesture
 //   [[mood happy]]           smoke reacts (happy|amused|curious|annoyed|excited|sad|calm)
+//   [[gesture wave]]         body language from the gesture library (count takes a number)
 //   [[remember TEXT]]        save a fact about the user
 //   [[forget TEXT]]          drop a remembered fact
 //   [[remind WHEN TEXT]]     reminder / timer, WHEN = 10m, 90s, 1h30m, 18:30, 7pm
@@ -34,6 +36,11 @@ function parseTag(body) {
     return { name, x: Number(nums[0]), y: Number(nums[1]) };
   }
   if (name === 'explain') return { name };
+  if (name === 'gesture') {
+    const n = /\b([1-5])\b/.exec(rest);
+    const g = Gestures.resolve(rest.replace(/\b[1-5]\b/, '').trim());
+    return g ? { name, gesture: g, ...(n ? { n: Number(n[1]) } : {}) } : null;
+  }
   if (name === 'mood') {
     const mood = rest.toLowerCase().split(/\s+/)[0];
     return MOODS.has(mood) ? { name, mood } : null;
@@ -96,7 +103,7 @@ class TagStreamParser {
   flush() {
     const out = [];
     // An unclosed run is plain text, unless it's clearly a cut-off tag.
-    const cutTag = /^\[\[\s*(point|explain|mood|remember|forget|remind|open|copy)\b/i.test(this.buf);
+    const cutTag = /^\[\[\s*(point|explain|gesture|mood|remember|forget|remind|open|copy)\b/i.test(this.buf);
     const rest = cutTag ? '' : this.buf;
     pushText(out, rest);
     this.buf = '';

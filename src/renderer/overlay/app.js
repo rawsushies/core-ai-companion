@@ -6,6 +6,7 @@
 
   const M = window.Motion;
   const S = window.Stage;
+  const G = window.Gestures;
   const bridge = window.core || null;
   const params = new URLSearchParams(location.search);
 
@@ -54,6 +55,11 @@
   let pointing = null; // { x, y, park, startedAt, until, arm }
   let explainUntil = 0;
   let lastGestureAt = 0;
+  // Body language from the gesture library: { name, start, opts, freeze }
+  let act = null;
+  let actBody = { dx: 0, dy: 0, spin: 0, squash: 0 };
+  let lastModelGesture = 0;
+  let lastAutoGesture = 0;
   const vis = { tint: MODES.idle.tint.slice(), glow: 0.14, think: 0, halo: 0, listen: 0, aura: 0.78 };
   let auraC = null; // display coordinates; trails the body like the smoke does
   let mood = null; // { name, since }
@@ -75,6 +81,7 @@
     onSay: (text, ms) => {
       showCaption(text);
       if (text && bridge) bridge.spoken(text, ms); // keeps the chat text in step with the voice
+      if (text) maybeAutoGesture(text);
     },
     onSpeakStart: () => setMode('speaking'),
     // Any finished turn returns to idle, including silent or empty replies.
@@ -154,9 +161,54 @@
     });
   }
 
+  function startGesture(name, opts = {}) {
+    const key = G.resolve(name);
+    if (!key || !body) return false;
+    act = { name: key, start: performance.now(), opts };
+    explainUntil = 0;
+    lastGestureAt = performance.now();
+    if (G.LIB[key].pulse) pulseAt(body.pos.x, body.pos.y, G.LIB[key].pulse);
+    return true;
+  }
+
+  // When the model didn't pick a gesture, sometimes add one that fits what
+  // is being said (a wave for hello, a shrug for "no idea"...). Sparing on
+  // purpose: at most one every 7 s.
+  function maybeAutoGesture(text) {
+    const now = performance.now();
+    if (act || pointing || body.dragging || now - lastModelGesture < 5000 || now - lastAutoGesture < 7000) return;
+    const g = G.autoGesture(text);
+    if (!g || Math.random() > 0.75) return;
+    lastAutoGesture = now;
+    startGesture(g.name, g.opts);
+  }
+
+  function updateGesture(now, t) {
+    if (!act) { actBody = { dx: 0, dy: 0, spin: 0, squash: 0 }; return; }
+    const e = act.freeze !== undefined ? act.freeze : (now - act.start) / 1000;
+    const g = G.sample(act.name, e, t, act.opts);
+    const r = body.r;
+    body.arms.forEach((arm, i) => {
+      if (pointing && pointing.arm === i) return;
+      const h = g.done ? null : g.arms[i];
+      if (h) {
+        arm.mode = 'gesture';
+        arm.goal = h.ext;
+        arm.target = { x: body.pos.x + h.x * r, y: body.pos.y + h.y * r };
+        arm.fingers = h.fingers;
+        arm.roll = h.roll;
+      } else if (arm.mode === 'gesture') {
+        arm.goal = 0;
+      }
+    });
+    actBody = g.done ? { dx: 0, dy: 0, spin: 0, squash: 0 } : g.body;
+    if (g.done) act = null;
+  }
+
   function gesture(item) {
     if (item.name === 'point') point(item.x, item.y);
     else if (item.name === 'explain') explain();
+    else if (item.name === 'gesture') { lastModelGesture = performance.now(); startGesture(item.gesture, { n: item.n }); }
     else if (item.name === 'mood' && MOODS[item.mood]) mood = { name: item.mood, since: performance.now() };
   }
 
@@ -170,6 +222,7 @@
     voice.stop();
     pointing = null;
     explainUntil = 0;
+    act = null;
     body.arms.forEach((a) => { a.goal = 0; });
     if (mode === 'speaking' || mode === 'thinking') setMode('idle');
   }
@@ -226,9 +279,10 @@
     if (!quiet) anim.nextIdle = Math.max(anim.nextIdle, now + 8000);
     else if (now > anim.nextIdle) {
       const pick = Math.random();
-      if (pick < 0.4) anim.spinUntil = now + 2200; // a slow spin
-      else if (pick < 0.7) body.vel.y -= r * 9; // a little hop
-      else pulseAt(body.pos.x, body.pos.y, 0.6); // a ripple
+      if (pick < 0.25) anim.spinUntil = now + 2200; // a slow spin
+      else if (pick < 0.45) body.vel.y -= r * 9; // a little hop
+      else if (pick < 0.6) pulseAt(body.pos.x, body.pos.y, 0.6); // a ripple
+      else startGesture(['magic', 'juggle', 'bounce', 'think', 'flex', 'wave'][Math.floor(Math.random() * 6)]); // fidget
       anim.nextIdle = now + 25000 + Math.random() * 20000;
     }
 
@@ -285,7 +339,7 @@
 
   // Is anything happening that needs full frame rate?
   function isActive() {
-    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || body.dragging || !!attention || !!mood || noticeKick > 0.05
+    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || !!act || body.dragging || !!attention || !!mood || noticeKick > 0.05
       || anim.form < 0.995 || !!anim.pulse || anim.spin > 0.05 || anim.inhale > 0.02
       || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
   }
@@ -303,6 +357,7 @@
     const t = (now - t0) / 1000;
 
     updateBehaviour(now, t);
+    updateGesture(now, t);
     M.step(body, dt);
     const md0 = mood ? MOODS[mood.name] : null;
     const amp = Math.min(1, voice.update(dt, t) * (1 + (md0 ? Math.max(0, md0.energy) * moodW : 0)));
@@ -311,8 +366,8 @@
     // A tiny shiver while speaking sells the "vibrating" voice.
     const jitter = amp * body.r * 0.025;
     const pos = {
-      x: body.pos.x + (Math.sin(t * 61) + Math.sin(t * 37)) * 0.5 * jitter,
-      y: body.pos.y + (Math.sin(t * 53 + 1) + Math.sin(t * 29)) * 0.5 * jitter,
+      x: body.pos.x + (Math.sin(t * 61) + Math.sin(t * 37)) * 0.5 * jitter + actBody.dx * body.r,
+      y: body.pos.y + (Math.sin(t * 53 + 1) + Math.sin(t * 29)) * 0.5 * jitter + actBody.dy * body.r,
     };
     const shown = { ...body, pos };
     const arms = body.arms.map((a) => (a.mode === 'off' && a.extend < 0.02 ? null : M.armGeometry(shown, a, t)));
@@ -353,8 +408,8 @@
       aura: vis.aura * Math.min(1, anim.form),
       form: Math.min(1, anim.form),
       pulse: anim.pulse ? { ...local(anim.pulse), age: (now - anim.pulse.t0) / 1000, strength: anim.pulse.strength } : null,
-      spin: anim.spin,
-      inhale: anim.inhale,
+      spin: anim.spin + actBody.spin,
+      inhale: Math.min(1, anim.inhale + Math.max(0, actBody.squash) * 4),
     });
 
     placeCaption(local(pos));
@@ -552,6 +607,7 @@
     addEventListener('mousemove', (e) => { mouse = { x: e.clientX, y: e.clientY }; });
     const levels = Object.keys(ATTENTION);
     let li = -1;
+    let gi = -1;
     addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
       if (k === 'p') { voice.action(() => point(mouse.x, mouse.y)); voice.say('That spot, right there.'); voice.end(); }
@@ -566,6 +622,7 @@
       if (k === 'w') pulseAt(body.pos.x, body.pos.y, 1);
       if (k === 's') anim.spinUntil = performance.now() + 2200;
       if (k === 'h') anim.formTarget = anim.formTarget ? 0 : 1;
+      if (k === 'g') { gi = (gi + 1) % G.NAMES.length; startGesture(G.NAMES[gi], { n: 3 }); showCaption(G.NAMES[gi]); }
     });
 
     // Deterministic poses for screenshots: ?pose=idle|speaking|point|explain|attention|move
@@ -586,6 +643,11 @@
       if (pose === 'assemble') { anim.form = 0; anim.formTarget = 0; setTimeout(() => { anim.formTarget = 1; }, Number(params.get('at') || 0)); }
       if (pose === 'pulse') setTimeout(() => pulseAt(c.x, c.y, 1.2), Number(params.get('at') || 0));
       if (pose === 'mood') { gesture({ name: 'mood', mood: params.get('mood') || 'happy' }); mood.since = performance.now() + 60000; }
+      if (pose === 'gesture') {
+        startGesture(params.get('g') || 'wave', { n: Number(params.get('n')) || 3 });
+        act.freeze = Number(params.get('at') || 1);
+        act.start = 0;
+      }
       if (pose === 'move') { body.pos = { x: c.x - 260, y: c.y + 40 }; body.tail = { ...body.pos }; body.target = { x: c.x + 220, y: c.y - 20 }; lastGestureAt = performance.now() + 60000; }
     }
   }

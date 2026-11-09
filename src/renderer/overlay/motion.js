@@ -28,7 +28,9 @@
   function makeArm(side) {
     return {
       side, // -1 left, +1 right
-      mode: 'off', // 'off' | 'point' | 'explain'
+      mode: 'off', // 'off' | 'point' | 'explain' | 'gesture'
+      fingers: null, // gesture: 5 extensions 0..1 (thumb..pinky)
+      roll: 0, // gesture: extra hand rotation (radians, right-hand terms)
       goal: 0,
       extend: 0,
       extendVel: 0,
@@ -141,6 +143,8 @@
     return {
       on: e,
       mode: arm.mode,
+      fingers: arm.mode === 'gesture' && arm.fingers ? arm.fingers : null,
+      roll: arm.mode === 'gesture' ? arm.roll || 0 : 0,
       pts: [base, at(0.36), at(0.72), tip],
       radii: radii.map((v) => v * grow),
     };
