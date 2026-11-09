@@ -125,46 +125,11 @@ class LinuxDriver {
 }
 
 // Windows: one fixed PowerShell helper (C# SendInput) that reads JSON lines.
-const WIN_HELPER = String.raw`
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System; using System.Runtime.InteropServices;
-public static class CoreInput {
-  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr extra; }
-  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr extra; }
-  [StructLayout(LayoutKind.Explicit)] public struct U { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
-  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public U u; }
-  [DllImport("user32.dll")] static extern uint SendInput(uint n, INPUT[] i, int size);
-  [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
-  [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
-  static void Send(INPUT i) { SendInput(1, new INPUT[] { i }, Marshal.SizeOf(typeof(INPUT))); }
-  static INPUT M(uint f, uint data) { var i = new INPUT(); i.type = 0; i.u.mi.dwFlags = f; i.u.mi.mouseData = data; return i; }
-  public static void Init() { SetProcessDPIAware(); }
-  public static void Move(int x, int y) { SetCursorPos(x, y); }
-  public static void Click(int x, int y, string b, bool dbl) {
-    SetCursorPos(x, y); uint d = 2, u = 4; if (b == "right") { d = 8; u = 16; } else if (b == "middle") { d = 32; u = 64; }
-    for (int n = 0; n < (dbl ? 2 : 1); n++) { Send(M(d, 0)); Send(M(u, 0)); }
-  }
-  public static void Wheel(int clicks) { Send(M(0x0800, unchecked((uint)(-clicks * 120)))); }
-  public static void Key(ushort vk, bool up) { var i = new INPUT(); i.type = 1; i.u.ki.wVk = vk; i.u.ki.dwFlags = up ? 2u : 0u; Send(i); }
-  public static void Char(char c) { foreach (uint f in new uint[] { 4u, 6u }) { var i = new INPUT(); i.type = 1; i.u.ki.wScan = c; i.u.ki.dwFlags = f; Send(i); } }
-}
-"@
-[CoreInput]::Init()
-while ($null -ne ($line = [Console]::In.ReadLine())) {
-  try {
-    $c = $line | ConvertFrom-Json
-    switch ($c.op) {
-      'move' { [CoreInput]::Move([int]$c.x, [int]$c.y) }
-      'click' { [CoreInput]::Click([int]$c.x, [int]$c.y, [string]$c.button, [bool]$c.double) }
-      'wheel' { if ($c.x -ne $null) { [CoreInput]::Move([int]$c.x, [int]$c.y) }; [CoreInput]::Wheel([int]$c.dy) }
-      'type' { foreach ($ch in ([string]$c.text).ToCharArray()) { [CoreInput]::Char($ch); Start-Sleep -Milliseconds 8 } }
-      'key' { foreach ($vk in $c.down) { [CoreInput]::Key([uint16]$vk, $false) }; [array]::Reverse($c.down); foreach ($vk in $c.down) { [CoreInput]::Key([uint16]$vk, $true) } }
-    }
-    [Console]::Out.WriteLine('ok')
-  } catch { [Console]::Out.WriteLine('error') }
-  [Console]::Out.Flush()
-}`;
+// The script is a plain file shipped with the app (src/main/ps/input-helper.ps1), run
+// with -File: no encoded commands and no execution-policy bypass, which antivirus
+// heuristics rightly treat as suspicious.
+const WIN_HELPER_FILE = require('path').join(__dirname, 'ps', 'input-helper.ps1');
+const WIN_HELPER = require('fs').readFileSync(WIN_HELPER_FILE, 'utf8');
 
 const VK = { ctrl: 0x11, control: 0x11, alt: 0x12, shift: 0x10, super: 0x5b, win: 0x5b, cmd: 0x5b, meta: 0x5b, enter: 0x0d, return: 0x0d, tab: 0x09, escape: 0x1b, esc: 0x1b, backspace: 0x08, delete: 0x2e, del: 0x2e, up: 0x26, down: 0x28, left: 0x25, right: 0x27, home: 0x24, end: 0x23, pageup: 0x21, pagedown: 0x22, space: 0x20, insert: 0x2d, minus: 0xbd, plus: 0xbb, comma: 0xbc, period: 0xbe, slash: 0xbf };
 function vkCodes(combo) {
@@ -180,8 +145,7 @@ class WindowsDriver {
   constructor() { this.proc = null; this.queue = []; }
   _ensure() {
     if (this.proc) return this.proc;
-    const enc = Buffer.from(WIN_HELPER, 'utf16le').toString('base64');
-    this.proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    this.proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', WIN_HELPER_FILE], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
     let buf = '';
     this.proc.stdout.on('data', (d) => {
       buf += d.toString();
