@@ -1,5 +1,7 @@
 'use strict';
 
+const { quarantine } = require('./config');
+
 // COre's long-term memory: short facts about the user that the model saves
 // with [[remember ...]]. Retrieval is a small BM25-style keyword match with a
 // recency bonus, so it needs no extra model and works with every brain. The
@@ -30,14 +32,29 @@ class Memory {
   constructor(file) {
     this.file = file;
     this.items = [];
-    try {
-      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (Array.isArray(data.items)) this.items = data.items;
-    } catch {}
+    this.recovered = null;
+    let text = null;
+    try { text = fs.readFileSync(file, 'utf8'); } catch {}
+    if (text !== null) {
+      try {
+        const data = JSON.parse(text);
+        if (!data || !Array.isArray(data.items)) throw new Error('no items list');
+        this.items = data.items.filter((i) => i && typeof i.text === 'string' && i.text.trim());
+      } catch {
+        // Never overwrite memories we couldn't read: set the file aside.
+        this.recovered = quarantine(file);
+      }
+    }
+    this.backedUp = false;
   }
 
   save() {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    // Once per session, keep the previous good file as memory.json.bak.
+    if (!this.backedUp && fs.existsSync(this.file)) {
+      try { fs.copyFileSync(this.file, `${this.file}.bak`); } catch {}
+      this.backedUp = true;
+    }
     const tmp = `${this.file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({ items: this.items }, null, 1));
     fs.renameSync(tmp, this.file);

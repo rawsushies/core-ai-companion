@@ -15,6 +15,26 @@
   present) and exit with a pass/fail code. Used by CI and the release gates.
 - The Claude CLI tests now also run on Windows, through a `.cmd` shim like the real CLI.
 
+### Updates you can trust, and undo
+- Source installs now update from **published releases** by default (Settings → Privacy → Update from),
+  not from every change on `main`. The downloaded code must carry the release's version, or it's refused.
+  Developers can opt into the `main` channel.
+- Every source update first backs up the current version and puts it back if applying fails halfway (disk
+  full, a locked file). If the updated COre then fails to start twice in a row, it restores the previous
+  version automatically and tells you. This works even when the new version can't load at all, thanks to a
+  small bootstrap (`boot.js`) that updates never replace.
+- After a rollback, packages are reinstalled only if the failed update had changed them.
+
+### Your data is never overwritten
+- A damaged `config.json`, `state.json`, `memory.json` or `notes.json` (a hand-edit typo, a disk problem) is
+  now kept as `<file>.corrupt-<time>`, and COre tells you where. Before, it was silently replaced, losing
+  settings, API keys, memories or notes.
+- Memory keeps a `.bak` of the previous good file and skips invalid entries. Notes are written atomically.
+
+### Fixes
+- Messages arriving from a window while it closes (during restart or quit) no longer throw errors in the
+  main process.
+
 ## 10.3.0 — New look, fewer loose ends
 - New brand: a logo made of smoke filaments, new app and tray icons, a wordmark where the orb is the "O",
   README banner, social preview, promo images for every major format, and a brand guide (docs/BRAND.md).

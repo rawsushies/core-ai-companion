@@ -38,7 +38,8 @@ npm install
 npm start
 ```
 
-Source copies update themselves from the `main` branch. The first time you talk, COre downloads its speech
+Source copies update themselves from **published releases** (backed up first, rolled back automatically if
+an update fails or won't start). Developers can switch to the `main` channel in Settings → Privacy. The first time you talk, COre downloads its speech
 recognition (~80 MB) and voice (~90 MB) models once. Both then run offline on your PC.
 
 > **Black box behind the orb?** Some graphics drivers can't draw transparent windows on the GPU. COre notices

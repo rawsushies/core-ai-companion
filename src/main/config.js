@@ -106,6 +106,7 @@ const DEFAULTS = {
   update: {
     enabled: true,
     source: 'rawsushies/core-ai-companion', // GitHub "owner/repo" that hosts COre; '' = updates off
+    channel: 'release', // 'release' = published releases only (gated); 'main' = latest development code
     branch: 'main',
     checkHours: 6,
   },
@@ -116,6 +117,20 @@ const DEFAULTS = {
     speak: false, // read notification titles aloud
   },
 };
+
+// A JSON file that won't parse is moved aside (never overwritten), so the
+// user's settings, keys or memories can be recovered from it. Returns the
+// quarantine path, or null.
+function quarantine(file) {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const to = `${file}.corrupt-${stamp}`;
+    fs.renameSync(file, to);
+    return to;
+  } catch {
+    return null;
+  }
+}
 
 function isObj(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
@@ -134,13 +149,25 @@ class JsonFile {
   constructor(file, defaults) {
     this.file = file;
     this.defaults = defaults;
+    this.recovered = null; // path of a damaged file that was set aside
     this.data = this._load();
   }
   _load() {
+    let text;
     try {
-      return deepMerge(this.defaults, JSON.parse(fs.readFileSync(this.file, 'utf8')));
+      text = fs.readFileSync(this.file, 'utf8');
     } catch (err) {
       if (err.code !== 'ENOENT') console.error(`[core] could not read ${this.file}: ${err.message}`);
+      return deepMerge(this.defaults, {});
+    }
+    try {
+      const parsed = JSON.parse(text);
+      if (!isObj(parsed)) throw new Error('not a JSON object');
+      return deepMerge(this.defaults, parsed);
+    } catch (err) {
+      // Damaged (hand edit, disk problem): keep it for recovery, start fresh.
+      this.recovered = quarantine(this.file);
+      console.error(`[core] ${this.file} is damaged (${err.message}); kept as ${this.recovered}`);
       return deepMerge(this.defaults, {});
     }
   }
@@ -169,6 +196,7 @@ function loadState(dir) {
   const st = new JsonFile(path.join(dir, 'state.json'), {});
   let timer = null;
   return {
+    recovered: st.recovered,
     get: (k) => st.data[k],
     set: (k, v) => {
       st.data[k] = v;
@@ -179,4 +207,4 @@ function loadState(dir) {
   };
 }
 
-module.exports = { loadConfig, loadState, deepMerge, DEFAULTS };
+module.exports = { loadConfig, loadState, deepMerge, DEFAULTS, quarantine };

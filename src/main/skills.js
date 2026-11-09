@@ -143,12 +143,28 @@ function describeEvents(list, range) {
 class Notes {
   constructor(file) {
     this.file = file;
-    try { this.items = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { this.items = []; }
-    if (!Array.isArray(this.items)) this.items = [];
+    this.items = [];
+    this.recovered = null;
+    let text = null;
+    try { text = fs.readFileSync(file, 'utf8'); } catch {}
+    if (text !== null) {
+      try {
+        const v = JSON.parse(text);
+        if (!Array.isArray(v)) throw new Error('not a list');
+        this.items = v;
+      } catch {
+        this.recovered = require('./config').quarantine(file); // never overwrite unreadable notes
+      }
+    }
   }
 
   _save() {
-    try { fs.mkdirSync(path.dirname(this.file), { recursive: true }); fs.writeFileSync(this.file, JSON.stringify(this.items, null, 2)); } catch {}
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const tmp = `${this.file}.tmp`; // atomic: a crash mid-write can't corrupt the notes
+      fs.writeFileSync(tmp, JSON.stringify(this.items, null, 2));
+      fs.renameSync(tmp, this.file);
+    } catch {}
   }
 
   add(text) {

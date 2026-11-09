@@ -13,7 +13,7 @@ const { Brain } = require('./brain');
 const { SpeechToText } = require('./stt');
 const { TextToSpeech, OrderedVoicePipeline } = require('./tts');
 const { startNotifyServer } = require('./notifyServer');
-const { Updater } = require('./updater');
+const { Updater, depsChanged } = require('./updater');
 const { ReleaseUpdater } = require('./releaseUpdater');
 const { Memory } = require('./memory');
 const { Reminders } = require('./reminders');
@@ -1737,8 +1737,11 @@ function registerHotkeys() {
 // ---------------------------------------------------------------- IPC
 
 function wireIpc() {
-  const fromOverlay = (e) => overlay && e.sender === overlay.webContents;
-  const fromPanel = (e) => panel && e.sender === panel.webContents;
+  // Sender checks must survive messages that arrive while a window is being
+  // destroyed (restart, quit): touching a destroyed window's webContents throws.
+  const isFrom = (win, e) => !!win && !win.isDestroyed() && e.sender === win.webContents;
+  const fromOverlay = (e) => isFrom(overlay, e);
+  const fromPanel = (e) => isFrom(panel, e);
 
   ipcMain.on('orb:bounds', (e, b) => {
     if (!fromOverlay(e) || !b) return;
@@ -1789,7 +1792,7 @@ function wireIpc() {
     if (dockVisible) positionDock();
   });
 
-  const fromDock = (e) => dock && e.sender === dock.webContents;
+  const fromDock = (e) => isFrom(dock, e);
   ipcMain.handle('dock:init', (e) => (fromDock(e) ? {
     settings: dockSettings(),
     // Recent conversation, plus notices from this session (the dock may load
@@ -1815,7 +1818,7 @@ function wireIpc() {
   ipcMain.on('dock:setting', (e, { key, value } = {}) => { if (fromDock(e)) applySetting(key, value); });
   ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
   ipcMain.on('dock:openSettings', (e) => { if (fromDock(e)) openSettings(); });
-  const fromSettings = (e) => settingsWin && !settingsWin.isDestroyed() && e.sender === settingsWin.webContents;
+  const fromSettings = (e) => isFrom(settingsWin, e);
   ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), version: app.getVersion() } : null));
   ipcMain.handle('settings:set', (e, { key, value } = {}) => (fromSettings(e) ? changeSetting(String(key), value) : { ok: false }));
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
@@ -1926,6 +1929,13 @@ function wireIpc() {
   ipcMain.once('overlay:ready', (e) => {
     if (!fromOverlay(e)) return;
     if (smoke) { smoke.mark('overlay-ready'); return; }
+    // COre started fine after an update: the update is good, stop watching it.
+    if (state.get('updateVerify')) { state.set('updateVerify', null); state.flush(); }
+    const rb = state.get('updateRolledBack');
+    if (rb) {
+      state.set('updateRolledBack', null);
+      addTranscript('system', `The update to v${rb.from} didn't start properly, so I went back to v${rb.to}. Your settings and memory are untouched. Diagnostics are in the crash log (Settings → Maintenance).`);
+    }
     // Spread start-up work out: loading the voice model uses every CPU core
     // for a moment, so do it a few seconds after COre has appeared.
     setTimeout(() => {
@@ -2074,8 +2084,11 @@ function setGraphicsMode(mode) {
 
 // ---------------------------------------------------------------- updates
 
-function relaunchAfterUpdate(version, needsInstall, install) {
+function relaunchAfterUpdate(version, needsInstall, install, meta) {
   if (needsInstall) state.set('pendingInstall', true);
+  // Source updates: watch the next starts; if the new version can't start,
+  // the backup of the old one is restored automatically (see checkUpdateHealth).
+  if (meta && meta.backup) state.set('updateVerify', { version, from: meta.from, backup: meta.backup, boots: 0 });
   state.flush();
   // Don't cut COre off mid-answer: wait (up to 3 minutes) until it's idle.
   const started = Date.now();
@@ -2103,6 +2116,38 @@ async function checkForUpdates(quiet) {
   }
 }
 
+// After a source update, count starts that never reached the first frame.
+// Two failed starts in a row: restore the previous version and restart.
+// Returns true when it rolled back (the caller should stop starting up).
+function checkUpdateHealth() {
+  const uv = state.get('updateVerify');
+  if (!uv || app.isPackaged) return false;
+  if ((uv.boots || 0) < 2) {
+    state.set('updateVerify', { ...uv, boots: (uv.boots || 0) + 1 });
+    state.flush();
+    return false;
+  }
+  try {
+    const readPkg = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { return {}; } };
+    const depsDiffer = depsChanged(readPkg(ROOT), readPkg(uv.backup));
+    updater.restore(uv.backup);
+    crashLog.record('update-rollback', `v${uv.version} failed to start twice; restored v${uv.from}`);
+    state.set('updateVerify', null);
+    state.set('updateRolledBack', { from: uv.version, to: uv.from });
+    // Reinstall packages only if the failed update had changed them.
+    if (depsDiffer) state.set('pendingInstall', true);
+    state.flush();
+    app.relaunch();
+    app.exit(0);
+    return true;
+  } catch (err) {
+    crashLog.record('update-rollback-failed', err);
+    state.set('updateVerify', null);
+    state.flush();
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------- app
 
 app.on('second-instance', () => setDockVisible(true, true));
@@ -2122,7 +2167,8 @@ app.whenReady().then(async () => {
   }
   updater = app.isPackaged
     ? new ReleaseUpdater({ getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg) })
-    : new Updater({ appRoot: ROOT, getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg) });
+    : new Updater({ appRoot: ROOT, getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg), backupDir: path.join(userData, 'update-backup') });
+  if (!SMOKE && checkUpdateHealth()) return; // rolled back: restarting into the previous version
   if (!app.isPackaged && state.get('pendingInstall')) {
     // Finish an update that changed packages, before anything native loads.
     try {
@@ -2149,6 +2195,13 @@ app.whenReady().then(async () => {
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
   notes = new SK.Notes(path.join(userData, 'notes.json'));
+  // Damaged data files were set aside, not overwritten: say where they are.
+  for (const [what, p] of [['settings', config.recovered], ['window state', state.recovered], ['memory', memory.recovered], ['notes', notes.recovered]]) {
+    if (p) {
+      crashLog.record('data-recovered', `${what}: ${p}`);
+      addTranscript('system', `Your ${what} file was damaged, so I started that part fresh. The old file is kept at ${p} if you want to recover anything.`);
+    }
+  }
   plugins = SK.loadPlugins(path.join(userData, 'skills'));
   reminders = new Reminders({ store: state, onFire: onReminder });
 

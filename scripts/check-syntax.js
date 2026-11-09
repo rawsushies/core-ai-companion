@@ -10,5 +10,6 @@ const files = [];
     else if (/\.(c|m)?js$/.test(f)) files.push(p);
   }
 })(path.join(__dirname, '..', 'src'));
+files.push(path.join(__dirname, '..', 'boot.js'));
 for (const f of files) execFileSync(process.execPath, ['--check', f], { stdio: 'inherit' });
 console.log(`syntax ok: ${files.length} files`);

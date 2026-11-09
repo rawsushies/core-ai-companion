@@ -101,6 +101,7 @@ const SECTIONS = [
       { key: 'orb.hideFromCaptures', label: 'Hide COre from its own screenshots', type: 'toggle' },
       { key: 'notify.enabled', label: 'Accept notifications from other programs', type: 'toggle', restart: true },
       { key: 'update.enabled', label: 'Update automatically', type: 'toggle', restart: true },
+      { key: 'update.channel', label: 'Update from', type: 'select', options: [['release', 'Published releases (recommended)'], ['main', 'Latest development code (may be unstable)']] },
     ],
   },
 ];
