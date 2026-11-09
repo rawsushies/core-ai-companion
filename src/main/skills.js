@@ -185,7 +185,7 @@ async function runSkill(name, args, ctx) {
     case 'timer': {
       const m = /^(\S+)\s*(.*)$/.exec(a);
       const r = m && ctx.reminders.add(m[1], m[2] || 'Timer');
-      return r ? { message: `⏰ Timer set: ${r.text}` } : { error: `Could not understand the timer ${a}.` };
+      return r ? { message: `Timer set: ${r.text}` } : { error: `Could not understand the timer ${a}.` };
     }
     case 'weather': {
       if (off('weather')) return { error: 'The weather skill is turned off in Settings.' };

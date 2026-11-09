@@ -328,7 +328,7 @@
   // Floating bubbles: only bubbles catch the mouse; the gaps between them
   // let clicks through to the app underneath (main applies this on Windows
   // and macOS, where mouse moves are forwarded while clicks pass through).
-  const BUBBLE = '.msg, .row.core, .composer, .settings, .core-menu, .banner, .history-toggle, .action, .proposal';
+  const BUBBLE = '.dock-head, .msg, .row.core, .composer, .settings, .core-menu, .banner, .action, .proposal';
   let overBubble = true;
   function setOver(v) { if (v !== overBubble) { overBubble = v; api.setInteractive(v); } }
   document.addEventListener('mousemove', (e) => setOver(!!(e.target && e.target.closest && e.target.closest(BUBBLE))));
@@ -350,8 +350,20 @@
     input.classList.toggle('scroll', input.scrollHeight > 110);
   }
 
+  // Header status: Online / Thinking… / Speaking / Offline.
+  const headStatus = document.getElementById('head-status');
+  let offline = false;
+  let speaking = false;
+  function syncStatus() {
+    const t = offline ? 'Offline' : busy && !speaking ? 'Thinking…' : speaking ? 'Speaking' : 'Online';
+    headStatus.textContent = t;
+    headStatus.classList.toggle('busy', !offline && (busy || speaking));
+    headStatus.classList.toggle('offline', offline);
+  }
+
   function setBusy(b) {
     busy = b;
+    syncStatus();
     send.classList.toggle('busy', b);
     send.title = b ? 'Stop' : 'Send';
     send.setAttribute('aria-label', send.title);
@@ -489,6 +501,8 @@
     }
     const anyConnected = list.some((p) => p.state === 'connected');
     banner.hidden = anyConnected;
+    offline = !anyConnected;
+    syncStatus();
     reportSize();
   }
   document.getElementById('banner-login').addEventListener('click', () => api.loginClaude());
@@ -622,6 +636,7 @@
     karaoke = null;
   }
   api.onSpeak(({ text, ms }) => {
+    speaking = true; syncStatus();
     finishKaraoke();
     if (!streaming) startStream();
     const words = text.match(/\s*\S+/g) || [];
@@ -644,6 +659,7 @@
     }, 60);
   });
   api.onDone(({ text }) => {
+    speaking = false; syncStatus();
     finishKaraoke();
     if (streaming) {
       if (text) streaming.text = text;

@@ -23,9 +23,9 @@ html, body {
   max-width: min(440px, 70vw);
   padding: 8px 14px;
   border-radius: 14px;
-  background: rgba(8, 8, 12, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #eceaf6;
+  background: rgba(5, 7, 10, 0.86);   /* brand: Void, solid frame, Ink text */
+  border: 1px solid #1d3327;
+  color: #e8fff1;
   font-size: 14px;
   line-height: 1.4;
   text-align: center;
@@ -45,10 +45,10 @@ body.demo {
   left: 16px;
   bottom: 16px;
   right: 16px;
-  color: #c9cfdc;
+  color: #86a595;
   font-size: 13px;
   opacity: 0.8;
 }
 
 /* Meiosis: the speaking core's name above its subtitle. */
-#caption .speaker { display: block; font-family: 'COre Display', 'COre Sans', sans-serif; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 2px; opacity: 0.95; }
+#caption .speaker { display: block; font-family: 'COre Display', 'COre Sans', sans-serif; font-size: 0.72em; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 2px; opacity: 0.95; }

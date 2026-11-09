@@ -24,3 +24,4 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-012:** at the user's request: minimal flat chat (no glass), brand fonts bundled (OFL) and applied to chat/settings/history/subtitles, brand palette; fixed uppercase "CORE" (the brand rule says always COre).
 - **M-013** (`4873823`): measured CPU/GPU reductions (safe graphics idle 173% → 37%), light render path, profile retune, latency instrumentation.
 - **M-014:** at the user's request: floating-bubble chat. Every element is a separate bubble on a transparent window; clicks pass through the gaps (Windows/macOS, `setIgnoreMouseEvents` with forward); settings overflow fixed.
+- **M-015:** at the user's request (reference image): one clear panel with a solid frame, header with mark and status, grouped Smoke bubbles, filled input pill, card-based quick settings; notes are halo text, not pills; brand audit of the overlay caption, History panel and Settings window.

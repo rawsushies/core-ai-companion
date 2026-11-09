@@ -2,11 +2,20 @@
 
 ## Unreleased
 
-### Floating bubbles
-- The chat is no longer a panel. Every part floats as its own bubble over a fully transparent window: each message,
-  the input pill, settings, the core wheel, banners and the history button. Gaps between bubbles show the screen.
-- On Windows and macOS clicks pass through the gaps to the app underneath; only the bubbles take the mouse.
-- When idle, old messages fade into the screen and the input dims; hovering brings them back.
+### Chat redesign (brand kit)
+- The chat under the orb is one clear panel: no fill (your screen shows through), a solid brand-coloured
+  frame and dividers. A header shows COre's real mark, its status (Online / Thinking… / Speaking / Offline),
+  and history, settings and hide buttons.
+- Replies are Smoke bubbles grouped under the speaker's avatar (COre's mark, or the specialist's colour orb).
+  Your messages are Void bubbles with an Emerald edge. The input is one filled pill with the recipient orb and
+  mic inside it, plus a round Emerald send button.
+- Notes like "Remembered…" are plain text with a dark halo, not a bubble. Emoji removed from notes.
+- Quick settings are cards in the same style. Back and the title sit in the header, empty reminders are hidden,
+  and slider values show in brand mono.
+- Gaps in the panel click through to the app below (Windows and macOS).
+- Brand audit across windows: the subtitle no longer uppercases names (it showed "CORE"), the old green and
+  off-palette greys and whites are replaced with brand colours, the History panel and Settings use the real
+  mark and Inter Display, and the History panel matches the chat.
 
 ### Lighter on CPU and GPU (measured)
 - While idle, COre now sleeps between frames instead of keeping the compositor awake at the display rate.

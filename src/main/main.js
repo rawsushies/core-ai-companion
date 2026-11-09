@@ -1091,20 +1091,20 @@ function handleActionTag(item) {
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
     const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
-    if (r && r.created) toDock('dock:message', { role: 'system', text: `🧠 Remembered: ${r.item.text}` });
-    else if (r && r.replaced) toDock('dock:message', { role: 'system', text: `🧠 Updated: ${r.item.text} (was: ${r.replaced})` });
+    if (r && r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
+    else if (r && r.replaced) toDock('dock:message', { role: 'system', text: `Updated: ${r.item.text} (was: ${r.replaced})` });
     toDock('dock:memory', memory.list());
     return true;
   }
   if (item.name === 'forget') {
     const gone = memory && memory.forget(item.text);
-    if (gone) toDock('dock:message', { role: 'system', text: `🧠 Forgot: ${gone.text}` });
+    if (gone) toDock('dock:message', { role: 'system', text: `Forgot: ${gone.text}` });
     toDock('dock:memory', memory ? memory.list() : []);
     return true;
   }
   if (item.name === 'remind') {
     const r = reminders.add(item.when, item.text);
-    toDock('dock:message', { role: 'system', text: r ? `⏰ Reminder at ${fmtTime(r.at)}: ${r.text}` : `⏰ I couldn't understand the time "${item.when}".` });
+    toDock('dock:message', { role: 'system', text: r ? `Reminder set for ${fmtTime(r.at)}: ${r.text}` : `I couldn't understand the time "${item.when}".` });
     toDock('dock:reminders', reminders.items);
     return true;
   }
