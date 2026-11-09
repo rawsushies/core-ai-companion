@@ -16,4 +16,5 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-004** (`89c610d`): brain watchdogs, partial-answer recovery with Continue, provider health, history size budget, Ollama keep_alive.
 - **M-005** (`e2b60e7`): memory slots and contradiction handling (conservative), project facts, provenance, inline editing.
 - **M-006** (`f7697d4`): Meiosis Mode: core identities, unified attributed timeline, @mention routing with autocomplete and picker, role-based specialist sessions, shared tasks with a Prime summary, subtitle attribution.
-- **M-007:** interrupted-task recovery, /stop and /merge per core, the summary waits for specialists to finish speaking (found with real Claude + voice), CORE_DEBUG voice timing.
+- **M-007** (`aa83af0`): interrupted-task recovery, /stop and /merge per core, the summary waits for specialists to finish speaking (found with real Claude + voice), CORE_DEBUG voice timing.
+- **M-008:** chat redesign at the user's request: bubble chat with orb avatars, rotating core wheel, orb-pill @ autocomplete; fixed the wheel turning back when an orb slid under a resting pointer.

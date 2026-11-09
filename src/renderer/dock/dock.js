@@ -42,37 +42,66 @@
     return head;
   }
 
+  // A small smoke-orb avatar in the core's colour.
+  function avatar(id) {
+    const c = coreOf(id);
+    const a = document.createElement('span');
+    a.className = 'avatar';
+    a.style.setProperty('--core', c.color);
+    a.setAttribute('aria-hidden', 'true');
+    return a;
+  }
+
+  // Core replies are bubbles with an avatar; consecutive replies from the
+  // same core share one avatar and header.
+  function coreRow(author) {
+    const c = coreOf(author);
+    const last = log.lastElementChild;
+    const row = document.createElement('div');
+    row.className = `row core by-${c.id}`;
+    row.style.setProperty('--core', c.color);
+    const cont = last && last.classList.contains(`by-${c.id}`) && last.classList.contains('row');
+    if (cont) row.classList.add('cont');
+    const bubble = document.createElement('div');
+    bubble.className = 'msg core';
+    row.append(cont ? document.createElement('span') : avatar(c.id), bubble);
+    if (cont) row.firstChild.className = 'avatar-gap';
+    return { row, bubble, head: !cont };
+  }
+
   // m: { role: 'user'|'core'|'system', text, author?, kind?, to? }
   function add(role, text, m = {}) {
     stickToBottom(() => {
-      const el = document.createElement('div');
-      el.className = `msg ${role}`;
       if (role === 'core') {
-        el.classList.add(`by-${coreOf(m.author).id}`);
-        el.style.setProperty('--core', coreOf(m.author).color);
-        el.append(speakerHead(m.author), window.renderMarkdown(text));
-      } else if (role === 'user' && m.to && m.to.length && !(m.to.length === 1 && m.to[0] === 'prime')) {
-        const to = document.createElement('div');
-        to.className = 'to-line';
-        to.textContent = `to ${m.to.map((id) => coreOf(id).name).join(', ')}`;
-        el.append(to, document.createTextNode(text));
-      } else if (role === 'system' && (m.kind === 'progress' || m.kind === 'error')) {
-        el.classList.add(m.kind);
-        if (m.author) el.style.setProperty('--core', coreOf(m.author).color);
-        el.textContent = text;
-      } else el.textContent = text;
-      log.appendChild(el);
+        const { row, bubble, head } = coreRow(m.author);
+        if (head) bubble.append(speakerHead(m.author));
+        bubble.append(window.renderMarkdown(text));
+        log.appendChild(row);
+      } else {
+        const el = document.createElement('div');
+        el.className = `msg ${role}`;
+        if (role === 'user' && m.to && m.to.length && !(m.to.length === 1 && m.to[0] === 'prime')) {
+          const to = document.createElement('div');
+          to.className = 'to-line';
+          for (const id of m.to) { const chip = document.createElement('span'); chip.className = 'to-chip'; chip.style.setProperty('--core', coreOf(id).color); chip.textContent = coreOf(id).name; to.append(chip); }
+          el.append(to, document.createTextNode(text.replace(/^(?:@[\p{L}\p{N}_-]+[\s,:]*)+/u, '')));
+        } else if (role === 'system') {
+          el.classList.add(m.kind || 'note');
+          if (m.author) { el.style.setProperty('--core', coreOf(m.author).color); el.classList.add('has-core'); }
+          el.textContent = text;
+        } else el.textContent = text;
+        log.appendChild(el);
+      }
       trim();
     });
     reportSize();
   }
 
   function startStream() {
-    const el = document.createElement('div');
-    el.className = 'msg core streaming by-prime';
-    el.style.setProperty('--core', coreOf('prime').color);
-    log.appendChild(el);
-    streaming = { el, text: '' };
+    const { row, bubble } = coreRow('prime');
+    bubble.classList.add('streaming');
+    log.appendChild(row);
+    streaming = { el: bubble, row, text: '', head: !row.classList.contains('cont') };
     trim();
   }
 
@@ -80,19 +109,23 @@
     if (!streaming) return;
     stickToBottom(() => {
       streaming.el.textContent = '';
-      streaming.el.append(speakerHead('prime'), window.renderMarkdown(streaming.text));
+      if (streaming.head) streaming.el.append(speakerHead('prime'));
+      streaming.el.append(window.renderMarkdown(streaming.text));
     });
     reportSize();
   }
 
-  // ---------------------------------------------------------- recipient picker + @ autocomplete
+  // ---------------------------------------------------------- core wheel + @ chips
+  // The recipient button is a mini orb of the current core. Clicking it opens
+  // a ring of the four cores that rotates the chosen one to the top.
   const toBtn = document.getElementById('to');
   const toName = document.getElementById('to-name');
   const menu = document.getElementById('core-menu');
   let recipient = 'prime';
-  let menuMode = null; // 'pick' (the To: button) | 'mention' (typing @)
+  let menuMode = null; // 'pick' (the wheel) | 'mention' (typing @)
   let menuItems = [];
   let menuIndex = 0;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function setRecipient(id) {
     recipient = coreOf(id).id;
@@ -100,43 +133,88 @@
     toName.textContent = c.name;
     toBtn.style.setProperty('--core', c.color);
     toBtn.classList.toggle('specialist', recipient !== 'prime');
-    input.placeholder = 'Message…'; // the chip beside it names the recipient
-    input.title = 'Type @ to address another core';
+    toBtn.setAttribute('aria-label', `Recipient: ${c.name} (${c.role}). Change`);
+    input.placeholder = 'Message…'; // the orb beside it names the recipient
     input.setAttribute('aria-label', `Message ${c.name}`);
   }
 
   function closeMenu() {
     menu.hidden = true;
+    menu.className = 'core-menu';
     menuMode = null;
     toBtn.setAttribute('aria-expanded', 'false');
+    shell.classList.remove('wheel-open');
+    reportSize();
+  }
+
+  function option(c, i) {
+    const o = document.createElement('div');
+    o.className = 'core-opt';
+    o.setAttribute('role', 'option');
+    o.setAttribute('aria-label', `${c.name}, ${c.role}${c.active ? '' : ', splits off when chosen'}`);
+    o.style.setProperty('--core', c.color);
+    o.addEventListener('mousedown', (e) => { e.preventDefault(); choose(i); });
+    // Hover highlights chips only: on the wheel, an orb sliding under a resting
+    // pointer while the ring turns would fire mouseenter and turn it back.
+    o.addEventListener('mouseenter', () => { if (menuMode === 'mention') highlight(i); });
+    return o;
   }
 
   function openMenu(mode, list) {
     menuMode = mode;
     menuItems = list;
-    menuIndex = Math.max(0, list.findIndex((c) => c.id === recipient));
-    if (mode === 'mention') menuIndex = 0;
+    menuIndex = mode === 'pick' ? Math.max(0, list.findIndex((c) => c.id === recipient)) : 0;
     menu.textContent = '';
-    list.forEach((c, i) => {
-      const o = document.createElement('div');
-      o.className = 'core-opt';
-      o.setAttribute('role', 'option');
-      o.setAttribute('aria-selected', String(i === menuIndex));
-      o.style.setProperty('--core', c.color);
-      const n = document.createElement('span'); n.className = 'who-name'; n.textContent = c.name;
-      const r = document.createElement('span'); r.className = 'who-role'; r.textContent = `${c.role}${c.active ? '' : ' · splits off'}`;
-      o.append(n, r);
-      o.addEventListener('mousedown', (e) => { e.preventDefault(); choose(i); });
-      menu.append(o);
-    });
+    if (mode === 'pick') {
+      menu.className = 'core-menu wheel';
+      const ring = document.createElement('div');
+      ring.className = 'ring';
+      list.forEach((c, i) => {
+        const o = option(c, i);
+        o.classList.add('orb-opt');
+        o.style.setProperty('--a', `${(360 / list.length) * i}deg`);
+        o.append(avatar(c.id));
+        ring.append(o);
+      });
+      const info = document.createElement('div');
+      info.className = 'wheel-info';
+            const nm = document.createElement('div'); nm.className = 'wheel-name';
+      const rl = document.createElement('div'); rl.className = 'wheel-role';
+      const hint = document.createElement('div'); hint.className = 'wheel-hint'; hint.textContent = '← → to turn · Enter to choose';
+      info.append(nm, rl, hint);
+      menu.append(ring, info);
+      shell.classList.add('wheel-open');
+      if (!reduceMotion) { ring.classList.add('spin-in'); setTimeout(() => ring.classList.remove('spin-in'), 450); }
+    } else {
+      menu.className = 'core-menu chips';
+      list.forEach((c, i) => {
+        const o = option(c, i);
+        o.classList.add('chip-opt');
+        const n = document.createElement('span'); n.className = 'who-name'; n.textContent = c.name;
+        o.append(avatar(c.id), n);
+        menu.append(o);
+      });
+    }
     menu.hidden = !list.length;
     toBtn.setAttribute('aria-expanded', String(!menu.hidden && mode === 'pick'));
+    highlight(menuIndex);
     reportSize();
   }
 
   function highlight(i) {
+    if (!menuItems.length) return;
     menuIndex = (i + menuItems.length) % menuItems.length;
-    [...menu.children].forEach((o, k) => o.setAttribute('aria-selected', String(k === menuIndex)));
+    const opts = [...menu.querySelectorAll('.core-opt')];
+    opts.forEach((o, k) => o.setAttribute('aria-selected', String(k === menuIndex)));
+    if (menuMode === 'pick') {
+      // Turn the ring so the highlighted core sits at the top.
+      const ring = menu.querySelector('.ring');
+      ring.style.setProperty('--rot', `${-(360 / menuItems.length) * menuIndex}deg`);
+      const c = menuItems[menuIndex];
+      menu.querySelector('.wheel-name').textContent = c.name;
+      menu.querySelector('.wheel-name').style.color = c.color;
+      menu.querySelector('.wheel-role').textContent = `${c.role}${c.active ? '' : ' · splits off'}`;
+    }
   }
 
   function choose(i) {
@@ -156,6 +234,13 @@
   }
 
   toBtn.addEventListener('click', () => (menuMode === 'pick' ? closeMenu() : openMenu('pick', cores)));
+  toBtn.addEventListener('keydown', (e) => {
+    if (menuMode !== 'pick') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); highlight(menuIndex + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); highlight(menuIndex - 1); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(menuIndex); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
+  });
   input.addEventListener('input', () => {
     // Only mentions at the start address cores, so only suggest there.
     const head = input.value.slice(0, input.selectionStart);
@@ -165,8 +250,9 @@
   });
   input.addEventListener('keydown', (e) => {
     if (menu.hidden) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); highlight(menuIndex + 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(menuIndex - 1); }
+    const next = menuMode === 'pick' ? ['ArrowRight', 'ArrowDown'] : ['ArrowRight', 'ArrowDown'];
+    if (next.includes(e.key)) { e.preventDefault(); highlight(menuIndex + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); highlight(menuIndex - 1); }
     else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); choose(menuIndex); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); }
   }, true);
@@ -487,7 +573,7 @@
       if (text) streaming.text = text;
       renderStream();
       streaming.el.classList.remove('streaming');
-      if (!streaming.text.trim()) streaming.el.remove();
+      if (!streaming.text.trim()) (streaming.row || streaming.el).remove();
       streaming = null;
     }
     reportSize();

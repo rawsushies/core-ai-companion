@@ -71,13 +71,13 @@
         <button type="button" id="updates" class="ghost">Check updates</button>
       </div>
     </div>
+    <div id="core-menu" class="core-menu" role="listbox" aria-label="Cores" hidden></div>
     <form id="composer" class="composer">
       <button type="button" id="gear" class="icon" title="Voice and tone" aria-label="Voice and tone settings">
         <svg viewBox="0 0 24 24" width="17" height="17"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm8.1-2.3.1-1.2-.1-1.2 2-1.6-2-3.4-2.4 1a8 8 0 0 0-2-1.2L15.3 3h-4l-.4 2.6a8 8 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6-.1 1.2.1 1.2-2 1.6 2 3.4 2.4-1a8 8 0 0 0 2 1.2l.4 2.6h4l.4-2.6a8 8 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6Z" fill="none" stroke-width="1.6"/></svg>
       </button>
-      <button type="button" id="to" class="to" aria-haspopup="listbox" aria-expanded="false" title="Who gets your message (or type @name)"><span class="sr">To </span><span id="to-name">COre</span> ▾</button>
+      <button type="button" id="to" class="to" aria-haspopup="listbox" aria-expanded="false" title="Choose who gets your message (or type @name)"><span class="to-orb" aria-hidden="true"></span><span id="to-name" class="sr">COre</span></button>
       <textarea id="input" rows="1" placeholder="Message…" title="Type @ to address another core" aria-label="Message"></textarea>
-      <div id="core-menu" class="core-menu" role="listbox" aria-label="Cores" hidden></div>
       <button type="button" id="mic" class="icon" title="Talk (Ctrl+Alt+Space)" aria-label="Talk">
         <svg viewBox="0 0 24 24" width="17" height="17"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke-width="1.7"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke-width="1.7" stroke-linecap="round"/></svg>
       </button>

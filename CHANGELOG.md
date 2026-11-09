@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Meiosis Mode: four cores, one chat
+- New chat look: replies are glassy bubbles tinted in each core's colour, each with a small swirling
+  smoke-orb avatar. Consecutive replies from the same core share one avatar. Your messages show which
+  cores they went to as coloured chips, and progress and errors are small centred pills. The old coloured
+  side bars are gone.
+- The **core wheel**: the orb next to the input shows who you're talking to. Click it and a ring of the four
+  cores spins in, turning the chosen one to the top. Arrow keys turn it, Enter or a click picks. Typing `@`
+  shows the cores as orb pills. Animations stop with reduced motion, and names are always written out.
 - COre is now four cores total: **COre** (Prime, the coordinator and default recipient) and three
   specialists that split off as smoke helpers. **Scout** researches and compares, **Forge** builds and drafts,
   **Sentinel** reviews and finds problems. They are role profiles over the same brain you already use, not
