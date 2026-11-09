@@ -31,6 +31,14 @@ const DEFAULTS = {
     tone: 'sarcastic', // 'sarcastic' | 'dramatic' | 'calm' | 'cheerful' | 'professional'
     greeting: true, // a short built-in greeting on the first launch of the day
   },
+  presence: {
+    chitchat: true, // after a quiet while COre starts a short conversation on its own
+    minutes: 25, // quiet minutes before it does (doubles each time it's ignored)
+    quietFrom: 22, // no chit-chat from this hour...
+    quietTo: 8, // ...until this hour
+    maxPerDay: 6,
+    reactions: true, // say something now and then when petted, poked or tossed
+  },
   memory: {
     enabled: true, // COre remembers facts about you across conversations (⚙ → Memory)
   },

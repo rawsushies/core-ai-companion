@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.0.0 — Companion presence
+- Idle chit-chat: after a quiet while (25 min by default) COre starts a short, relevant conversation on
+  its own: the time of day, what you seem to be working on, something it remembers, a fun fact or a game.
+  It's polite about it. It only speaks when you're at the computer but paused (never mid-typing, never
+  when you're away), never in quiet hours (22:00–08:00 by default), at most 6 times a day, and it waits
+  twice as long each time you ignore it.
+- Touch it: pet COre (slow strokes) and it hums and glows happily, sometimes with a smoke heart; tickle it
+  (quick wiggles) and it giggles into a laughing face; poke it (quick double click) and it jumps, and gets
+  annoyed if you keep going; toss it (fling while dragging) and it flies, spins and lands where it went.
+  Now and then it says something about it (can be turned off).
+- Games: tray → Play a game (trivia, riddle, 20 questions), or just ask. COre hosts and keeps score.
+- New settings: chit-chat on/off, quiet time, quiet hours, talk-back reactions.
+
 ## 3.0.0 — Shape-shifting
 - COre's smoke can form shapes: emoji faces (laugh, smile, sad, wink, surprised, cool, angry), heart,
   check, cross, question/exclamation marks, star, sun, moon, music note, light bulb, Zzz, arrows,

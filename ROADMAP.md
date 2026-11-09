@@ -39,13 +39,13 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
   moon, music note, arrows, numbers/letters…) with matching voice expression (giggle, hum, sigh).
 - `[[form laugh]]` tag; particle targets sampled from tiny vector glyphs (cheap).
 
-## 🔨 v4.0.0 — Companion presence
+## ✅ v4.0.0 — Companion presence
 - Idle chit-chat: after a quiet while, COre starts a short, relevant conversation (time of day, what's on
   screen if allowed, memories, reminders), rate-limited and respectful (do-not-disturb, fullscreen apps,
   meetings).
 - Interactions: poke, pet, toss, tickle reactions; mini games (riddles, 20 questions, trivia).
 
-## ⏳ v5.0.0 — Many COres
+## 🔨 v5.0.0 — Many COres
 - Clones: COre splits (meiosis animation) into helpers, each with its own window, voice, context and task;
   they lay themselves out so they never overlap each other or your focus window; merge back when done.
 - Voice routing so clones never talk over each other (queue / priority / per-clone voice).

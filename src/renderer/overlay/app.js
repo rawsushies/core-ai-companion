@@ -497,8 +497,40 @@
 
   // ------------------------------------------------------------ mouse
 
+  // Playful touches: local reactions (no brain round trip), and main hears
+  // about them so it knows you're around.
+  let pokes = [];
+  const reactions = [];
+  window.__coreReactions = () => reactions.slice(); // test hook
+  function react(kind) {
+    const now = performance.now();
+    reactions.push(kind);
+    const quietVoice = voice.speaking || voice.busy;
+    if (kind === 'pet') {
+      mood = { name: 'happy', since: now };
+      if (!quietVoice) voice.expr('hum');
+      if (Math.random() < 0.35) formShape('heart', 2.4);
+    } else if (kind === 'tickle') {
+      formShape('laugh', 2.6);
+      startGesture('magic');
+      if (!quietVoice) voice.expr('giggle');
+    } else if (kind === 'poke') {
+      pokes = pokes.filter((t) => now - t < 8000).concat(now);
+      startGesture('bounce');
+      if (!quietVoice) voice.expr('gasp');
+      if (pokes.length >= 3) { mood = { name: 'annoyed', since: now }; formShape('angry', 2.2); pokes = []; }
+    } else if (kind === 'toss') {
+      anim.spinUntil = now + 1800;
+      if (!quietVoice) voice.expr('giggle');
+    }
+    if (bridge && bridge.interaction) bridge.interaction(kind);
+  }
+
   function setupPointer() {
     let down = null;
+    let lastClickAt = 0;
+    let trail = [];
+    const touch = new window.Interactions.TouchDetector({ r: body.r });
     const toView = (e) => ({ x: e.clientX + stage.x, y: e.clientY + stage.y });
 
     // Ends a click or drag. Called from several signals because the window
@@ -510,6 +542,19 @@
       down = null;
       if (d.moved) {
         body.dragging = false;
+        // A fast release tosses COre: it flies on and lands further along.
+        const v = window.Interactions.releaseVelocity(trail);
+        const sp = Math.hypot(v.x, v.y);
+        if (sp > 1500) {
+          const m = body.r * 1.8;
+          body.target = {
+            x: Math.min(view.w - m, Math.max(m, body.target.x + v.x * 0.2)),
+            y: Math.min(view.h - m, Math.max(m, body.target.y + v.y * 0.2)),
+          };
+          body.vel = { x: v.x * 0.5, y: v.y * 0.5 };
+          react('toss');
+        }
+        trail = [];
         home = { x: body.target.x, y: body.target.y };
         lastGestureAt = performance.now();
         if (bridge) { bridge.orbDrag(false); bridge.orbHome(home); bridge.orbAnchor({ ...home, r: body.r }); }
@@ -517,6 +562,10 @@
       } else {
         acknowledge();
         pulseAt(d.x, d.y, 1); // a ripple from where you clicked
+        const now = performance.now();
+        // A quick second click is a poke; it also undoes the first click's
+        // chat toggle, so the chat stays as it was.
+        if (now - lastClickAt < 380) { react('poke'); lastClickAt = 0; } else lastClickAt = now;
         if (bridge) bridge.orbClick();
       }
     }
@@ -529,7 +578,15 @@
       try { canvas.setPointerCapture(e.pointerId); } catch {}
     });
     window.addEventListener('pointermove', (e) => {
-      if (!down) return;
+      if (!down) {
+        const p = toView(e);
+        if (Math.hypot(p.x - body.pos.x, p.y - body.pos.y) < body.r * 1.45 && !body.dragging) {
+          touch.r = body.r;
+          const kind = touch.feed(p.x, p.y, e.timeStamp || performance.now());
+          if (kind) react(kind);
+        } else touch.reset();
+        return;
+      }
       if (e.buttons === 0) return release(); // button was released somewhere we didn't hear
       const p = toView(e);
       if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 6) {
@@ -538,7 +595,11 @@
         pointing = null;
         if (bridge) bridge.orbDrag(true);
       }
-      if (down.moved) body.target = { x: p.x, y: p.y };
+      if (down.moved) {
+        body.target = { x: p.x, y: p.y };
+        trail.push({ x: p.x, y: p.y, t: e.timeStamp || performance.now() });
+        if (trail.length > 12) trail.shift();
+      }
     });
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);

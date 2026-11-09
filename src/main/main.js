@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-  app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen,
+  app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, powerMonitor,
   desktopCapturer, shell, nativeImage, session, dialog, nativeTheme, safeStorage, Notification,
 } = require('electron');
 const { spawn } = require('child_process');
@@ -18,6 +18,7 @@ const { ReleaseUpdater } = require('./releaseUpdater');
 const { Memory } = require('./memory');
 const { Reminders } = require('./reminders');
 const SCHEMA = require('./settingsSchema');
+const { Presence, chitchatPrompt } = require('./presence');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -81,6 +82,8 @@ let dockHeight = 60;
 let currentPipeline = null;
 let memory = null;
 let reminders = null;
+let presence = null;
+let lastReaction = 0;
 const actions = new Map(); // one-click actions offered in the chat: id -> { kind, value }
 // Spoken questions: the chat reveals each sentence as it is spoken, then the
 // full formatted answer once COre stops talking. { spokenAny, finished, reply }
@@ -764,6 +767,14 @@ function createTray() {
     { type: 'separator' },
     { label: 'Hide / show COre', click: toggleOrb },
     { label: 'New conversation', click: resetConversation },
+    {
+      label: 'Play a game',
+      submenu: [
+        { label: 'Trivia', click: () => playGame('trivia') },
+        { label: 'Riddle', click: () => playGame('riddle') },
+        { label: '20 questions', click: () => playGame('twenty') },
+      ],
+    },
     { label: 'Settings…', click: openSettings },
     { label: 'Check for updates', click: () => checkForUpdates(false) },
     { label: 'Log in to Claude', click: loginClaude },
@@ -1080,12 +1091,65 @@ function speakLine(text) {
   p.push({ type: 'end' });
 }
 
-async function handleUserText(text, { withScreen = false, typed = false } = {}) {
+// ---------------------------------------------------------------- presence
+
+const REACTIONS = {
+  pet: ['That is surprisingly pleasant.', 'Careful. I could get used to this.', 'Mm. Acceptable.', 'You do know I am made of smoke, right?'],
+  tickle: ['Stop that. I am a serious machine.', 'Hey! That tickles. Somehow.', 'This is beneath my dignity. Do it again.'],
+  poke: ['Yes? I am right here.', 'Poking the smoke. Bold strategy.', 'Ow. Metaphorically.'],
+  toss: ['Wheee. I mean, how dare you.', 'I was not built for flight. Clearly I was.', 'Ten out of ten landing.'],
+};
+
+function onInteraction(kind) {
+  if (presence) presence.noteInteraction();
+  const now = Date.now();
+  if (config.data.presence && config.data.presence.reactions === false) return;
+  if (current || listening || now - lastReaction < 90_000 || Math.random() > 0.45) return;
+  const lines = REACTIONS[kind];
+  if (!lines) return;
+  lastReaction = now;
+  setTimeout(() => { if (!current && !listening) speakLine(lines[Math.floor(Math.random() * lines.length)]); }, 700);
+}
+
+async function startChitchat({ quietMinutes }) {
+  let windows = [];
+  try { windows = await openWindowTitles(); } catch {}
+  const prompt = chitchatPrompt({ quietMinutes, windows, hasMemory: !!(memory && memory.list().length) });
+  handleUserText(prompt, { internal: true });
+}
+
+function startPresence() {
+  presence = new Presence({
+    getConfig: () => config.data.presence || {},
+    idleSec: () => { try { return powerMonitor.getSystemIdleTime(); } catch { return 0; } },
+    isBusy: () => !!current || !!listening || !brain,
+    isHidden: () => orbHidden,
+    store: state,
+    onChat: startChitchat,
+  });
+  presence.start();
+}
+
+function playGame(name) {
+  const games = {
+    trivia: 'Let us play trivia. Ask me one question at a time and keep score.',
+    riddle: 'Give me a riddle. Let me guess before you tell me the answer.',
+    twenty: 'Let us play 20 questions. You think of something and I will ask yes or no questions.',
+  };
+  if (games[name]) handleUserText(games[name]);
+}
+
+// internal: COre speaking up on its own (chit-chat): the prompt isn't shown
+// as something the user said.
+async function handleUserText(text, { withScreen = false, typed = false, internal = false } = {}) {
   text = String(text || '').trim();
   if (!text) return;
   abortCurrent();
   toOverlay('speech:stop');
-  addTranscript('user', text);
+  if (!internal) {
+    addTranscript('user', text);
+    if (presence) presence.noteInteraction();
+  }
   if (!brain) {
     addTranscript('system', 'No brain is configured. Open Settings and check brain.provider.');
     toOverlay('attention', { level: 'urgent', title: 'No brain configured' });
@@ -1186,6 +1250,7 @@ async function handleUserText(text, { withScreen = false, typed = false } = {}) 
 }
 
 function startListening(withScreen) {
+  if (presence) presence.noteInteraction();
   if (listening) {
     toOverlay('listen:stop'); // second press: stop and send what we have
     return;
@@ -1267,7 +1332,8 @@ function wireIpc() {
     if (!fromOverlay(e) || !r || ![r.x, r.y, r.w, r.h].every(Number.isFinite)) return;
     applyStage(r);
   });
-  ipcMain.on('orb:click', (e) => { if (fromOverlay(e)) toggleDock(); });
+  ipcMain.on('orb:click', (e) => { if (fromOverlay(e)) { toggleDock(); if (presence) presence.noteInteraction(); } });
+  ipcMain.on('orb:interaction', (e, kind) => { if (fromOverlay(e) && ['pet', 'tickle', 'poke', 'toss'].includes(kind)) onInteraction(kind); });
   ipcMain.on('orb:anchor', (e, a) => {
     if (!fromOverlay(e) || !a) return;
     dockAnchor = { x: +a.x || 0, y: +a.y || 0, r: Math.max(8, +a.r || 60) };
@@ -1616,6 +1682,8 @@ app.whenReady().then(async () => {
   await startNotify();
   updater.start(relaunchAfterUpdate);
   reminders.start();
+  startPresence();
+  if (process.env.CORE_DEBUG_CHITCHAT) setTimeout(() => startChitchat({ quietMinutes: 30 }), 9000); // end-to-end tests
   setTimeout(greetIfFirstToday, 3500);
 
   const hk = config.data.hotkeys;

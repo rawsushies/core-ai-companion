@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('core', {
   orbBounds: (b) => ipcRenderer.send('orb:bounds', b),
   orbDrag: (dragging) => ipcRenderer.send('orb:drag', dragging),
   orbClick: () => ipcRenderer.send('orb:click'),
+  interaction: (kind) => ipcRenderer.send('orb:interaction', String(kind)),
   orbHome: (home) => ipcRenderer.send('orb:home', home),
   orbAnchor: (a) => ipcRenderer.send('orb:anchor', a),
   stageNeed: (r) => ipcRenderer.send('stage:need', r),
