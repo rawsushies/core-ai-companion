@@ -1,9 +1,9 @@
-:root { --bg: #070b0a; --panel: #0c1210; --line: rgba(120, 255, 170, 0.12); --text: #e6f3ea; --muted: #8ea597; --accent: #4dff9a; --danger: #ff6b78; }
+:root { --bg: #05070a; --panel: #0b0f0d; --line: rgba(232, 255, 241, 0.08); --text: #e8fff1; --muted: #86a595; --accent: #3dff85; --danger: #ff6b78; } /* brand palette (docs/BRAND.md) */
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: transparent; color: var(--text); font: 13.5px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+html, body { margin: 0; height: 100%; background: transparent; color: var(--text); font: 13.5px/1.45 "COre Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
 .window { height: 100%; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 .bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 10px 18px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.brand { display: flex; align-items: center; gap: 10px; font: 600 15px/1 'COre Display', 'COre Sans', sans-serif; letter-spacing: -0.01em; }
 .version { color: var(--muted); font-weight: 400; font-size: 12px; }
 .dot { width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle, #04140b 0 45%, var(--accent) 70%, transparent 75%); box-shadow: 0 0 10px rgba(77, 255, 154, 0.45); }
 button { font: inherit; color: inherit; cursor: pointer; white-space: nowrap; }
@@ -50,3 +50,6 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .secret button { flex: none; padding: 6px 10px; }
 .folder .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
 .field:has(.folder) { grid-template-columns: 1fr 300px; }
+
+h2, .section-title, .field label strong { font-family: 'COre Display', 'COre Sans', sans-serif; }
+code, kbd, .hotkey { font-family: 'COre Mono', Consolas, monospace; }

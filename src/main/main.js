@@ -529,7 +529,7 @@ function updateHitTest() {
 
 // ---------------------------------------------------------------- chat dock
 
-const DOCK_WIDTH = 340; // compact glass chat
+const DOCK_WIDTH = 320; // compact, flat chat (brand: minimal)
 
 function createDock() {
   dock = new BrowserWindow({

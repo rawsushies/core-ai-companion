@@ -1,9 +1,9 @@
 :root {
-  --bg: rgba(6, 10, 9, 0.94);
-  --line: rgba(120, 255, 170, 0.12);
-  --text: #e6f3ea;
-  --muted: #8ea597;
-  --accent: #4dff9a;
+  --bg: rgba(5, 7, 10, 0.96);
+  --line: rgba(232, 255, 241, 0.08);
+  --text: #e8fff1;
+  --muted: #86a595;
+  --accent: #3dff85;
   --accent-2: #4fd6ff;
   --user: rgba(77, 255, 154, 0.1);
   --core: rgba(255, 255, 255, 0.035);
@@ -18,7 +18,7 @@ html, body {
   height: 100%;
   background: transparent;
   color: var(--text);
-  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  font: 14px/1.45 "COre Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 
 .shell {

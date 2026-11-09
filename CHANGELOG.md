@@ -31,6 +31,15 @@
 - Specialists can take up to three rounds of reading in their own session before answering.
 
 ### Meiosis Mode: four cores, one chat
+- **Minimal, on-brand chat** (replaces the glass bubbles from earlier in this cycle):
+  - A flat Void panel at 88% opacity with a hairline border, narrower at 320 px. When idle it fades to 28% so
+    it blends back into your screen.
+  - Replies are plain text under a small coloured name ("Scout · Research"). Your messages are a quiet block
+    on the right, and system notes are muted text.
+  - The core wheel and @ chips are flat coloured dots. The rings and highlights stay subtle.
+- COre's brand type (Inter, Inter Display, JetBrains Mono, all OFL) is now bundled with the app and used in the
+  chat, Settings, history and subtitles, so it looks the same on every PC. Settings and history use the brand
+  palette.
 - New chat look: replies are glassy bubbles tinted in each core's colour, each with a small swirling
   smoke-orb avatar. Consecutive replies from the same core share one avatar. Your messages show which
   cores they went to as coloured chips, and progress and errors are small centred pills. The old coloured

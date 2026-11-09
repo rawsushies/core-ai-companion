@@ -1,0 +1,6 @@
+/* COre brand type (docs/BRAND.md), bundled so it looks the same on every PC.
+   Inter and Inter Display (OFL-1.1, rsms.me/inter), JetBrains Mono (OFL-1.1). */
+@font-face { font-family: 'COre Sans'; src: url('Inter-Regular.otf') format('opentype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'COre Sans'; src: url('Inter-SemiBold.otf') format('opentype'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'COre Display'; src: url('InterDisplay-SemiBold.otf') format('opentype'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'COre Mono'; src: url('JetBrainsMono-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }

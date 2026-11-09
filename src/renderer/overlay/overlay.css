@@ -5,7 +5,7 @@ html, body {
   overflow: hidden;
   background: transparent;
   user-select: none;
-  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  font-family: "COre Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 
 #orb {
@@ -51,4 +51,4 @@ body.demo {
 }
 
 /* Meiosis: the speaking core's name above its subtitle. */
-#caption .speaker { display: block; font-size: 0.72em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 2px; opacity: 0.95; }
+#caption .speaker { display: block; font-family: 'COre Display', 'COre Sans', sans-serif; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 2px; opacity: 0.95; }
