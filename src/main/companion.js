@@ -77,10 +77,12 @@ const STATIC = {
   '/manifest.json': ['manifest.json', 'application/manifest+json'],
 };
 
+const APP_ORIGINS = new Set(['http://localhost', 'https://localhost', 'capacitor://localhost']);
+
 class Companion {
   // opts: { port, host (optional address override), staticDir, naclFile, iconFile, devices: [{ id, name, key: Uint8Array, ctr, created, lastSeen }],
   //         saveDevices(list), confirmPair({ name, code }) -> Promise<bool>, onMessage(text, device),
-  //         onStop(device), getFeed(since) -> { events, status }, now() }
+  //         onStop(device), onMedia(action, device), getMemory() -> [{ text }], getFeed(since) -> { events, status }, now() }
   constructor(opts) {
     this.o = opts;
     this.devices = new Map((opts.devices || []).map((d) => [d.id, { ...d }]));
@@ -170,6 +172,18 @@ class Companion {
     if (!isPrivate(ip)) { req.destroy(); return; }
     if (this._limited(ip)) return this._send(res, 429, { error: 'slow down' });
     const url = new URL(req.url, 'http://x');
+    // The COre phone app (Capacitor) runs at http://localhost; nothing else may
+    // call the API from a web page. Every body is still sealed with a device key.
+    const origin = req.headers.origin;
+    if (origin && APP_ORIGINS.has(origin)) {
+      res.setHeader('access-control-allow-origin', origin);
+      res.setHeader('vary', 'origin');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, { 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'content-type', 'access-control-max-age': '600' });
+        res.end();
+        return;
+      }
+    }
     if (req.method === 'GET' && STATIC[url.pathname]) {
       const [file, type] = STATIC[url.pathname];
       const p = url.pathname === '/nacl.js' ? this.o.naclFile : url.pathname === '/icon.png' ? this.o.iconFile : path.join(this.o.staticDir, file);
@@ -210,7 +224,10 @@ class Companion {
     const m = open(body, d.key);
     if (!m) return this._send(res, 401, { error: 'unreadable' });
     const t = this.now();
-    if (!Number.isSafeInteger(m.ctr) || m.ctr <= d.ctr || Math.abs(t - Number(m.ts)) > 120000) return this._send(res, 409, seal({ error: 'replay', ctr: d.ctr }, d.key));
+    // Old counter: a replay. Clock too far off: tell the phone our time so it can
+    // correct itself (it retries once, never in a loop).
+    if (!Number.isSafeInteger(m.ctr) || m.ctr <= d.ctr) return this._send(res, 409, seal({ error: 'replay', ctr: d.ctr, now: t }, d.key));
+    if (Math.abs(t - Number(m.ts)) > 120000) return this._send(res, 409, seal({ error: 'clock', ctr: d.ctr, now: t }, d.key));
     d.ctr = m.ctr;
     const seenBefore = d.lastSeen;
     d.lastSeen = t;
@@ -222,9 +239,16 @@ class Companion {
       if (!text) return this._send(res, 200, seal({ ok: false, error: 'empty' }, d.key));
       this.o.onMessage(text, { id: d.id, name: d.name });
     } else if (m.op === 'stop') this.o.onStop({ id: d.id, name: d.name });
+    else if (m.op === 'memory') reply = { ok: true, memory: this.o.getMemory ? this.o.getMemory() : [] };
+    else if (m.op === 'media') {
+      // Fixed media keys only (the same list as the music skill).
+      const action = String(m.action || '');
+      if (!['play', 'pause', 'toggle', 'next', 'previous', 'louder', 'quieter', 'mute'].includes(action) || !this.o.onMedia) reply = { ok: false, error: 'unknown' };
+      else this.o.onMedia(action, { id: d.id, name: d.name });
+    }
     else reply = { ok: false, error: 'unknown' };
     return this._send(res, 200, seal({ ...reply, ctr: m.ctr }, d.key));
   }
 }
 
-module.exports = { Companion, seal, open, pairCode, isPrivate, lanAddress, b64url, fromB64url };
+module.exports = { APP_ORIGINS, Companion, seal, open, pairCode, isPrivate, lanAddress, b64url, fromB64url };

@@ -813,7 +813,7 @@ function phoneFeed(since) {
 function ensureCompanion() {
   if (companion) return companion;
   companion = new Companion({
-    port: Number(config.data.phone.port) || 47330,
+    port: Number.isInteger(config.data.phone.port) ? config.data.phone.port : 47330, // 0 = any free port (tests)
     host: /^[\w.:-]{3,60}$/.test(config.data.phone.host || '') ? config.data.phone.host : '',
     staticDir: path.join(__dirname, '..', 'renderer', 'phone'),
     naclFile: require.resolve('tweetnacl/nacl-fast.min.js'),
@@ -835,6 +835,13 @@ function ensureCompanion() {
     },
     onMessage: (text, device) => { handleUserText(text, { typed: true, remote: true }); toolAudit(`phone ${device.name}: message`); },
     onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
+    onMedia: (action) => {
+      if (config.data.skills.music === false) return;
+      const cmd = SK.musicCommand(action, process.platform);
+      if (cmd) require('child_process').execFile(cmd.file, cmd.args, { timeout: 6000, windowsHide: true }, () => {});
+    },
+    // The phone app keeps a copy of what COre knows about you for when it's away from the PC.
+    getMemory: () => (config.data.memory && config.data.memory.enabled === false ? [] : (memory && memory.items ? memory.items : []).slice(-200).map((m) => ({ text: String(m.text || '').slice(0, 300) }))),
     getFeed: phoneFeed,
   });
   return companion;
@@ -854,6 +861,67 @@ function phoneQr(url) {
   qr.addData(url);
   qr.make();
   return qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
+}
+
+// ---------------------------------------------------------------- Google Drive memory (optional)
+// See gdrive.js. Off until you add your OAuth client and connect.
+const GD = require('./gdrive');
+let drive = null;
+let driveSyncTimer = null;
+let driveSyncing = false;
+
+function noteMemoryRemoved(text) {
+  const list = (state.get('memoryRemoved') || []).filter((r) => Date.now() - r.at < 90 * 864e5).slice(-300);
+  list.push({ text: String(text).slice(0, 300), at: Date.now() });
+  state.set('memoryRemoved', list);
+  scheduleDriveSync();
+}
+
+function googleDrive() {
+  const c = config.data.cloud || {};
+  if (!drive) {
+    drive = new GD.GoogleDrive({
+      clientId: c.googleClientId || '',
+      clientSecret: getSecret('googleClientSecret'),
+      refreshToken: getSecret('googleRefresh'),
+      fetch: (u, o) => require('electron').net.fetch(u, o),
+      openBrowser: (url) => shell.openExternal(url),
+      saveRefreshToken: (t) => setSecret('googleRefresh', t),
+    });
+  }
+  return drive;
+}
+
+function scheduleDriveSync(ms = 30000) {
+  if (!(config.data.cloud && config.data.cloud.autoSync !== false) || !getSecret('googleRefresh')) return;
+  clearTimeout(driveSyncTimer);
+  driveSyncTimer = setTimeout(() => syncDrive().catch(() => {}), ms);
+}
+
+async function syncDrive() {
+  if (driveSyncing || !memory) return { ok: false, error: 'busy' };
+  driveSyncing = true;
+  try {
+    const d = googleDrive();
+    const cloud = await d.read();
+    const local = { items: memory.items.map((i) => ({ text: i.text, at: i.updatedAt || i.ts || 0 })), removed: state.get('memoryRemoved') || [] };
+    const merged = GD.mergeMemory(local, cloud);
+    const have = new Set(memory.items.map((i) => i.text.toLowerCase().replace(/\s+/g, ' ').trim()));
+    let added = 0;
+    for (const it of merged.items) if (!have.has(it.text.toLowerCase().replace(/\s+/g, ' ').trim())) { if (memory.remember(it.text, { source: { via: 'cloud' } })) added++; }
+    let dropped = 0;
+    for (const r of merged.removed) {
+      const hit = memory.items.find((i) => i.text.toLowerCase().replace(/\s+/g, ' ').trim() === r.text && (i.updatedAt || i.ts || 0) <= r.at);
+      if (hit && memory.forget(hit.id)) dropped++;
+    }
+    await d.write(merged);
+    state.set('memoryRemoved', merged.removed);
+    state.set('driveSyncedAt', Date.now());
+    if (added || dropped) toDock('dock:memory', memory.list());
+    return { ok: true, added, dropped, total: merged.items.length };
+  } finally {
+    driveSyncing = false;
+  }
 }
 
 // ---------------------------------------------------------------- backups
@@ -911,6 +979,22 @@ async function settingsAction(name) {
       const res = changeSetting('backup.folder', found[0].suggested);
       return { message: res.ok ? `Backups go to ${found[0].name}, in COre Backups. ${getSecret('backup') ? '' : 'Tip: set a passphrase so the cloud copy is encrypted.'}`.trim() : res.error, values: res.values, secrets: res.secrets };
     }
+    case 'connectGoogle': {
+      drive = null; // pick up the client ID / secret just entered
+      try {
+        await googleDrive().connect();
+        const r = await syncDrive();
+        return { message: `Connected to Google. Memory synced (${r.total} facts in your Drive's private COre folder).` };
+      } catch (err) { return { message: `Google: ${err.message}` }; }
+    }
+    case 'syncGoogle': {
+      if (!getSecret('googleRefresh')) return { message: 'Connect your Google account first.' };
+      try { const r = await syncDrive(); return { message: r.ok ? `Synced: ${r.added} new here, ${r.dropped} removed, ${r.total} in total.` : 'A sync is already running.' }; } catch (err) { return { message: `Google: ${err.message}` }; }
+    }
+    case 'disconnectGoogle':
+      await googleDrive().disconnect().catch(() => {});
+      drive = null;
+      return { message: 'Disconnected from Google. The copy in Drive stays until you delete COre from your Google account\'s connected apps.' };
     case 'backupNow': {
       const r = runBackup('manual');
       return { message: r.ok ? `Backed up ${r.count} files${r.encrypted ? ', encrypted' : ''}.` : r.error };
@@ -1259,6 +1343,9 @@ async function captureScreen() {
     mediaType: 'image/jpeg',
     displayWidth: width,
     displayHeight: height,
+    displayX: d.bounds.x,
+    displayY: d.bounds.y,
+    scaleFactor: d.scaleFactor || 1,
     canPoint,
     windows,
   };
@@ -1293,6 +1380,7 @@ function handleActionTag(item) {
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
     const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
+    if (r && (r.created || r.replaced)) scheduleDriveSync();
     if (r && r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
     else if (r && r.replaced) toDock('dock:message', { role: 'system', text: `Updated: ${r.item.text} (was: ${r.replaced})` });
     toDock('dock:memory', memory.list());
@@ -1300,6 +1388,7 @@ function handleActionTag(item) {
   }
   if (item.name === 'forget') {
     const gone = memory && memory.forget(item.text);
+    if (gone) noteMemoryRemoved(gone.text);
     if (gone) toDock('dock:message', { role: 'system', text: `Forgot: ${gone.text}` });
     toDock('dock:memory', memory ? memory.list() : []);
     return true;
@@ -1389,7 +1478,6 @@ function hideGlance() {
   clearTimeout(glanceTimer);
   glanceIdleSince = 0;
   stopGlanceReader();
-  if (companion) companion.stop();
   toOverlay('glance', null);
 }
 
@@ -1401,11 +1489,36 @@ function glanceCard(title, lines, ms = 25000) {
   glanceTimer = setTimeout(hideGlance, ms);
 }
 
+// Live progress of a shared task: one row per specialist. Never covers a song or
+// lyrics card; goes away a few seconds after the last specialist finishes.
+function glanceTask(task) {
+  if (config.data.skills.glance === false) return;
+  if (glance && (glance.what === 'music' || glance.what === 'lyrics')) return;
+  stopGlanceReader();
+  clearTimeout(glanceTimer);
+  glance = { what: 'card' };
+  const steps = task.steps.map((st) => { const c = coreById(st.core) || {}; return { name: c.name || st.core, color: c.color || '', status: st.status }; });
+  toOverlay('glance', { kind: 'task', title: String(task.text).replace(/\s+/g, ' ').slice(0, 60), steps });
+  const finished = task.steps.every((st) => !['pending', 'running'].includes(st.status));
+  glanceTimer = setTimeout(hideGlance, finished ? 6000 : 10 * 60e3);
+}
+
+// A live countdown card for a timer, for a few seconds after it's set or asked about.
+function glanceCountdown(at, text, ms = 9000) {
+  if (config.data.skills.glance === false) return;
+  stopGlanceReader();
+  clearTimeout(glanceTimer);
+  glance = { what: 'card' };
+  toOverlay('glance', { kind: 'timer', title: String(text || 'Timer'), endsAt: Number(at), startedAt: Date.now() });
+  glanceTimer = setTimeout(hideGlance, ms);
+}
+
 function pushGlance() {
   if (!glance || glance.what === 'card') return;
   const t = glance.track;
   const out = { kind: glance.what, waiting: !t };
   if (t) Object.assign(out, { title: t.title, artist: t.artist, posMs: t.posMs, durMs: t.durMs, playing: t.playing, at: t.at });
+  if (glance.art && !glance.artSent) { out.art = glance.art; glance.artSent = true; }
   if (glance.what === 'lyrics') {
     const L = glance.lyrics;
     out.note = glance.note || (!L ? 'Finding the lyrics…' : L.instrumental ? 'Instrumental' : !L.synced && !L.plain ? 'No lyrics found for this song.' : '');
@@ -1416,6 +1529,22 @@ function pushGlance() {
     }
   }
   toOverlay('glance', out);
+}
+
+// Album art once per track: from the media session (Windows) or the player's
+// art URL (Linux). Sent to the overlay once, as a small data: URL.
+function loadArt(track) {
+  const key = glance.key;
+  glance.art = null;
+  glance.artSent = false;
+  const done = (url) => {
+    if (!glance || glance.key !== key || !url) return;
+    glance.art = url;
+    glance.artSent = false;
+    pushGlance();
+  };
+  if (track.artData) done(track.artData);
+  else if (track.artUrl) GL.artFromUrl(track.artUrl, (u, o) => require('electron').net.fetch(u, o)).then(done, () => {});
 }
 
 function loadLyrics(track) {
@@ -1449,6 +1578,7 @@ function onGlanceMedia(m) {
   else if (!glanceIdleSince) glanceIdleSince = Date.now();
   else if (Date.now() - glanceIdleSince > 60000) { hideGlance(); return; }
   if (changed && glance.what === 'lyrics') loadLyrics(m);
+  if (changed) loadArt(m);
   pushGlance();
 }
 
@@ -1456,8 +1586,9 @@ function showGlance(req) {
   if (!req || config.data.skills.glance === false) return;
   if (req.what === 'off') { hideGlance(); return; }
   if (req.what === 'card') { glanceCard(req.card.title, req.card.lines); return; }
+  if (req.what === 'timer') { glanceCountdown(req.at, req.text); return; }
   const prev = glance && glance.what !== 'card' ? glance : null;
-  glance = { what: req.what, track: prev ? prev.track : null, key: prev ? prev.key : null, lyrics: null, linesSent: false, note: '' };
+  glance = { what: req.what, track: prev ? prev.track : null, key: prev ? prev.key : null, lyrics: null, linesSent: false, note: '', art: prev ? prev.art : null, artSent: false };
   if (glance.track && req.what === 'lyrics') loadLyrics(glance.track);
   if (!glanceReader) {
     const reader = new GL.MediaReader();
@@ -1471,6 +1602,99 @@ function showGlance(req) {
   glanceTimer = setTimeout(() => {
     if (glance && glance.what !== 'card' && !glance.track) glanceCard('Now playing', ['Nothing is playing right now.'], 6000);
   }, 6000);
+}
+
+// ---------------------------------------------------------------- desktop agent
+// Off by default (Settings, Agent). Started only by you: "/do TASK" in the chat.
+// Every step is shown; actions that change something need your OK (or "Allow
+// all steps" for this task). Esc or the Stop button ends it at once.
+const AG = require('./agent');
+let agentRunner = null;
+let agentBrainInst = null;
+const agentApprovals = new Map();
+
+function agentBrain() {
+  if (!agentBrainInst) {
+    const mem = {};
+    agentBrainInst = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+  }
+  return agentBrainInst;
+}
+
+function stopAgent(reason) {
+  if (agentRunner && agentRunner.running) agentRunner.stop(reason);
+  for (const [id, a] of agentApprovals) { a.resolve('no'); agentApprovals.delete(id); }
+}
+
+async function startAgent(goal, { remote = false } = {}) {
+  const ag = config.data.agent || {};
+  if (!ag.enabled) { addTranscript('system', 'The desktop agent is off. Turn it on in Settings, Agent.', { kind: 'error' }); return; }
+  if (remote) { addTranscript('system', 'The desktop agent can only be started at the PC.', { kind: 'error' }); return; }
+  const driver = AG.driverFor(process.platform);
+  if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
+  if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
+  addTranscript('user', `/do ${goal}`);
+  addTranscript('system', `Agent: working on "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
+  toOverlay('state', 'thinking');
+  try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
+  // The agent's own Esc presses must not trip the Esc-to-stop shortcut.
+  const guarded = {
+    perform: async (a, p) => {
+      const esc = a.type === 'key' && /(^|\+)(esc|escape)$/.test(a.combo);
+      if (esc) try { globalShortcut.unregister('Escape'); } catch {}
+      try { return await driver.perform(a, p); } finally {
+        if (esc) try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
+      }
+    },
+  };
+  agentRunner = new AG.AgentRunner({
+    driver: guarded,
+    maxSteps: Math.max(3, Math.min(50, Number(ag.maxSteps) || 25)),
+    autoApprove: ag.approve === 'task-auto', // only if the user chose it in Settings
+    screenshot: async () => {
+      const shot = await captureScreen();
+      return shot;
+    },
+    think: async ({ text, shot, signal }) => {
+      const acts = [];
+      const { reply } = await agentBrain().ask({ text, shot, typed: true, signal, onItem: (it) => { if (it.type === 'gesture' && it.name === 'act') acts.push(it.json); } });
+      return `${reply || ''}${acts.length ? ` [[act ${acts[0]}]]` : ''}`;
+    },
+    approve: (action, info) => new Promise((resolve) => {
+      const id = require('crypto').randomUUID();
+      agentApprovals.set(id, { resolve });
+      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: action.why || '' });
+      if (action.type === 'click' || action.type === 'move') {
+        // COre points at where it wants to click.
+        const d = primaryDisplay();
+        const p = AG.toScreen(action, info.shot);
+        const sf = info.shot.scaleFactor || 1;
+        toOverlay('speak:item', { type: 'gesture', name: 'point', x: p.x / sf - d.bounds.x, y: p.y / sf - d.bounds.y });
+      }
+    }),
+    openApp: async (name) => {
+      const r = await SK.runSkill('open', name, skillCtx());
+      if (r.error) throw new Error(r.error);
+    },
+    onStep: (o) => {
+      if (o.error) addTranscript('system', `Agent step ${o.step}: ${o.error}`, { kind: 'error' });
+      else if (o.running) addTranscript('system', `Agent step ${o.step}: ${o.label}${o.action.why ? ` (${o.action.why})` : ''}`, { kind: 'progress' });
+      else if (o.ok === false) addTranscript('system', `Agent step ${o.step} failed: ${o.error}`, { kind: 'error' });
+    },
+    log: toolAudit,
+  });
+  let r;
+  try { r = await agentRunner.run(goal); } catch (err) { r = { status: 'failed', reason: err.message }; }
+  try { globalShortcut.unregister('Escape'); } catch {}
+  toDock('dock:agent-approve', null);
+  toOverlay('state', 'idle');
+  const msg = r.status === 'done' ? `Agent finished: ${r.summary || 'done'}`
+    : r.status === 'ask' ? `Agent needs you: ${r.question}`
+      : `Agent stopped: ${r.reason || r.status}.`;
+  addTranscript('core', msg);
+  toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
+  if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
+  return r;
 }
 
 // ---------------------------------------------------------------- quick replies (no brain)
@@ -1503,7 +1727,10 @@ function quickReply(text, { typed }) {
   const now = new Date();
   if (q.kind === 'time') line = `It's ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
   else if (q.kind === 'date') line = `It's ${now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}.`;
-  else if (q.kind === 'glance') {
+  else if (q.kind === 'timers') {
+    const next = reminders.items.filter((x) => x.at > Date.now()).sort((a, b) => a.at - b.at)[0];
+    if (next) { glanceCountdown(next.at, next.text); line = `${next.text}: ${Math.max(1, Math.round((next.at - Date.now()) / 60000))} minutes left.`; } else line = 'No timers running.';
+  } else if (q.kind === 'glance') {
     if (config.data.skills.glance === false) return false;
     showGlance({ what: q.what });
     line = q.what === 'off' ? null : q.what === 'lyrics' ? QUICK_LINES.lyrics : QUICK_LINES.music_card;
@@ -1590,6 +1817,7 @@ function runAction(id) {
 
 function onReminder(r, missed) {
   toOverlay('attention', { level: 'warn', title: 'Reminder' });
+  if (config.data.skills.glance !== false && !missed) glanceCard("Time's up", [r.text], 15000);
   addTranscript('notice', `⏰ ${missed ? `Missed while I was off (${fmtTime(r.at)}): ` : ''}${r.text}`);
   toDock('dock:reminders', reminders.items);
   if (Notification.isSupported()) new Notification({ title: 'COre reminder', body: r.text }).show();
@@ -1932,13 +2160,15 @@ async function runSharedTask(targets, text) {
   saveTask(task);
   const names = task.steps.map((s) => coreById(s.core).name).join(', ');
   addTranscript('system', `Shared task: ${names} working in parallel. COre will sum up.`, { author: 'prime', kind: 'progress', task: task.id });
+  for (const step of task.steps) step.status = 'running';
+  glanceTask(task);
   await Promise.all(task.steps.map(async (step) => {
-    step.status = 'running';
     saveTask(task);
     const r = await askCore(step.core, text, { task });
     step.status = r.ok ? 'completed' : r.error === 'cancelled' ? 'cancelled' : 'failed';
     if (r.ok) step.result = r.reply.slice(0, 4000); else step.error = r.error;
     saveTask(task);
+    glanceTask(task);
   }));
   const done = task.steps.filter((s) => s.status === 'completed');
   task.status = done.length === task.steps.length ? 'completed' : done.length ? 'partial' : task.steps.every((s) => s.status === 'cancelled') ? 'cancelled' : 'failed';
@@ -2127,6 +2357,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // Meiosis routing: decide the recipient before touching Prime's turn, so
   // talking to a specialist never interrupts what COre itself is saying.
   if (!internal && !chain) {
+    if (/^\/do\s+\S/i.test(text)) { startAgent(text.replace(/^\/do\s+/i, '').slice(0, 500), { remote }); return; }
+    if (agentRunner && agentRunner.running && typed) stopAgent('you sent a message');
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
@@ -2503,11 +2735,19 @@ function wireIpc() {
   const fromSettings = (e) => isFrom(settingsWin, e);
   ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), secrets: settingsSecrets(), version: app.getVersion() } : null));
   ipcMain.handle('settings:set', (e, { key, value } = {}) => (fromSettings(e) ? changeSetting(String(key), value) : { ok: false }));
+  ipcMain.on('dock:agent-answer', (e, { id, answer } = {}) => {
+    if (!fromDock(e)) return;
+    if (id === 'stop') { stopAgent('you pressed Stop'); return; }
+    const a = agentApprovals.get(String(id));
+    if (!a) return;
+    agentApprovals.delete(String(id));
+    a.resolve(['yes', 'all', 'no'].includes(answer) ? answer : 'no');
+  });
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
   ipcMain.on('dock:memoryEdit', (e, { id, text } = {}) => { if (fromDock(e) && memory) { memory.edit(String(id), String(text || '')); toDock('dock:memory', memory.list()); } });
-  ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { memory.forget(String(id)); toDock('dock:memory', memory.list()); } });
+  ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { const gone = memory.forget(String(id)); if (gone) noteMemoryRemoved(gone.text); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
   ipcMain.handle('dock:reminders', (e) => (fromDock(e) && reminders ? reminders.items : []));
   ipcMain.on('dock:reminderCancel', (e, id) => { if (fromDock(e) && reminders) { reminders.cancel(String(id)); toDock('dock:reminders', reminders.items); } });
@@ -2912,6 +3152,8 @@ app.whenReady().then(async () => {
   syncPhone();
   watchPower();
   setTimeout(prewarmQuickVoice, 45_000);
+  scheduleDriveSync(120_000);
+  setInterval(() => scheduleDriveSync(0), 3600_000).unref();
   setInterval(checkAutoBackup, 3600_000).unref();
   reminders = new Reminders({ store: state, onFire: onReminder });
 
@@ -3006,6 +3248,8 @@ app.whenReady().then(async () => {
 
 app.on('will-quit', () => {
   stopGlanceReader();
+  if (companion) companion.stop();
+  stopAgent('quitting');
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
   if (!restarting) {

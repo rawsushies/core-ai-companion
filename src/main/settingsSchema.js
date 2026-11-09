@@ -105,6 +105,25 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'cloud',
+    title: 'Cloud',
+    fields: [
+      { key: 'cloud.googleClientId', label: 'Google OAuth client ID (Desktop app, from your Google Cloud Console)', type: 'text', maxLength: 200, optional: true, pattern: '^[\\w.-]+\\.apps\\.googleusercontent\\.com$' },
+      { key: 'cloud.googleClientSecret', label: 'Client secret', type: 'text', maxLength: 200, optional: true, secret: 'googleClientSecret' },
+      { key: 'cloud.actions', label: "COre's memory in your Google Drive's private app folder (COre can't see anything else)", type: 'actions', items: [['connectGoogle', 'Connect Google'], ['syncGoogle', 'Sync now'], ['disconnectGoogle', 'Disconnect']] },
+      { key: 'cloud.autoSync', label: 'Sync memory automatically', type: 'toggle' },
+    ],
+  },
+  {
+    id: 'agent',
+    title: 'Agent',
+    fields: [
+      { key: 'agent.enabled', label: 'Let COre operate this PC for tasks I start with /do (it clicks and types; Esc stops it)', type: 'toggle' },
+      { key: 'agent.approve', label: 'Approval', type: 'select', options: [['every', 'Ask me before every click, key or typing (recommended)'], ['task-auto', 'Never ask (only for tasks you watch)']] },
+      { key: 'agent.maxSteps', label: 'Most steps per task', type: 'range', min: 5, max: 50, step: 5 },
+    ],
+  },
+  {
     id: 'phone',
     title: 'Phone',
     fields: [

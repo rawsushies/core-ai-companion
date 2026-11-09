@@ -99,6 +99,16 @@ const DEFAULTS = {
     lyrics: true, // look up lyrics on lrclib.net (sends the song title and artist) when you ask for them
     quick: true, // answer short requests (time, music keys, lyrics) on the spot, without the brain
   },
+  cloud: {
+    googleClientId: '', // your own OAuth client (Desktop app) from Google Cloud Console; the secret is stored encrypted
+    googleClientSecret: '', // stored as an encrypted secret instead
+    autoSync: true, // sync memory with your Google Drive's private app folder after changes and hourly
+  },
+  agent: {
+    enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
+    approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
+    maxSteps: 25,
+  },
   phone: {
     enabled: false, // the phone companion: chat with COre from your phone's browser on the same Wi-Fi
     port: 47330,

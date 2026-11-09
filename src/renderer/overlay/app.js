@@ -192,7 +192,7 @@
   // updates when the line or the second changes, never per frame.
   const glanceEl = document.getElementById('glance');
   const gq = (c) => glanceEl.querySelector(c);
-  const GE = { kicker: gq('.g-kicker'), title: gq('.g-title'), sub: gq('.g-sub'), lyrics: gq('.g-lyrics'), prev: gq('.g-prev'), cur: gq('.g-cur'), next: gq('.g-next'), list: gq('.g-list'), bar: gq('.g-bar'), fill: gq('.g-bar i') };
+  const GE = { art: gq('.g-art'), kicker: gq('.g-kicker'), title: gq('.g-title'), sub: gq('.g-sub'), lyrics: gq('.g-lyrics'), prev: gq('.g-prev'), cur: gq('.g-cur'), next: gq('.g-next'), list: gq('.g-list'), bar: gq('.g-bar'), fill: gq('.g-bar i') };
   let glance = null;
   let glanceLines = null;
   let glancePlain = null;
@@ -241,13 +241,59 @@
       return;
     }
     const sameTrack = glance && glance.kind === g.kind && glance.title === g.title && glance.artist === g.artist;
-    if (!sameTrack) { glanceLines = null; glancePlain = null; glanceIdx = -2; }
+    if (!sameTrack) { glanceLines = null; glancePlain = null; glanceIdx = -2; GE.art.hidden = true; GE.art.removeAttribute('src'); }
+    if (typeof g.art === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,/.test(g.art)) { GE.art.src = g.art; GE.art.hidden = false; }
+    if (g.kind === 'card' || g.kind === 'timer') GE.art.hidden = true;
     if (g.lines !== undefined) { glanceLines = g.lines; glanceIdx = -2; }
     if (g.plain !== undefined) glancePlain = g.plain;
     glance = g;
     glanceEl.hidden = false;
     glanceEl.dataset.kind = g.kind;
     GE.list.textContent = '';
+    if (g.kind === 'timer') {
+      GE.kicker.textContent = 'Timer';
+      GE.title.textContent = g.title || 'Timer';
+      GE.sub.textContent = '';
+      GE.lyrics.hidden = false;
+      GE.prev.textContent = ''; GE.next.textContent = '';
+      const tick = () => {
+        const left = Math.max(0, g.endsAt - Date.now());
+        const m = Math.floor(left / 60000);
+        const h = Math.floor(m / 60);
+        const sec = Math.floor((left % 60000) / 1000);
+        GE.cur.textContent = left ? (h ? `${h}:${String(m % 60).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`) : "Time's up";
+        const total = Math.max(1, g.endsAt - g.startedAt);
+        GE.fill.style.transform = `scaleX(${Math.min(1, 1 - left / total).toFixed(4)})`;
+      };
+      tick();
+      glanceTimer = setInterval(tick, 1000);
+      GE.bar.hidden = false;
+      requestAnimationFrame(() => glanceEl.classList.add('show'));
+      return;
+    }
+    if (g.kind === 'task') {
+      GE.kicker.textContent = 'Shared task';
+      GE.title.textContent = g.title || '';
+      GE.sub.textContent = '';
+      const label = { pending: 'waiting', running: 'working…', completed: 'done', failed: 'failed', cancelled: 'stopped' };
+      for (const st of g.steps || []) {
+        const li = document.createElement('li');
+        li.className = `step ${st.status}`;
+        const dot = document.createElement('i');
+        if (/^#[0-9a-f]{6}$/i.test(st.color || '')) dot.style.background = st.color;
+        const n = document.createElement('span');
+        n.textContent = st.name;
+        const s2 = document.createElement('em');
+        s2.textContent = label[st.status] || st.status;
+        li.append(dot, n, s2);
+        GE.list.append(li);
+      }
+      GE.lyrics.hidden = true;
+      GE.bar.hidden = true;
+      GE.art.hidden = true;
+      requestAnimationFrame(() => glanceEl.classList.add('show'));
+      return;
+    }
     if (g.kind === 'card') {
       GE.kicker.textContent = '';
       GE.title.textContent = g.title || '';

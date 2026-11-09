@@ -65,3 +65,9 @@ Approval to push is not approval to merge, and approval to merge is not approval
 - A stray branch `dev/core-next` was pushed by mistake and can't be deleted from this environment. It holds
   only commits already on the PR. Please delete it on GitHub.
 - Tests at `2b03131`: `npm test` 190 passed, 0 failed. Follow-up audit: `docs/dev/AUDIT-FOLLOWUP.md`.
+
+## PR #2 (improvement loop)
+PR #1 was merged at the user's request (`d9044d6`). Loop work continues on `review/core-M-012` → PR #2:
+M-022 `55f2ced`, loop-2 tests `bd3a20b`, M-023 `b39584c`, M-024 `6ce782c`, M-025 `8094ba5`, M-026 `addfa03`.
+Not merged, tagged or released. The stray `dev/core-next` branch and the broken releases v2.0.0–v10.2.0 must be
+deleted by the user: this session type can't delete branches or releases.

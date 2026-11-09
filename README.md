@@ -111,8 +111,18 @@ requests like the time or "next song" are answered instantly, without the brain.
 { "name": "wiki", "description": "search Wikipedia", "url": "https://en.wikipedia.org/wiki/Special:Search?search={q}" }
 ```
 
+**Desktop agent (optional).** Turn it on in Settings → Agent, then type `/do` and a task. COre works through it on
+your screen, one step at a time, asking before each click or keystroke. Esc stops it. See
+[docs/dev/AGENT.md](docs/dev/AGENT.md).
+
+**COre for Android.** An app in `mobile/` (built by CI): chat with COre on your PC over Wi-Fi, or with Gemini when
+you're away, and it still knows you. Light enough for older phones. See [docs/dev/MOBILE.md](docs/dev/MOBILE.md).
+
 **Phone companion (optional).** Pair your phone with a QR code (Settings → Phone) and chat with COre from the
 phone's browser on the same Wi-Fi, end-to-end encrypted. See [docs/dev/PHONE.md](docs/dev/PHONE.md).
+
+**Memory in your Google account (optional).** Settings → Cloud keeps COre's memory in your Drive's private app
+folder, synced both ways. You need a free OAuth client of your own: [docs/dev/CLOUD.md](docs/dev/CLOUD.md).
 
 **Backups.** Settings → Backup keeps copies of your settings, memories, notes and plugins in a folder you choose.
 Pick a OneDrive, Google Drive or Dropbox folder and they're cloud backups. API keys are never included, and a

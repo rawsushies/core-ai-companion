@@ -32,7 +32,9 @@ class SentenceChunker {
       // An opening clause ("Here's one:", "Honestly,") goes out on its own...
       const m = this.buffer.length >= 12 && /^(.{8,}?[,;:\u2014\u2013])\s/.exec(this.buffer);
       // ...and a long opening with no pause at all is split after a few words.
-      const words = !m && this.buffer.length >= 70 && /^(.{24,48}\S)\s/.exec(this.buffer);
+      // (Measured: each chunk costs about 0.7 s of fixed synthesis time plus about
+      // 11 ms per character, so a shorter first chunk starts the voice 0.25-0.45 s sooner.)
+      const words = !m && this.buffer.length >= 48 && /^(.{20,36}\S)\s/.exec(this.buffer);
       const cut = m || words;
       if (cut) {
         ready.push(cut[1].trim());

@@ -12,7 +12,7 @@ function dataDir() {
   fs.writeFileSync(path.join(d, 'config.json'), JSON.stringify({ brain: { secrets: { gemini: 'enc:SECRET' }, openaiCompat: { apiKey: 'sk-x' } }, skills: { calendarUrl: 'https://cal/secret', city: 'Jakarta' }, notify: { token: 'TOKEN' }, orb: { theme: 'ice' } }));
   fs.writeFileSync(path.join(d, 'memory.json'), JSON.stringify({ items: [{ text: 'likes SQLite' }] }));
   fs.writeFileSync(path.join(d, 'notes.json'), JSON.stringify([{ text: 'buy milk' }]));
-  fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ onboarded: true }));
+  fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ onboarded: true, phoneDevices: [{ id: 'p1', key: 'plain:PHONEKEY' }] }));
   fs.mkdirSync(path.join(d, 'skills'));
   fs.writeFileSync(path.join(d, 'skills', 'wiki.json'), JSON.stringify({ name: 'wiki', url: 'https://x/{q}' }));
   fs.writeFileSync(path.join(d, 'skills', 'evil.js'), 'code');
@@ -26,7 +26,7 @@ test('a backup holds settings, memory, notes, state and plugins, never secrets',
   const r = BK.createBackup({ dataDir: d, destDir: dest, appVersion: '1.0.0', now: new Date(2026, 10, 9, 10, 0, 0) });
   assert.strictEqual(path.basename(r.file), 'COre-backup-2026-11-09_100000.json');
   const raw = fs.readFileSync(r.file, 'utf8');
-  for (const s of ['enc:SECRET', 'sk-x', 'https://cal/secret', 'TOKEN']) assert.ok(!raw.includes(s), `${s} must not be in a backup`);
+  for (const s of ['enc:SECRET', 'sk-x', 'https://cal/secret', 'TOKEN', 'PHONEKEY']) assert.ok(!raw.includes(s), `${s} must not be in a backup`);
   const b = BK.readBackup(r.file);
   assert.deepStrictEqual(Object.keys(b.files).sort(), ['config.json', 'memory.json', 'notes.json', 'skills/wiki.json', 'state.json']);
   assert.strictEqual(JSON.parse(b.files['config.json']).skills.city, 'Jakarta');
@@ -64,6 +64,7 @@ test('restore keeps this PC secrets, saves a snapshot first, and ignores unknown
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'core-bk-target-'));
   fs.writeFileSync(path.join(target, 'config.json'), JSON.stringify({ brain: { secrets: { groq: 'enc:MINE' } }, notify: { token: 'MYTOKEN' }, skills: { calendarUrl: 'https://mine' } }));
   fs.writeFileSync(path.join(target, 'memory.json'), JSON.stringify({ items: [{ text: 'old memory' }] }));
+  fs.writeFileSync(path.join(target, 'state.json'), JSON.stringify({ phoneDevices: [{ id: 'mine', key: 'enc:MYPHONE' }] }));
   const snapDir = path.join(target, 'backups');
   const res = BK.restoreBackup({ dataDir: target, backup: BK.readBackup(r.file), snapshotDir: snapDir });
   const cfg = JSON.parse(fs.readFileSync(path.join(target, 'config.json'), 'utf8'));
@@ -71,6 +72,9 @@ test('restore keeps this PC secrets, saves a snapshot first, and ignores unknown
   assert.strictEqual(cfg.notify.token, 'MYTOKEN');
   assert.strictEqual(cfg.skills.calendarUrl, 'https://mine');
   assert.strictEqual(cfg.orb.theme, 'ice');
+  const st = JSON.parse(fs.readFileSync(path.join(target, 'state.json'), 'utf8'));
+  assert.strictEqual(st.onboarded, true);
+  assert.deepStrictEqual(st.phoneDevices, [{ id: 'mine', key: 'enc:MYPHONE' }], 'paired phones survive a restore');
   assert.ok(fs.readFileSync(path.join(target, 'memory.json'), 'utf8').includes('likes SQLite'));
   assert.ok(res.snapshot && fs.readFileSync(res.snapshot, 'utf8').includes('old memory'));
   assert.ok(fs.existsSync(path.join(target, 'skills', 'wiki.json')));

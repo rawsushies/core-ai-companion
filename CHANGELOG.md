@@ -1,6 +1,75 @@
 # Changelog
 
-## Unreleased
+## 11.0.0 — Agent, phone app, cards and a new chat
+
+### Memory in your Google account (optional)
+- Settings → **Cloud**: connect your Google account and COre keeps its memory in your Drive's private app folder.
+  It asks for the `drive.appdata` permission only and can't see anything else.
+- Memory is merged both ways after every change and hourly. Deletions stay deleted.
+- Sign-in is Google's desktop flow (PKCE, local callback). Only the refresh token is kept, encrypted.
+- You need your own free OAuth client: steps in `docs/dev/CLOUD.md`.
+
+### COre for Android (new app)
+- `mobile/` is a real Android app (Capacitor). CI builds an installable debug APK.
+- **With your PC** on the same Wi-Fi, it's paired like the phone page (encrypted) and gets chat, status, the media
+  remote and Stop.
+- **Away from the PC** it answers with Gemini using your own key, and still knows you: it keeps a copy of COre's
+  memory from the PC.
+- **For low and mid-range phones:** a light 2D orb picked by device class (180–520 particles at 24–30 fps). It
+  stops when hidden.
+- The desktop now answers the app's origin only (CORS) and serves a sealed memory copy. See `docs/dev/MOBILE.md`.
+
+### Fixed (found by the new agent test)
+- **Closing any card beside the orb stopped the phone companion server** (a misplaced line from the phone
+  milestone). Phones lost their connection after "hide that" or any card timing out. Fixed, with a regression test.
+
+### Desktop agent (off by default)
+- `/do TASK` lets COre operate the PC: it looks at the screen, then clicks, types, presses keys, scrolls or opens
+  apps one step at a time.
+- Every step that changes something waits for **Allow** (or **Allow all steps**), and COre points where it will click.
+- **Esc**, **Stop** or any message ends it.
+- Fixed action set with validation and blocked key combos; drivers take parameters as data (xdotool on Linux, a
+  fixed SendInput helper on Windows).
+- Details: `docs/dev/AGENT.md`.
+
+### Live task card
+- When several cores work on one request (for example `@Scout @Sentinel compare…`), a card beside the orb shows
+  each specialist with a live status: working…, done, failed. It never covers a song or lyrics card, and it goes
+  away a few seconds after the last one finishes.
+
+### Voice starts sooner on long openings
+- When a reply opens with a long sentence without a comma, the first few words are now spoken on their own as soon
+  as 48 characters have arrived (was 70). Measured with the voice model: each spoken chunk costs about 0.7 s plus
+  about 11 ms per character, so this starts the voice about 0.25–0.45 s sooner on those replies.
+
+### Album art on the song card
+- The now-playing and lyrics card shows the album cover: from the Windows media session's thumbnail (read once per
+  track), or from the player's art link on Linux (local file, or https fetched only while the card is open, at most
+  600 KB, images only).
+- The Linux media reading is now tested end to end with a stand-in player.
+
+### Phone media remote
+- The phone companion has previous / play-pause / next / volume buttons that press the PC's media keys (fixed keys
+  only, like the music skill; respects the music switch).
+- Screen readers no longer announce every lyric line of the lyrics card.
+
+### Live cards beside the orb
+- Setting a timer shows a live countdown card for a few seconds; "how long left?" brings it back instantly
+  (no brain). When a timer ends, a "Time's up" card shows next to the reminder.
+- Asking for the weather shows a card with now, today and tomorrow while COre talks about it.
+- Asking about your calendar shows a card with the day's events.
+
+### Fixed (loop 1 audit)
+- Backups no longer contain paired phones' keys (on Linux without a keyring they were unencrypted), and restoring a
+  backup keeps the phones paired with this PC.
+- A phone whose clock is more than 2 minutes off no longer retries endlessly: COre tells it the right time, and it
+  retries once.
+- Scrolling over a gap between chat messages scrolls the chat (Windows and macOS), instead of the app underneath.
+
+### Tests
+- New end-to-end suite against the real app (`npm run e2e`, also in CI on Linux): chat reply, instant answers, the
+  glance card, paused rendering, plain-text notes, every Settings section, backup to a cloud folder without secrets,
+  phone pairing / chat / removal, and no renderer errors.
 
 ### Instant answers sound instant
 - Short spoken lines are kept after the first time, and the quick-answer lines ("Paused.", "Next one."…) are

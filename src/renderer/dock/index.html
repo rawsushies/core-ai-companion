@@ -94,6 +94,15 @@
         <button type="button" id="all-settings" class="primary-sm">All settings</button>
       </div>
     </div>
+    <div id="agent-card" class="agent-card" hidden>
+      <div class="agent-step"><span id="agent-step-no"></span> <span id="agent-label"></span></div>
+      <div id="agent-why" class="agent-why"></div>
+      <div class="agent-actions">
+        <button type="button" id="agent-yes" class="primary-sm">Allow</button>
+        <button type="button" id="agent-all" class="ghost">Allow all steps</button>
+        <button type="button" id="agent-stop" class="ghost danger">Stop</button>
+      </div>
+    </div>
     <div id="core-menu" class="core-menu" role="listbox" aria-label="Cores" hidden></div>
     <form id="composer" class="composer">
       <div class="field">

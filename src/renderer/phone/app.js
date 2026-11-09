@@ -39,7 +39,7 @@
   }
 
   function show(which) {
-    for (const id of ['pair', 'unpaired', 'log', 'composer']) $(id).hidden = true;
+    for (const id of ['pair', 'unpaired', 'log', 'composer', 'media']) $(id).hidden = true;
     for (const id of which) $(id).hidden = false;
     $('stop').hidden = !which.includes('log');
   }
@@ -92,8 +92,10 @@
     return c;
   }
 
-  async function call(op, extra = {}) {
-    const res = await fetch('/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ d: deviceId, ...seal({ op, ctr: nextCtr(), ts: Date.now(), ...extra }, key) }) });
+  let clockOffset = 0; // PC time minus phone time, learned when the PC says our clock is off
+
+  async function call(op, extra = {}, retried = false) {
+    const res = await fetch('/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ d: deviceId, ...seal({ op, ctr: nextCtr(), ts: Date.now() + clockOffset, ...extra }, key) }) });
     if (res.status === 401) {
       store.del('device'); store.del('key');
       show(['unpaired']);
@@ -101,7 +103,12 @@
       throw new Error('unpaired');
     }
     const r = open(await res.json(), key);
-    if (res.status === 409 && r && r.ctr) { store.set('ctr', String(r.ctr)); return call(op, extra); }
+    if (res.status === 409 && r) {
+      if (retried) throw new Error('refused');
+      if (r.error === 'clock' && Number.isFinite(r.now)) clockOffset = r.now - Date.now();
+      if (Number(r.ctr) >= Number(store.get('ctr') || 0)) store.set('ctr', String(r.ctr));
+      return call(op, extra, true);
+    }
     if (!r) throw new Error('unreadable');
     return r;
   }
@@ -147,7 +154,7 @@
     const k = store.get('key');
     if (!deviceId || !k) { show(['unpaired']); status('Not paired', 'off'); return; }
     key = unb64(k);
-    show(['log', 'composer']);
+    show(['log', 'media', 'composer']);
     sync();
   }
 
@@ -160,6 +167,9 @@
   });
   $('input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !matchMedia('(pointer: coarse)').matches) { e.preventDefault(); $('composer').requestSubmit(); } });
   $('stop').addEventListener('click', () => call('stop').catch(() => {}));
+  for (const b of document.querySelectorAll('[data-media]')) {
+    b.addEventListener('click', () => { b.disabled = true; call('media', { action: b.dataset.media }).catch(() => {}).finally(() => { b.disabled = false; }); });
+  }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && key) sync(); });
 
   const m = /#pair=([\w-]+)\.([\w-]+)/.exec(location.hash);

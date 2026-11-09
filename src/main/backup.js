@@ -7,7 +7,7 @@
 //
 // Never in a backup: API keys and other secrets (they are encrypted with this
 // PC's account and useless elsewhere anyway), the calendar feed link, the
-// notification token. Optionally the whole bundle is encrypted with a
+// notification token, paired phones' keys. Optionally the whole bundle is encrypted with a
 // passphrase (AES-256-GCM, key from scrypt), which is wise for cloud folders.
 //
 // Restoring first saves a snapshot of the current files, then replaces them;
@@ -42,6 +42,13 @@ function scrubConfig(text) {
   return JSON.stringify(c, null, 2);
 }
 
+// State without device keys (phone pairing keys stay on this PC).
+function scrubState(text) {
+  const st = JSON.parse(text);
+  delete st.phoneDevices;
+  return JSON.stringify(st);
+}
+
 function sha256(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
 
 // Read what will go into a backup: { name: text }.
@@ -56,6 +63,9 @@ function collect(dataDir) {
     } catch { continue; }
     if (f === 'config.json') {
       try { text = scrubConfig(text); } catch { continue; } // a damaged config is not worth keeping
+    }
+    if (f === 'state.json') {
+      try { text = scrubState(text); } catch { continue; }
     }
     files[f] = text;
   }
@@ -175,6 +185,15 @@ function restoreBackup({ dataDir, backup, snapshotDir, appVersion = '', now = ne
       next.notify.token = (cur.notify && cur.notify.token) || '';
       if (next.skills) next.skills.calendarUrl = (cur.skills && cur.skills.calendarUrl) || '';
       out = JSON.stringify(next, null, 2);
+    }
+    if (k === 'state.json') {
+      // Paired phones belong to this PC: keep them.
+      let cur = {};
+      try { cur = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')); } catch {}
+      const next = JSON.parse(text);
+      delete next.phoneDevices;
+      if (cur.phoneDevices) next.phoneDevices = cur.phoneDevices;
+      out = JSON.stringify(next);
     }
     writeAtomic(path.join(dataDir, ...k.split('/')), out);
     restored.push(k);

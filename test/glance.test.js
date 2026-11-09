@@ -89,3 +89,55 @@ test('the Windows media script is fixed text', () => {
   assert.ok(GL.WIN_SCRIPT.includes("'IAsyncOperation`1'"));
   assert.ok(!/\$\{/.test(GL.WIN_SCRIPT));
 });
+
+test('weather comes back as speech text plus a short card', async () => {
+  const fake = async (url) => ({ json: async () => (url.includes('geocoding')
+    ? { results: [{ name: 'Bandung', country: 'Indonesia', latitude: -6.9, longitude: 107.6 }] }
+    : { current: { temperature_2m: 24.4, apparent_temperature: 25, weather_code: 2, wind_speed_10m: 7 }, daily: { temperature_2m_min: [19, 18], temperature_2m_max: [29, 28], precipitation_probability_max: [60, 30], weather_code: [61, 3] } }) });
+  const r = await SK.runSkill('weather', 'Bandung', { config: {}, fetch: fake });
+  assert.match(r.result, /Bandung, Indonesia: now 24 C/);
+  assert.strictEqual(r.glance.card.title, 'Bandung · 24 °C');
+  assert.match(r.glance.card.lines[1], /Today: 19–29 °C · 60% rain · light rain/);
+});
+
+test('a timer comes back with a countdown card', async () => {
+  const r = await SK.runSkill('timer', '10m tea', { config: {}, reminders: { add: () => ({ at: 1000, text: 'tea' }) } });
+  assert.deepStrictEqual(r.glance, { what: 'timer', at: 1000, text: 'tea' });
+});
+
+test('calendar answers come with a card of the day', async () => {
+  const now = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const day = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`;
+  const ics = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:1\nDTSTART:${day}T230000\nDTEND:${day}T233000\nSUMMARY:Late review\nEND:VEVENT\nEND:VCALENDAR\n`;
+  const r = await SK.runSkill('calendar', 'today', { config: { calendarUrl: 'https://x/cal.ics' }, fetch: async () => ({ ok: true, text: async () => ics }), now: () => now });
+  assert.strictEqual(r.glance.card.title, 'Today');
+  assert.match(r.glance.card.lines[0], /Late review/);
+});
+
+test('asking how long is left is a quick intent', () => {
+  assert.deepStrictEqual(GL.quickIntent('how long left?'), { kind: 'timers' });
+  assert.deepStrictEqual(GL.quickIntent('show my timers'), { kind: 'timers' });
+});
+
+test('album art: local files and https become small data URLs, anything else is refused', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { pathToFileURL } = require('url');
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'core-art-')), 'cover.png');
+  fs.writeFileSync(f, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  assert.match(await GL.artFromUrl(pathToFileURL(f).href), /^data:image\/png;base64,iVBORw==/);
+  const big = path.join(path.dirname(f), 'big.jpg');
+  fs.writeFileSync(big, Buffer.alloc(700000));
+  assert.strictEqual(await GL.artFromUrl(pathToFileURL(big).href), null);
+  const txt = path.join(path.dirname(f), 'notes.txt');
+  fs.writeFileSync(txt, 'x');
+  assert.strictEqual(await GL.artFromUrl(pathToFileURL(txt).href), null);
+  const fake = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
+  assert.match(await GL.artFromUrl('https://i.scdn.co/image/abc', fake), /^data:image\/jpeg;base64,AQID$/);
+  assert.strictEqual(await GL.artFromUrl('http://insecure/x.png', fake), null);
+  const n = GL.normalise({ title: 'T', art: 'iVBORw==', artType: 'image/png' });
+  assert.strictEqual(n.artData, 'data:image/png;base64,iVBORw==');
+  assert.strictEqual(GL.normalise({ title: 'T', art: 'not base64!' }).artData, undefined);
+});
