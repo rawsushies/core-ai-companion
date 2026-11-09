@@ -1,5 +1,17 @@
 # Changelog
 
+## 8.0.0 — Skills
+- COre can now do things, not just talk: take and look up **notes**, set **timers**, tell you the
+  **weather** (free Open-Meteo, no key; set your city in Settings → Skills), **control music**
+  (play/pause/next/previous/volume), **open apps** from a safe list (Spotify, VS Code, calculator,
+  settings, terminal…), offer a **web search**, and read your **calendar** from a private ICS feed link.
+- Lookups come back into the conversation: COre says "one moment", checks, then tells you the answer.
+- Plugins: drop a small JSON file in COre's data folder → `skills/` to add search-style skills, e.g.
+  `{"name": "wiki", "description": "search Wikipedia", "url": "https://en.wikipedia.org/wiki/Special:Search?search={q}"}`.
+- Safe by design: nothing runs a command made from the model's words (apps and media keys are fixed
+  lists), new pages open only when you click, plugins are data (https links), not code, and every skill
+  can be switched off in Settings → Skills.
+
 ## 7.0.0 — Screen partner
 - Watch mode: when an error dialog, crash report, failed install or "(Not Responding)" window appears,
   COre glows, mentions it, and offers a **Take a look** button in the chat. It only reads window titles

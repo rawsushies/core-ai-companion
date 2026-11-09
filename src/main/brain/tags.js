@@ -19,6 +19,7 @@ const Shapes = require('../../renderer/overlay/shapes');
 //   [[point X,Y]]            reach a hand to a screenshot pixel
 //   [[explain]]              open-hands gesture
 //   [[mood happy]]           smoke reacts (happy|amused|curious|annoyed|excited|sad|calm)
+//   [[do SKILL ARGS]]        use a skill (notes, timer, weather, music, open app, search, calendar, plugins)
 //   [[clone TASK]]           split off a helper COre that works on TASK in parallel
 //   [[form laugh]]           smoke forms a shape: emoji, symbol, or up to 3 letters/digits
 //   [[gesture wave]]         body language from the gesture library (count takes a number)
@@ -39,6 +40,10 @@ function parseTag(body) {
     return { name, x: Number(nums[0]), y: Number(nums[1]) };
   }
   if (name === 'explain') return { name };
+  if (name === 'do') {
+    const m2 = /^([a-z][a-z0-9-]*)\s*([\s\S]*)$/i.exec(rest);
+    return m2 ? { name, skill: m2[1].toLowerCase(), args: m2[2].trim().slice(0, 500) } : null;
+  }
   if (name === 'clone' && rest) return { name, task: rest.slice(0, 600) };
   if (name === 'form') {
     const shape = Shapes.resolve(rest);
@@ -111,7 +116,7 @@ class TagStreamParser {
   flush() {
     const out = [];
     // An unclosed run is plain text, unless it's clearly a cut-off tag.
-    const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|mood|remember|forget|remind|open|copy)\b/i.test(this.buf);
+    const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|do|mood|remember|forget|remind|open|copy)\b/i.test(this.buf);
     const rest = cutTag ? '' : this.buf;
     pushText(out, rest);
     this.buf = '';

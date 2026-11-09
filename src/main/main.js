@@ -23,6 +23,7 @@ const CL = require('./clones');
 const { matchWake } = require('./handsfree');
 const { ScreenWatch } = require('./watch');
 const { refinePoint } = require('./pointing');
+const SK = require('./skills');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -93,6 +94,9 @@ let mainSpeaking = false; // the main orb has sentences queued or playing
 let mainSpeakingSince = 0;
 let floor = null;
 let lastReaction = 0;
+let notes = null;
+let plugins = [];
+let turnSkills = null; // skill lookups started during the current turn
 let followUpPending = false; // conversation mode: listen again when this spoken reply ends
 const actions = new Map(); // one-click actions offered in the chat: id -> { kind, value }
 // Spoken questions: the chat reveals each sentence as it is spoken, then the
@@ -988,6 +992,7 @@ function fmtTime(ts) {
 
 // Tags that act instead of animating. Returns true when handled here.
 function handleActionTag(item) {
+  if (item.name === 'do') { runSkillTag(item); return true; }
   if (item.name === 'clone') { spawnClone(item.task); return true; }
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
@@ -1025,6 +1030,45 @@ function handleActionTag(item) {
     return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------- skills
+
+function skillCtx() {
+  return {
+    platform: process.platform,
+    config: config.data.skills || {},
+    notes,
+    reminders: { add: (when, text) => { const r = reminders.add(when, text); toDock('dock:reminders', reminders.items); return r; } },
+    fetch: (url) => fetch(url, { signal: AbortSignal.timeout(10_000) }),
+    launch: async (a) => {
+      if (a.uri) await shell.openExternal(a.uri);
+      else if (a.exe) spawn(a.exe, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+    },
+    runFixed: (cmd) => new Promise((resolve) => {
+      require('child_process').execFile(cmd.file, cmd.args, { timeout: 6000, windowsHide: true }, () => resolve());
+    }),
+    plugins,
+  };
+}
+
+function runSkillTag(item) {
+  const job = (async () => {
+    let r;
+    try { r = await SK.runSkill(item.skill, item.args, skillCtx()); } catch (err) { r = { error: err.message }; }
+    if (r.message) toDock('dock:message', { role: 'system', text: r.message });
+    if (r.action) {
+      const id = require('crypto').randomUUID();
+      actions.set(id, { kind: r.action.kind, value: r.action.value });
+      while (actions.size > 30) actions.delete(actions.keys().next().value);
+      toDock('dock:action', { id, kind: r.action.kind, label: r.action.label });
+    }
+    if (r.result) return `${item.skill}: ${r.result}`;
+    if (r.error) return `${item.skill} did not work: ${r.error}`;
+    return null;
+  })();
+  if (turnSkills) turnSkills.push(job);
+  return job;
 }
 
 // Runs only when the user clicks the button in the chat.
@@ -1406,11 +1450,21 @@ function playGame(name) {
 
 // internal: COre speaking up on its own (chit-chat): the prompt isn't shown
 // as something the user said.
-async function handleUserText(text, { withScreen = false, typed = false, internal = false } = {}) {
+// chain: a follow-up turn right after the previous one (skill results): the
+// previous reply keeps speaking and this one queues after it.
+async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0 } = {}) {
   text = String(text || '').trim();
   if (!text) return;
-  abortCurrent();
-  toOverlay('speech:stop');
+  if (chain) {
+    if (syncTurn && syncTurn.finished) toDock('dock:done', { text: syncTurn.reply });
+    syncTurn = null;
+    currentPipeline = null; // let it finish speaking
+  } else {
+    abortCurrent();
+    toOverlay('speech:stop');
+  }
+  const mySkills = [];
+  turnSkills = mySkills;
   if (typed || internal) followUpPending = false;
   if (!internal) {
     if (/^\/clone\s+\S/i.test(text)) { spawnClone(text.replace(/^\/clone\s+/i, '')); return; }
@@ -1446,6 +1500,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       const mem = memory.contextFor(text);
       if (mem) contextBlocks.push(mem);
     }
+    if (plugins.length) contextBlocks.push(`[Skills] Extra skills you can use with the do tag (do NAME QUERY): ${plugins.map((p) => `${p.name} (${p.description || 'opens a link'})`).join(', ')}`);
     if (CLIPBOARD_RE.test(text)) {
       // Electron 45+: clipboard.readText() returns a Promise (older: a string).
       const clip = String((await Promise.resolve(require('electron').clipboard.readText())) || '').trim();
@@ -1503,6 +1558,15 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       }, 90_000);
     } else {
       toDock('dock:done', { text: reply });
+    }
+    // Lookups the reply asked for (weather, notes, calendar): let COre answer with them.
+    if (mySkills.length && chain < 2) {
+      const results = (await Promise.all(mySkills)).filter(Boolean);
+      if (results.length && current === ac && !ac.signal.aborted) {
+        current = null;
+        handleUserText(`[skill] ${results.join('\n')}`, { internal: true, chain: chain + 1, typed });
+        return;
+      }
     }
   } catch (err) {
     toDock('dock:done', {});
@@ -1997,6 +2061,8 @@ app.whenReady().then(async () => {
   });
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
+  notes = new SK.Notes(path.join(userData, 'notes.json'));
+  plugins = SK.loadPlugins(path.join(userData, 'skills'));
   reminders = new Reminders({ store: state, onFire: onReminder });
 
   // Only COre's own overlay may use the microphone.

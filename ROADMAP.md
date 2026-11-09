@@ -58,11 +58,11 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
 - Optional watch mode: COre notices errors/dialogs on screen and offers help; smarter pointing (UI element
   detection), multi-monitor presence.
 
-## 🔨 v8.0.0 — Skills
+## ✅ v8.0.0 — Skills
 - Plugin/skill system (safe, permissioned): timers, notes, weather, music control, app launcher, web
   search via the brain, calendar integrations.
 
-## ⏳ v9.0.0 — Polish
+## 🔨 v9.0.0 — Polish
 - Themes/skins (colours, styles), languages, accessibility, performance profiles, crash reporting (local),
   onboarding tour.
 

@@ -74,6 +74,14 @@ const DEFAULTS = {
     hideFromCaptures: true, // hide the orb for a moment while COre takes a screenshot
     home: null, // {x, y} remembered after you drag it
   },
+  skills: {
+    weather: true,
+    city: '', // used when you ask for the weather without a place
+    music: true,
+    apps: true,
+    calendar: true,
+    calendarUrl: '', // secret-ish ICS link from your calendar's settings
+  },
   watch: {
     enabled: true, // notice error pop-ups / frozen apps from window titles and offer help (no screenshots)
     speak: true, // say so out loud (otherwise just the chat and a colour)

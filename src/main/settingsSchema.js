@@ -67,6 +67,18 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'skills',
+    title: 'Skills',
+    fields: [
+      { key: 'skills.weather', label: 'Weather (free Open-Meteo service)', type: 'toggle' },
+      { key: 'skills.city', label: 'My city (for weather)', type: 'text', maxLength: 80, optional: true },
+      { key: 'skills.music', label: 'Control music (play, pause, next, volume)', type: 'toggle' },
+      { key: 'skills.apps', label: 'Open apps from a safe list', type: 'toggle' },
+      { key: 'skills.calendar', label: 'Read my calendar', type: 'toggle' },
+      { key: 'skills.calendarUrl', label: 'Calendar feed link (ICS, from Google / Outlook calendar settings)', type: 'text', maxLength: 500, optional: true, pattern: '^(https|webcal)://\\S+$' },
+    ],
+  },
+  {
     id: 'privacy',
     title: 'Privacy',
     fields: [
@@ -98,8 +110,10 @@ function validate(key, value) {
     return Number(stepped.toFixed(4));
   }
   if (f.type === 'text') {
-    const t = String(value || '').trim();
-    return t.length && t.length <= (f.maxLength || 200) && !/[\u0000-\u001f]/.test(t) ? t : undefined;
+    const t = String(value == null ? '' : value).trim();
+    if (!t) return f.optional ? '' : undefined;
+    if (f.pattern && !new RegExp(f.pattern, 'i').test(t)) return undefined;
+    return t.length <= (f.maxLength || 200) && !/[\u0000-\u001f]/.test(t) ? t : undefined;
   }
   if (f.type === 'hotkey') return HOTKEY_RE.test(String(value)) ? String(value) : undefined;
   return undefined;
