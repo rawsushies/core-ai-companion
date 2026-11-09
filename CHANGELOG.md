@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Instant answers sound instant
+- Short spoken lines are kept after the first time, and the quick-answer lines ("Paused.", "Next one."…) are
+  rendered in the background a little after start, only while COre is quiet. They're rendered again when you change
+  the voice or pitch. Measured with the real voice model: about 300 ms to synthesise a short phrase, 0 ms from the
+  cache.
+
+### Safety
+- Messages from the phone never trigger a screenshot, even with "look at this": a screenshot needs someone at the PC.
+
 ### Zero cost when you're not looking
 - Hidden (Ctrl+Alt+H), screen locked or PC asleep: COre and its helpers draw no frames at all. Measured in safe
   graphics mode: **53% → 1.7%** CPU. Before, the hidden window kept rendering in the background.

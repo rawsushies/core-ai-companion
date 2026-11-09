@@ -648,6 +648,7 @@ function applySetting(key, value) {
   toOverlay('config', overlayConfig());
   toDock('dock:settings', dockSettings());
   if (key === 'personality.tone' && !current) warmClaude();
+  if (key.startsWith('voice.')) schedulePrewarm();
 }
 
 // ---------------------------------------------------------------- settings window
@@ -732,6 +733,7 @@ function applyLive(key, value) {
   if (key.startsWith('voice.') || key.startsWith('orb.')) toOverlay('config', overlayConfig());
   if (key === 'voice.wakeWord') { if (value) stt.warm(); if (tray) { createTrayMenu(); trayTooltip(); } }
   if (key === 'voice.kokoroVoice' || key === 'voice.engine') { if (config.data.voice.engine === 'kokoro') tts.warm(); }
+  if (['voice.kokoroVoice', 'voice.engine', 'voice.semitones', 'voice.speed', 'voice.tts'].includes(key)) schedulePrewarm();
   if (key.startsWith('brain.')) {
     try {
       if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
@@ -831,7 +833,7 @@ function ensureCompanion() {
       if (ok) toSettings('settings:phone', { paired: name });
       return ok;
     },
-    onMessage: (text, device) => { handleUserText(text, { typed: true }); toolAudit(`phone ${device.name}: message`); },
+    onMessage: (text, device) => { handleUserText(text, { typed: true, remote: true }); toolAudit(`phone ${device.name}: message`); },
     onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
     getFeed: phoneFeed,
   });
@@ -1475,6 +1477,24 @@ function showGlance(req) {
 // Short, unambiguous requests are answered on the spot: no waiting and no
 // usage. Everything else goes to the brain as usual.
 
+const QUICK_LINES = {
+  music: { play: 'Playing.', pause: 'Paused.', next: 'Next one.', previous: 'Going back.', louder: 'Louder.', quieter: 'Quieter.', mute: 'Muted.' },
+  lyrics: 'Lyrics, coming up.',
+  music_card: "Here's what's playing.",
+};
+
+// Render the fixed quick-reply lines ahead of time (in the background, only
+// while COre is quiet) so instant answers also sound instant.
+let prewarmTimer = null;
+function schedulePrewarm() { clearTimeout(prewarmTimer); prewarmTimer = setTimeout(prewarmQuickVoice, 3000); } // sliders fire often
+
+function prewarmQuickVoice() {
+  const v = config.data.voice;
+  if (!tts || v.tts === false || v.engine !== 'kokoro' || config.data.skills.quick === false) return;
+  tts.clearCache();
+  tts.prewarm([...Object.values(QUICK_LINES.music), QUICK_LINES.lyrics, QUICK_LINES.music_card], { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed });
+}
+
 function quickReply(text, { typed }) {
   if (config.data.skills.quick === false) return false;
   const q = GL.quickIntent(text);
@@ -1486,13 +1506,13 @@ function quickReply(text, { typed }) {
   else if (q.kind === 'glance') {
     if (config.data.skills.glance === false) return false;
     showGlance({ what: q.what });
-    line = q.what === 'off' ? null : q.what === 'lyrics' ? 'Lyrics, coming up.' : "Here's what's playing.";
+    line = q.what === 'off' ? null : q.what === 'lyrics' ? QUICK_LINES.lyrics : QUICK_LINES.music_card;
   } else if (q.kind === 'music') {
     if (config.data.skills.music === false) return false;
     const cmd = SK.musicCommand(q.action, process.platform);
     if (!cmd) return false; // let the brain explain
     require('child_process').execFile(cmd.file, cmd.args, { timeout: 6000, windowsHide: true }, () => {});
-    line = { play: 'Playing.', pause: 'Paused.', next: 'Next one.', previous: 'Going back.', louder: 'Louder.', quieter: 'Quieter.', mute: 'Muted.' }[q.action];
+    line = QUICK_LINES.music[q.action];
   }
   addTranscript('user', text);
   if (presence) presence.noteInteraction();
@@ -2101,7 +2121,7 @@ function playGame(name) {
 // as something the user said.
 // chain: a follow-up turn right after the previous one (skill results): the
 // previous reply keeps speaking and this one queues after it.
-async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0 } = {}) {
+async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false } = {}) {
   text = String(text || '').trim();
   if (!text) return;
   // Meiosis routing: decide the recipient before touching Prime's turn, so
@@ -2174,7 +2194,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     return;
   }
 
-  const share = withScreen || (config.data.screen.autoShareOnDeixis && DEIXIS.test(text));
+  // Never from the phone: a screenshot needs someone at the PC.
+  const share = !remote && (withScreen || (config.data.screen.autoShareOnDeixis && DEIXIS.test(text)));
   toOverlay('state', 'thinking');
 
   let shot = null;
@@ -2890,6 +2911,7 @@ app.whenReady().then(async () => {
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();
+  setTimeout(prewarmQuickVoice, 45_000);
   setInterval(checkAutoBackup, 3600_000).unref();
   reminders = new Reminders({ store: state, onFire: onReminder });
 

@@ -8,7 +8,9 @@ Chat with COre from your phone's browser on the same Wi-Fi. It's off by default 
 - Send a message, which COre treats like a typed one.
 - Stop COre talking.
 
-The phone sends intents only. It can't change settings, read files, approve file changes or run anything.
+The phone sends intents only. It can't change settings, approve file changes or run anything, and its messages
+never trigger a screenshot ("look at this" from the phone is answered without one). If you shared a project folder,
+COre may still read it to answer, read-only, exactly as for a typed message.
 Approving proposed file changes from the phone is deliberately not included yet. It would need the same
 diff card and confirmation as the desktop.
 

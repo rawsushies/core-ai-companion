@@ -21,9 +21,12 @@ Every number below was measured in this environment (Linux, Xvfb, software rende
 1. **Software rendering is still expensive.** In safe graphics mode the idle orb costs about half a CPU core,
    because every frame is drawn by the CPU. On a real GPU this is GPU time instead, which is not measured here.
    Next step: draw fewer particles while idle, not only fewer frames.
-2. **Voice start is about 1 s on CPU.** Kokoro's first audio chunk dominates the time to first speech (warm Claude:
-   about 0.7 s to the first text, 1.7 s to the first audio). Quick answers avoid the brain but not the voice.
-3. **Click-through gaps only work on Windows and macOS.** On Linux the whole chat window takes the mouse.
+2. **Voice start is about 1 s on CPU for model replies.** Kokoro's first audio chunk dominates the time to first
+   speech (warm Claude: about 0.7 s to the first text, 1.7 s to the first audio). Quick answers are now pre-rendered
+   and cached (0 ms; a fresh short phrase takes about 300 ms), so only model replies still wait.
+3. **Click-through gaps only work on Windows and macOS.** On Linux the whole chat window takes the mouse. Since the
+   M-015 redesign the gaps sit inside the panel frame, so this matters less. A Linux fix (`setShape`) would also
+   clip the frame, so it's left as is.
 4. **The phone page is served over plain HTTP.** Messages are end-to-end encrypted, but someone who controls the
    Wi-Fi when the page loads could tamper with it (documented in `PHONE.md`).
 5. **Windows media reading (now playing, lyrics) is untested on real Windows.** The script uses the documented
@@ -31,6 +34,12 @@ Every number below was measured in this environment (Linux, Xvfb, software rende
 6. **On Linux without a keyring**, "encrypted" secrets fall back to plain text (Electron limitation).
 7. **Lyrics timing** depends on the player's reported position. Some players report rarely, so lines can lag a
    little.
+
+## Fixed in this pass
+
+- A phone message saying "look at this" could trigger an automatic screenshot. Remote messages never capture the
+  screen now.
+- The cloud-folder test failed on Windows (Unix path in the test). CI is green on Linux and Windows again.
 
 ## Still missing
 
