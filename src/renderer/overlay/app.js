@@ -96,14 +96,36 @@
     },
   });
 
+  // Hands-free: wake phrase and barge-in (only when enabled in settings).
+  let wake = null;
+  let wakeBusyUntil = 0;
+  function syncWake() {
+    const want = !!(bridge && !cfg.clone && cfg.voice && cfg.voice.wakeWord);
+    if (want && !wake) {
+      wake = new window.WakeListener({
+        canCheck: () => performance.now() > wakeBusyUntil,
+        onPhrase: (audio) => { wakeBusyUntil = performance.now() + 4000; bridge.wakeCheck(audio); },
+        isSpeaking: () => voice.speaking,
+        bargeIn: () => cfg.voice.bargeIn !== false,
+        onBargeIn: () => { stopAll(); bridge.bargeIn(); },
+      });
+      wake.start();
+    } else if (!want && wake) {
+      wake.stop();
+      wake = null;
+    }
+  }
+
   const listener = new window.Listener({
     onLevel: (v) => { listenLevel = v; },
     onAudio: (audio, meta) => {
+      if (wake) wake.pause(false);
       setMode('thinking');
       if (body) pulseAt(body.pos.x, body.pos.y, 0.5); // "got it" the moment you stop talking
       if (bridge) bridge.sendAudio(audio, !!meta.withScreen);
     },
     onCancel: (reason) => {
+      if (wake) wake.pause(false);
       setMode('idle');
       if (bridge) bridge.listenCancelled(reason);
     },
@@ -532,6 +554,8 @@
   function setupPointer() {
     let down = null;
     let lastClickAt = 0;
+    let holdTimer = null;
+    let holding = false;
     let trail = [];
     const touch = new window.Interactions.TouchDetector({ r: body.r });
     const toView = (e) => ({ x: e.clientX + stage.x, y: e.clientY + stage.y });
@@ -543,6 +567,13 @@
       if (!down) return;
       const d = down;
       down = null;
+      clearTimeout(holdTimer);
+      if (holding) {
+        // Hold-to-talk: letting go sends what you said.
+        holding = false;
+        if (bridge) bridge.holdTalk(false);
+        return;
+      }
       if (d.moved) {
         body.dragging = false;
         // A fast release tosses COre: it flies on and lands further along.
@@ -579,6 +610,13 @@
       if (d > body.r * 1.45) return;
       down = { x: p.x, y: p.y, moved: false };
       try { canvas.setPointerCapture(e.pointerId); } catch {}
+      // Press and hold (without moving) to talk; let go to send.
+      clearTimeout(holdTimer);
+      if (bridge && !cfg.clone) {
+        holdTimer = setTimeout(() => {
+          if (down && !down.moved) { holding = true; pulseAt(body.pos.x, body.pos.y, 0.5); bridge.holdTalk(true); }
+        }, 450);
+      }
     });
     window.addEventListener('pointermove', (e) => {
       if (!down) {
@@ -592,9 +630,10 @@
       }
       if (e.buttons === 0) return release(); // button was released somewhere we didn't hear
       const p = toView(e);
-      if (cfg.clone) return; // helpers can't be dragged (click or poke them)
+      if (cfg.clone || holding) return; // helpers can't be dragged; holding = talking
       if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 6) {
         down.moved = true;
+        clearTimeout(holdTimer);
         body.dragging = true;
         pointing = null;
         if (bridge) bridge.orbDrag(true);
@@ -619,6 +658,7 @@
     const b = (cfg.orb && cfg.orb.backdrop) || 'auto';
     light = b === 'light' ? 1 : b === 'dark' ? 0 : (cfg.lightTheme ? 1 : 0);
     voice.setConfig(cfg.voice);
+    if (typeof syncWake === 'function' && body) syncWake();
     if (c.view) view = { ...c.view };
     if (c.stage) stage = { ...c.stage };
     if (body) {
@@ -668,7 +708,8 @@
       bridge.onSpeakItem(onSpeakItem);
       bridge.onState((s) => setMode(s));
       bridge.onAttention(setAttention);
-      bridge.onListenStart((meta) => { stopAll(); setMode('listening'); anim.listenStart = performance.now(); listener.start(meta); });
+      bridge.onListenStart((meta) => { stopAll(); if (wake) wake.pause(true); setMode('listening'); anim.listenStart = performance.now(); listener.start(meta); });
+      bridge.onWakeResult((ok) => { wakeBusyUntil = performance.now() + (ok ? 1500 : 300); });
       // Hide/show: dissolve into drifting smoke, then reassemble.
       bridge.onDissolve(() => { anim.formTarget = 0; });
       bridge.onAssemble(() => { anim.form = 0; anim.formVel = 0; anim.formTarget = 1; });
@@ -688,6 +729,7 @@
     } else {
       demo();
     }
+    syncWake();
     requestAnimationFrame((now) => {
       frame(now);
       if (bridge) bridge.ready(); // first frame drawn

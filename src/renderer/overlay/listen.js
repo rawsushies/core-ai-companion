@@ -78,14 +78,15 @@
           this.speech = true;
           this.chunks = this.preroll.slice();
           this.quiet = 0;
-        } else if (elapsed > NO_SPEECH_MS) {
+        } else if (!this.meta.hold && elapsed > (this.meta.followUp ? 5000 : NO_SPEECH_MS)) {
           this.cancel('silence');
         }
         return;
       }
       this.chunks.push(block);
       this.quiet = e < stopThr ? this.quiet + 1 : 0;
-      if (this.quiet >= SILENCE_CHUNKS || elapsed > MAX_MS) this.stop();
+      // Hold-to-talk and toggle mode end only when you let go / press again.
+      if ((!this.meta.hold && this.quiet >= SILENCE_CHUNKS) || elapsed > (this.meta.hold ? 60000 : MAX_MS)) this.stop();
     }
 
     // Finish now (second hotkey press or end of speech).

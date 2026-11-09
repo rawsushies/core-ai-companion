@@ -20,6 +20,7 @@ const { Reminders } = require('./reminders');
 const SCHEMA = require('./settingsSchema');
 const { Presence, chitchatPrompt } = require('./presence');
 const CL = require('./clones');
+const { matchWake } = require('./handsfree');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -90,6 +91,7 @@ let mainSpeaking = false; // the main orb has sentences queued or playing
 let mainSpeakingSince = 0;
 let floor = null;
 let lastReaction = 0;
+let followUpPending = false; // conversation mode: listen again when this spoken reply ends
 const actions = new Map(); // one-click actions offered in the chat: id -> { kind, value }
 // Spoken questions: the chat reveals each sentence as it is spoken, then the
 // full formatted answer once COre stops talking. { spokenAny, finished, reply }
@@ -632,6 +634,7 @@ function applyLive(key, value) {
   if (key === 'app.startWithWindows') setStartWithWindows(value);
   if (key.startsWith('hotkeys.')) registerHotkeys();
   if (key.startsWith('voice.') || key.startsWith('orb.')) toOverlay('config', overlayConfig());
+  if (key === 'voice.wakeWord') { if (value) stt.warm(); if (tray) createTrayMenu(); }
   if (key === 'voice.kokoroVoice' || key === 'voice.engine') { if (config.data.voice.engine === 'kokoro') tts.warm(); }
   if (key.startsWith('brain.')) {
     try {
@@ -766,8 +769,15 @@ function createTray() {
   const icon = nativeImage.createFromPath(path.join(ROOT, 'assets', 'tray.png'));
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
   tray.setToolTip('COre');
+  createTrayMenu();
+  // Clicking the tray icon brings COre back if hidden, otherwise opens the chat.
+  tray.on('click', () => { if (orbHidden) toggleOrb(); else setDockVisible(true, true); });
+}
+
+function createTrayMenu() {
   const menu = Menu.buildFromTemplate([
     { label: 'Talk to COre', click: () => startListening(false) },
+    { label: 'Hands-free ("Hey COre")', type: 'checkbox', checked: !!config.data.voice.wakeWord, click: (item) => setHandsFree(item.checked) },
     { label: 'Talk about my screen', click: () => startListening(true) },
     { label: 'Show chat under the orb', click: () => setDockVisible(true, true) },
     { label: 'Conversation history', click: () => togglePanel(true) },
@@ -799,8 +809,6 @@ function createTray() {
     { label: 'Quit COre', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
-  // Clicking the tray icon brings COre back if hidden, otherwise opens the chat.
-  tray.on('click', () => { if (orbHidden) toggleOrb(); else setDockVisible(true, true); });
 }
 
 let orbHidden = false;
@@ -1343,6 +1351,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   if (!text) return;
   abortCurrent();
   toOverlay('speech:stop');
+  if (typed || internal) followUpPending = false;
   if (!internal) {
     if (/^\/clone\s+\S/i.test(text)) { spawnClone(text.replace(/^\/clone\s+/i, '')); return; }
     if (/^\/merge\b/i.test(text)) { mergeAllClones(); return; }
@@ -1449,7 +1458,9 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   }
 }
 
-function startListening(withScreen) {
+// extra: { hold } hold-to-talk (ends when released), { followUp } conversation
+// mode (gives up quietly after a few seconds), { wake } woken by "Hey COre".
+function startListening(withScreen, extra = {}) {
   if (presence) presence.noteInteraction();
   if (listening) {
     toOverlay('listen:stop'); // second press: stop and send what we have
@@ -1457,9 +1468,22 @@ function startListening(withScreen) {
   }
   abortCurrent();
   toOverlay('speech:stop');
+  stopCloneSpeech();
   listening = { withScreen };
   stt.warm();
-  toOverlay('listen:start', { withScreen });
+  const hold = !!extra.hold || (!extra.followUp && !extra.wake && config.data.voice.talkMode === 'toggle');
+  toOverlay('listen:start', { withScreen, ...extra, hold });
+}
+
+function setHandsFree(on) {
+  config.data.voice.wakeWord = !!on;
+  config.save();
+  if (on) stt.warm();
+  toOverlay('config', overlayConfig());
+  addTranscript('system', on
+    ? 'Hands-free is on: say "Hey COre" any time. It is detected on this PC; nothing is sent anywhere until you talk to me.'
+    : 'Hands-free is off. The microphone only opens when you press the talk key.');
+  if (tray) createTrayMenu();
 }
 
 let sttNoticeShown = false;
@@ -1625,12 +1649,48 @@ function wireIpc() {
         toOverlay('state', 'idle');
         return;
       }
+      followUpPending = config.data.voice.followUp === true;
       await handleUserText(text, { withScreen });
     } catch (err) {
       addTranscript('system', `Speech recognition failed: ${err.message}. You can type in the chat panel instead.`);
       toOverlay('attention', { level: 'warn', title: 'Could not hear you' });
       toOverlay('state', 'idle');
     }
+  });
+  // Hands-free: a short phrase heard after a pause; is it "Hey COre"?
+  let wakeChecking = false;
+  ipcMain.on('wake:check', async (e, audio) => {
+    if (!fromOverlay(e) || !config.data.voice.wakeWord || wakeChecking || listening || current) { if (fromOverlay(e)) toOverlay('wake:result', false); return; }
+    wakeChecking = true;
+    let hit = null;
+    try {
+      const pcm = audio instanceof Float32Array ? audio : new Float32Array(audio);
+      hit = matchWake(await stt.transcribe(pcm));
+    } catch (err) {
+      console.warn('[core] wake check failed:', err.message);
+    } finally {
+      wakeChecking = false;
+    }
+    toOverlay('wake:result', !!hit);
+    if (!hit || listening || current) return;
+    if (presence) presence.noteInteraction();
+    if (hit.rest.split(/\s+/).length >= 2) {
+      // "Hey COre, what's the weather like" - the question came with it.
+      followUpPending = config.data.voice.followUp === true;
+      handleUserText(hit.rest);
+    } else {
+      startListening(false, { wake: true });
+    }
+  });
+  ipcMain.on('voice:bargein', (e) => {
+    if (!fromOverlay(e)) return;
+    abortCurrent();
+    startListening(false, { wake: true });
+  });
+  ipcMain.on('listen:hold', (e, on) => {
+    if (!fromOverlay(e)) return;
+    if (on && !listening) startListening(false, { hold: true });
+    else if (!on && listening) toOverlay('listen:stop');
   });
   ipcMain.on('listen:cancelled', (e, reason) => {
     if (!fromOverlay(e)) return;
@@ -1646,6 +1706,10 @@ function wireIpc() {
   });
   ipcMain.on('voice:idle', (e) => {
     if (fromOverlay(e)) mainSpeaking = false;
+    if (fromOverlay(e) && followUpPending && !current && !listening) {
+      followUpPending = false;
+      setTimeout(() => { if (!current && !listening) startListening(false, { followUp: true }); }, 250);
+    }
     if (!fromOverlay(e) || !syncTurn || !syncTurn.finished) return;
     toDock('dock:done', { text: syncTurn.reply });
     syncTurn = null;

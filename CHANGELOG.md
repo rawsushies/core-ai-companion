@@ -1,5 +1,17 @@
 # Changelog
 
+## 6.0.0 — Hands-free
+- "Hey COre": an optional wake phrase, detected entirely on this PC (Settings → Voice, or tray →
+  Hands-free). A cheap sound detector only passes short phrases that follow a pause to the local speech
+  model, so ordinary conversation is never transcribed and nothing leaves the computer. Say
+  "Hey COre" and talk, or say it all at once: "Hey COre, what time is it?"
+- Barge-in: with hands-free on, just start talking while COre speaks; it stops and listens (echo
+  cancellation keeps its own voice from triggering this).
+- Hold to talk: press and hold the orb, speak, let go to send.
+- Talk hotkey mode: "stops when I pause" (as before) or "press again to send" for long thoughts.
+- Conversation mode: COre listens again for a few seconds after each spoken reply, so a back-and-forth
+  doesn't need the hotkey every time.
+
 ## 5.0.0 — Many COres
 - Helpers: COre can split off up to 3 helper copies that work on tasks in parallel (research from what it
   knows, drafting, planning, writing code) while you keep talking to COre itself. Ask for several things at

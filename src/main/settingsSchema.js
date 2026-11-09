@@ -42,6 +42,10 @@ const SECTIONS = [
     title: 'Voice',
     fields: [
       { key: 'voice.tts', label: 'Speak replies', type: 'toggle' },
+      { key: 'voice.wakeWord', label: 'Hands-free: wake me with "Hey COre" (on this PC, mic stays open)', type: 'toggle' },
+      { key: 'voice.bargeIn', label: 'Hands-free: talk over COre to interrupt', type: 'toggle' },
+      { key: 'voice.followUp', label: 'Conversation mode: listen again after each spoken reply', type: 'toggle' },
+      { key: 'voice.talkMode', label: 'Talk hotkey', type: 'select', options: [['auto', 'Stops when I pause'], ['toggle', 'Press again to send']] },
       { key: 'voice.speakTyped', label: 'Also speak replies to typed messages', type: 'toggle' },
       { key: 'voice.kokoroVoice', label: 'Voice', type: 'select', options: [['am_onyx', 'Onyx (deep)'], ['am_fenrir', 'Fenrir (gravelly)'], ['am_michael', 'Michael (warm)'], ['am_adam', 'Adam'], ['am_eric', 'Eric'], ['bm_george', 'George (British)'], ['bm_lewis', 'Lewis (British, deep)']] },
       { key: 'voice.engine', label: 'Voice engine', type: 'select', options: [['kokoro', 'COre voice (neural, robotic)'], ['system', 'Windows voices']] },

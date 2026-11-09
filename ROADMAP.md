@@ -50,11 +50,11 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
   they lay themselves out so they never overlap each other or your focus window; merge back when done.
 - Voice routing so clones never talk over each other (queue / priority / per-clone voice).
 
-## 🔨 v6.0.0 — Hands-free
+## ✅ v6.0.0 — Hands-free
 - Wake word ("Hey COre", on-device), push-to-talk hold mode, barge-in (talk over COre to interrupt),
   continuous conversation mode.
 
-## ⏳ v7.0.0 — Screen partner
+## 🔨 v7.0.0 — Screen partner
 - Optional watch mode: COre notices errors/dialogs on screen and offers help; smarter pointing (UI element
   detection), multi-monitor presence.
 

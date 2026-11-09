@@ -51,6 +51,10 @@ const DEFAULTS = {
     speed: 1.0,
     quality: 'fast', // 'fast' (4-bit voice model, ~3x quicker) or 'best' (8-bit)
     speakTyped: true, // read the opening of typed-chat replies aloud
+    wakeWord: false, // hands-free: say "Hey COre" (detected on this PC; keeps the mic open)
+    bargeIn: true, // with hands-free on: talk over COre to interrupt it
+    followUp: false, // conversation mode: keep listening briefly after each spoken reply
+    talkMode: 'auto', // 'auto' = stop when you pause; 'toggle' = press the hotkey again to send
     voiceName: '', // part of a voice name, e.g. "David" or "Indonesia"; empty = auto by language
     lang: '', // e.g. "en-US", "id-ID"; empty = system default
     rate: 1.05, // system voice only
