@@ -19,7 +19,7 @@ button { font: inherit; color: inherit; cursor: pointer; white-space: nowrap; }
 .field { display: grid; grid-template-columns: 1fr 220px; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
 .field label { color: var(--text); }
 .field .note { display: block; color: var(--muted); font-size: 11.5px; }
-.field select, .field input[type="text"], .hotkey { width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }
+.field select, .field input[type="text"], .field input[type="password"], .hotkey { width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }
 .field input[type="range"] { width: 100%; accent-color: var(--accent); }
 .range { display: grid; grid-template-columns: 1fr 54px; gap: 8px; align-items: center; }
 .range output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -44,3 +44,7 @@ button { font: inherit; color: inherit; cursor: pointer; white-space: nowrap; }
 .restart-bar[hidden] { display: none; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #142019; border: 1px solid var(--line); padding: 8px 14px; border-radius: 10px; font-size: 12.5px; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.secret { display: flex; gap: 8px; align-items: center; width: 100%; min-width: 0; }
+.secret input { flex: 1; min-width: 0; }
+.secret button { flex: none; padding: 6px 10px; }

@@ -35,6 +35,20 @@
 - Messages arriving from a window while it closes (during restart or quit) no longer throw errors in the
   main process.
 
+### Calendar you can rely on
+- Recurring events now show (daily, weekly on chosen days, monthly like "2nd Tuesday" or "last Friday",
+  yearly), with `COUNT`/`UNTIL`/`INTERVAL`, cancelled occurrences (`EXDATE`) and moved occurrences.
+  Before, a weekly meeting only appeared on the day of its very first occurrence.
+- Event times are read in their own time zone (with daylight-saving), including Outlook's Windows zone
+  names. Before, a 09:00 meeting in another zone showed at 09:00 local time.
+- The private calendar link is stored encrypted like API keys (an existing plain-text link is moved over
+  automatically), is never shown again in Settings ("Saved (hidden)" with Remove), and can't leak into the
+  chat, the brain or logs through error messages.
+
+### Problems are no longer silent
+- If something unexpected breaks inside COre, it now says so once in the chat (and tints the orb if it keeps
+  happening) instead of only writing to the crash log.
+
 ## 10.3.0 — New look, fewer loose ends
 - New brand: a logo made of smoke filaments, new app and tray icons, a wordmark where the orb is the "O",
   README banner, social preview, promo images for every major format, and a brand guide (docs/BRAND.md).

@@ -22,6 +22,7 @@
     const r = await api.set(field.key, value);
     if (!r || !r.ok) { toast(r && r.error ? r.error : 'That value is not allowed.'); render(); return; }
     data.values = r.values;
+    if (r.secrets) { data.secrets = r.secrets; if (field.secret) { render(); toast(r.secrets[field.key] ? 'Saved, encrypted on this PC.' : 'Removed.'); } }
     if (field.restart) restartBar.hidden = false;
   }
 
@@ -77,6 +78,30 @@
       input.addEventListener('input', () => { out.textContent = fmt(field, Number(input.value)); });
       input.addEventListener('change', () => save(field, Number(input.value)));
       wrap.append(input, out);
+      return wrap;
+    }
+    if (field.type === 'text' && field.secret) {
+      // Secret: never shown back. Paste to replace, Remove to clear.
+      const wrap = document.createElement('span');
+      wrap.className = 'secret';
+      const input = document.createElement('input');
+      input.type = 'password';
+      input.id = id;
+      input.autocomplete = 'off';
+      input.maxLength = field.maxLength || 200;
+      const saved = data.secrets && data.secrets[field.key];
+      input.placeholder = saved ? 'Saved (hidden)' : 'Paste it here';
+      input.title = saved ? 'Saved and encrypted on this PC. Paste a new one to replace it.' : 'Stored encrypted on this PC, never shown again.';
+      input.addEventListener('change', () => { if (input.value.trim()) save(field, input.value); });
+      wrap.append(input);
+      if (saved) {
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'ghost';
+        rm.textContent = 'Remove';
+        rm.addEventListener('click', () => save(field, ''));
+        wrap.append(rm);
+      }
       return wrap;
     }
     if (field.type === 'text') {

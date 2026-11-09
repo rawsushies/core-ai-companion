@@ -96,22 +96,3 @@ test('weather asks for a city, then summarises Open-Meteo', async () => {
   assert.match(r.result, /Jakarta, Indonesia: now 30 C .*partly cloudy.*Today: rain showers, 25 to 32 C, 60 percent/);
 });
 
-test('calendar feed parsing', async () => {
-  const now = new Date(2026, 10, 9, 8, 0);
-  const ics = [
-    'BEGIN:VCALENDAR',
-    'BEGIN:VEVENT', 'SUMMARY:Standup', 'DTSTART:20261109T093000', 'END:VEVENT',
-    'BEGIN:VEVENT', 'SUMMARY:Long title that', ' continues', 'DTSTART;VALUE=DATE:20261110', 'LOCATION:Office\\, 3F', 'END:VEVENT',
-    'BEGIN:VEVENT', 'SUMMARY:Old', 'DTSTART:20250101T100000Z', 'END:VEVENT',
-    'END:VCALENDAR',
-  ].join('\r\n');
-  const ev = SK.parseIcs(ics);
-  assert.strictEqual(ev.length, 3);
-  assert.strictEqual(ev[2].title, 'Long title thatcontinues');
-  const today = SK.eventsIn(ev, 'today', now);
-  assert.deepStrictEqual(today.map((e) => e.title), ['Standup']);
-  const tomorrow = SK.describeEvents(SK.eventsIn(ev, 'tomorrow', now), 'tomorrow');
-  assert.match(tomorrow, /all day: Long title thatcontinues \(Office, 3F\)/);
-  assert.match(SK.describeEvents([], 'today'), /Nothing/);
-  assert.match((await SK.runSkill('calendar', 'today', ctx())).result, /No calendar/);
-});

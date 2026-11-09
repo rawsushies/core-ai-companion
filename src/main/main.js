@@ -68,8 +68,25 @@ if (IS_LINUX) {
 // Local crash log (never uploaded). Uncaught errors are recorded instead of
 // taking COre down with a dialog.
 const crashLog = new CrashLog(path.join(EARLY_DIR, 'logs'));
-process.on('uncaughtException', (err) => { console.error('[core] uncaught:', err); crashLog.record('main-exception', err); });
-process.on('unhandledRejection', (err) => { console.error('[core] unhandled rejection:', err); crashLog.record('main-rejection', err); });
+// The first one in a session is mentioned in the chat (once), so problems
+// aren't silent; repeated errors also tint the orb.
+const mainErrors = [];
+function onMainError(kind, err) {
+  console.error(`[core] ${kind}:`, err);
+  crashLog.record(kind, err);
+  const now = Date.now();
+  mainErrors.push(now);
+  while (mainErrors.length && now - mainErrors[0] > 60_000) mainErrors.shift();
+  try {
+    if (!onMainError.told && typeof addTranscript === 'function' && config) {
+      onMainError.told = true;
+      addTranscript('system', 'Something went wrong inside me. It is written to the crash log (Settings → Maintenance → Open crash logs). If I start acting strange, restart me from the tray.');
+    }
+    if (mainErrors.length >= 5) toOverlay('attention', { level: 'warn', title: 'COre is having trouble' });
+  } catch {}
+}
+process.on('uncaughtException', (err) => onMainError('main-exception', err));
+process.on('unhandledRejection', (err) => onMainError('main-rejection', err));
 app.on('render-process-gone', (_e, wc, d) => crashLog.record('renderer-gone', `${wc.getURL().split('/').slice(-2).join('/')} ${d.reason} (${d.exitCode})`));
 app.on('child-process-gone', (_e, d) => { if (d.reason !== 'clean-exit') crashLog.record('process-gone', `${d.type} ${d.reason} (${d.exitCode})`); });
 
@@ -661,8 +678,16 @@ function settingsValues() {
   for (const key of SCHEMA.FIELDS.keys()) {
     let v = SCHEMA.getPath(config.data, key);
     if (key === 'app.startWithWindows') v = startsWithWindows();
+    if (SCHEMA.FIELDS.get(key).secret) v = ''; // secrets never go back to a window
     SCHEMA.setPath(out, key, v);
   }
+  return out;
+}
+
+// Which secret settings have a value saved (shown as "saved", never revealed).
+function settingsSecrets() {
+  const out = {};
+  for (const [key, f] of SCHEMA.FIELDS) if (f.secret) out[key] = !!getSecret(f.secret);
   return out;
 }
 
@@ -712,10 +737,17 @@ function changeSetting(key, value) {
     const clash = Object.entries(config.data.hotkeys).find(([k, acc]) => `hotkeys.${k}` !== key && acc === v);
     if (clash) return { ok: false, error: 'Another COre shortcut already uses that key.' };
   }
+  const field = SCHEMA.FIELDS.get(key);
+  if (field.secret) {
+    setSecret(field.secret, v); // encrypted; the plain value is never written to config
+    SCHEMA.setPath(config.data, key, '');
+    config.save();
+    return { ok: true, values: settingsValues(), secrets: settingsSecrets() };
+  }
   SCHEMA.setPath(config.data, key, v);
   config.save();
   applyLive(key, v);
-  return { ok: true, values: settingsValues() };
+  return { ok: true, values: settingsValues(), secrets: settingsSecrets() };
 }
 
 function removeUserData(names) {
@@ -1073,7 +1105,7 @@ function handleActionTag(item) {
 function skillCtx() {
   return {
     platform: process.platform,
-    config: config.data.skills || {},
+    config: { ...(config.data.skills || {}), calendarUrl: getSecret('calendar') },
     notes,
     reminders: { add: (when, text) => { const r = reminders.add(when, text); toDock('dock:reminders', reminders.items); return r; } },
     // Chromium's network stack: follows the system proxy and certificate settings.
@@ -1819,7 +1851,7 @@ function wireIpc() {
   ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
   ipcMain.on('dock:openSettings', (e) => { if (fromDock(e)) openSettings(); });
   const fromSettings = (e) => isFrom(settingsWin, e);
-  ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), version: app.getVersion() } : null));
+  ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), secrets: settingsSecrets(), version: app.getVersion() } : null));
   ipcMain.handle('settings:set', (e, { key, value } = {}) => (fromSettings(e) ? changeSetting(String(key), value) : { ok: false }));
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
@@ -2195,6 +2227,12 @@ app.whenReady().then(async () => {
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
   notes = new SK.Notes(path.join(userData, 'notes.json'));
+  // Older versions kept the private calendar link in plain text: encrypt it.
+  if (config.data.skills && config.data.skills.calendarUrl) {
+    setSecret('calendar', config.data.skills.calendarUrl);
+    config.data.skills.calendarUrl = '';
+    config.save();
+  }
   // Damaged data files were set aside, not overwritten: say where they are.
   for (const [what, p] of [['settings', config.recovered], ['window state', state.recovered], ['memory', memory.recovered], ['notes', notes.recovered]]) {
     if (p) {

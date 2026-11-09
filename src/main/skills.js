@@ -93,50 +93,7 @@ async function weather(city, fetchImpl) {
 
 // ------------------------------------------------------------------ calendar (ICS)
 
-function parseIcsDate(v) {
-  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(String(v).trim());
-  if (!m) return null;
-  const [, y, mo, d, h, mi, s, z] = m;
-  if (!h) return { date: new Date(+y, +mo - 1, +d), allDay: true };
-  const args = [+y, +mo - 1, +d, +h, +mi, +(s || 0)];
-  return { date: z ? new Date(Date.UTC(...args)) : new Date(...args), allDay: false };
-}
-
-function parseIcs(text) {
-  const lines = String(text || '').replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '').split(/\r?\n/);
-  const events = [];
-  let ev = null;
-  for (const line of lines) {
-    if (line === 'BEGIN:VEVENT') ev = {};
-    else if (line === 'END:VEVENT') { if (ev && ev.start) events.push(ev); ev = null; } else if (ev) {
-      const i = line.indexOf(':');
-      if (i < 0) continue;
-      const key = line.slice(0, i).split(';')[0].toUpperCase();
-      const val = line.slice(i + 1);
-      if (key === 'SUMMARY') ev.title = val.replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
-      if (key === 'DTSTART') { const p = parseIcsDate(val); if (p) { ev.start = p.date; ev.allDay = p.allDay; } }
-      if (key === 'LOCATION') ev.location = val.replace(/\\,/g, ',').trim();
-    }
-  }
-  return events.sort((a, b) => a.start - b.start);
-}
-
-function eventsIn(events, range, now = new Date()) {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = range === 'tomorrow' ? [1, 2] : range === 'week' ? [0, 7] : [0, 1];
-  const from = new Date(start.getTime() + days[0] * 86400_000);
-  const to = new Date(start.getTime() + days[1] * 86400_000);
-  return events.filter((e) => e.start >= from && e.start < to);
-}
-
-function describeEvents(list, range) {
-  if (!list.length) return `Nothing on the calendar ${range === 'week' ? 'this week' : range}.`;
-  return list.slice(0, 12).map((e) => {
-    const when = e.allDay ? 'all day' : e.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const day = range === 'week' ? `${e.start.toLocaleDateString([], { weekday: 'short' })} ` : '';
-    return `${day}${when}: ${e.title || 'untitled'}${e.location ? ` (${e.location})` : ''}`;
-  }).join('; ');
-}
+const CAL = require('./calendar');
 
 // ------------------------------------------------------------------ notes
 
@@ -257,9 +214,18 @@ async function runSkill(name, args, ctx) {
     case 'calendar': {
       if (off('calendar') || !cfg.calendarUrl) return { result: 'No calendar is connected. The user can paste a calendar feed link (ICS) in Settings, Skills.' };
       const url = String(cfg.calendarUrl).replace(/^webcal:/i, 'https:');
-      const text = await (await ctx.fetch(url)).text();
+      // The feed link is a password: never let it into chat, the brain or logs.
+      let text;
+      try {
+        const res = await ctx.fetch(url);
+        if (!res.ok) return { error: `The calendar feed answered with HTTP ${res.status}. The link may have expired; paste a new one in Settings, Skills.` };
+        text = await res.text();
+      } catch {
+        return { error: 'Could not reach the calendar feed (offline, or the link is wrong).' };
+      }
       const range = /tomorrow/i.test(a) ? 'tomorrow' : /week/i.test(a) ? 'week' : 'today';
-      return { result: describeEvents(eventsIn(parseIcs(text), range), range) };
+      const [from, to] = CAL.rangeFor(range, ctx.now ? ctx.now() : new Date());
+      return { result: CAL.describe(CAL.occurrences(CAL.parseIcs(text), from, to), range) };
     }
     default: {
       const p = (ctx.plugins || []).find((x) => x.name === n);
@@ -269,4 +235,4 @@ async function runSkill(name, args, ctx) {
   }
 }
 
-module.exports = { runSkill, appFor, musicCommand, parseIcs, eventsIn, describeEvents, Notes, loadPlugins, weather, BUILTIN };
+module.exports = { runSkill, appFor, musicCommand, Notes, loadPlugins, weather, BUILTIN };
