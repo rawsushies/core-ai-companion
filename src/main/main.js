@@ -1261,7 +1261,10 @@ function makeVoicePipeline({ speak }) {
     synth: useKokoro ? (text) => tts.synth(text, { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed }) : null,
     forward: (item) => {
       if (item.type === 'say' && !speak) return;
-      if (item.type === 'say') { mainSpeaking = true; mainSpeakingSince = Date.now(); stopCloneSpeech(); }
+      if (item.type === 'say') {
+        if (!mainSpeaking && process.env.CORE_DEBUG) console.log(`[core] voice prime start ${Date.now()}`);
+        mainSpeaking = true; mainSpeakingSince = Date.now(); stopCloneSpeech();
+      }
       toOverlay('speak:item', item);
     },
     onError: (err) => {
@@ -1480,9 +1483,12 @@ function saveTask(task) {
   state.set('tasks', list.slice(-20));
 }
 
+// Wait until COre isn't busy and no specialist is speaking or waiting to
+// speak, so COre's summary never cuts their spoken summaries off.
 async function waitPrimeIdle(maxMs = 120_000) {
   const t0 = Date.now();
-  while ((current || listening) && Date.now() - t0 < maxMs) await new Promise((r) => setTimeout(r, 400));
+  const busy = () => current || listening || mainSpeaking || (floor && (floor.holder || floor.queue.length));
+  while (busy() && Date.now() - t0 < maxMs) await new Promise((r) => setTimeout(r, 400));
 }
 
 // Specialists work in parallel on the same request; Prime then gives the
@@ -1526,6 +1532,7 @@ function primarySpeaker() {
 
 function speakForClone(c, text) {
   if (!c.win || c.win.isDestroyed()) { floor.release(c.id); return; }
+  if (process.env.CORE_DEBUG) console.log(`[core] voice ${c.id} start ${Date.now()}`);
   const v = config.data.voice;
   const useKokoro = v.tts !== false && v.engine !== 'system' && !tts.failed && tts.ready;
   const p = new OrderedVoicePipeline({
@@ -1686,7 +1693,20 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // talking to a specialist never interrupts what COre itself is saying.
   if (!internal && !chain) {
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
-    if (/^\/merge\b/i.test(text)) { mergeAllClones(); return; }
+    // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
+    const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
+    if (ctl) {
+      const who = CORES.parseMentions(cores, ctl[2]).targets.filter((t) => t !== 'prime');
+      const ids = who.length ? who : [...clones.keys()];
+      if (ctl[1].toLowerCase() === 'stop') {
+        if (!who.length) { abortCurrent(); toOverlay('speech:stop'); }
+        for (const id of ids) { const c = clones.get(id); if (c) { try { c.ac.abort(); } catch {} toClone(c, 'speech:stop'); } }
+        addTranscript('system', who.length ? `Stopped ${who.map((id) => coreById(id).name).join(', ')}.` : 'Stopped.', { kind: 'progress' });
+      } else {
+        for (const id of ids) mergeClone(id);
+      }
+      return;
+    }
     const route = CORES.parseMentions(cores, text, { spoken: !typed });
     if (route.unknown.length) {
       addTranscript('user', text);
@@ -1726,8 +1746,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   if (!internal) {
     addTranscript('user', text);
     if (presence) presence.noteInteraction();
+    stopCloneSpeech(); // the user talking to COre interrupts a specialist; COre's own turns don't
   }
-  stopCloneSpeech();
   if (!brain) {
     addTranscript('system', 'No brain is configured. Open Settings and check brain.provider.');
     toOverlay('attention', { level: 'urgent', title: 'No brain configured' });
@@ -1960,6 +1980,7 @@ function wireIpc() {
   ipcMain.handle('clone:init', (e) => { const c = cloneFrom(e); return c ? cloneConfig(c) : null; });
   ipcMain.on('clone:idle', (e) => {
     const c = cloneFrom(e);
+    if (c && process.env.CORE_DEBUG) console.log(`[core] voice ${c.id} end ${Date.now()}`);
     if (c && floor && floor.holder === c.id) { clearTimeout(c.floorTimer); floor.release(c.id); }
   });
   // Click a specialist to talk to it; poke it (double click) to merge it back.
@@ -2103,6 +2124,7 @@ function wireIpc() {
   });
   ipcMain.on('voice:idle', (e) => {
     if (fromOverlay(e)) mainSpeaking = false;
+    if (fromOverlay(e) && process.env.CORE_DEBUG) console.log(`[core] voice prime end ${Date.now()}`);
     if (fromOverlay(e) && followUpPending && !current && !listening) {
       followUpPending = false;
       setTimeout(() => { if (!current && !listening) startListening(false, { followUp: true }); }, 250);
@@ -2384,6 +2406,18 @@ app.whenReady().then(async () => {
   memory = new Memory(path.join(userData, 'memory.json'));
   notes = new SK.Notes(path.join(userData, 'notes.json'));
   refreshCores();
+  // Shared tasks that were running when COre stopped are marked interrupted,
+  // never re-run on their own (a retry is the user's call).
+  const tasks = state.get('tasks') || [];
+  const interrupted = tasks.filter((t) => t.status === 'running');
+  if (interrupted.length) {
+    for (const t of interrupted) {
+      t.status = 'interrupted';
+      for (const st of t.steps || []) if (st.status === 'running' || st.status === 'pending') st.status = 'interrupted';
+    }
+    state.set('tasks', tasks);
+    addTranscript('system', `${interrupted.length === 1 ? 'A shared task was' : `${interrupted.length} shared tasks were`} interrupted when COre closed: "${String(interrupted[0].text).slice(0, 80)}". Ask again to run it.`, { kind: 'error', author: 'prime' });
+  }
   // Older versions kept the private calendar link in plain text: encrypt it.
   if (config.data.skills && config.data.skills.calendarUrl) {
     setSecret('calendar', config.data.skills.calendarUrl);

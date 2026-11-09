@@ -22,6 +22,11 @@
 - Specialists can't open files, run commands or browse yet (that's the coming permissioned task engine); their
   instructions say so, so they won't pretend.
 - Names, aliases, colours and voices are configurable in `config.json` → `meiosis.cores`.
+- `/stop @Scout` and `/merge @Forge` act on specific cores (`/stop` and `/merge` alone act on all).
+- A shared task interrupted by COre closing is marked as interrupted, and COre tells you when it next starts.
+  It is never re-run on its own.
+- COre's summary of a shared task waits until every specialist has finished speaking, instead of cutting
+  them off. Only you talking to COre interrupts a specialist.
 
 ### Release engineering
 - Releases now come only from an explicit version tag, never from a `package.json` change. They go through
