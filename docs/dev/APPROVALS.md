@@ -15,7 +15,8 @@ Approval to push is not approval to merge, and approval to merge is not approval
 | M-007 Meiosis recovery, per-core stop/merge, voice-order fix, real-Claude validation | `aa83af0` | M-006 | AWAITING USER APPROVAL |
 | M-008 Chat redesign: bubbles with orb avatars, rotating core wheel, orb-pill autocomplete | `6e6d0d7` | M-007 | AWAITING USER APPROVAL |
 | M-009 Permissioned read-only project access (Phase 4 slice 1) | `e343244` | M-008 | AWAITING USER APPROVAL |
-| M-010 Approved file changes with diff preview, Apply, Undo (Phase 4 slice 2) | (see `git log`) | M-009 | AWAITING USER APPROVAL |
+| M-010 Approved file changes with diff preview, Apply, Undo (Phase 4 slice 2) | `937aff2` | M-009 | AWAITING USER APPROVAL |
+| M-011 Phase 5/6 research + read-only Archicad PoC | (see `git log`) | M-010 | AWAITING USER APPROVAL |
 
 ## Decisions needed (not code)
 - The published releases v2.0.0 – v10.2.0 are broken (missing installer or blockmap, no `latest.yml`).

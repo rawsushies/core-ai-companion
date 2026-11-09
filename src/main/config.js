@@ -94,6 +94,7 @@ const DEFAULTS = {
     apps: true,
     calendar: true,
     calendarUrl: '', // secret-ish ICS link from your calendar's settings
+    archicad: false, // read-only access to a running Archicad on this PC (local JSON API)
   },
   watch: {
     enabled: true, // notice error pop-ups / frozen apps from window titles and offer help (no screenshots)

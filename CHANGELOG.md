@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Archicad (read-only proof of concept)
+- Turn on Settings → Skills → "Read my open Archicad project" and ask COre how many doors, walls or windows the
+  open project has. COre talks to Archicad's built-in JSON API on this PC only (127.0.0.1, ports 19723–19743)
+  and can only use read commands; nothing in the model can be changed. Not yet tested against a real
+  Archicad. See docs/dev/RESEARCH-PHASE5-6.md for the integration research (Archicad, Revit via pyRevit
+  Routes, Windows UI Automation) and the secure Android companion design.
+
 ### Approved file changes (you click Apply)
 - With Settings → Projects → "Let cores propose changes" on (off by default), a core can propose a whole file:
   it writes the new file in a code block tagged `file=path`. The chat shows a card with the file, +/− counts

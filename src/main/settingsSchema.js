@@ -96,6 +96,7 @@ const SECTIONS = [
       { key: 'skills.music', label: 'Control music (play, pause, next, volume)', type: 'toggle' },
       { key: 'skills.apps', label: 'Open apps from a safe list', type: 'toggle' },
       { key: 'skills.calendar', label: 'Read my calendar', type: 'toggle' },
+      { key: 'skills.archicad', label: 'Read my open Archicad project (count elements; never changes it)', type: 'toggle' },
       // secret: stored encrypted (like API keys), never shown back or logged.
       { key: 'skills.calendarUrl', label: 'Private calendar feed link (ICS, from Google / Outlook calendar settings)', type: 'text', maxLength: 500, optional: true, pattern: '^(https|webcal)://\\S+$', secret: 'calendar' },
     ],

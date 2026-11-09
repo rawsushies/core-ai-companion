@@ -19,4 +19,5 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-007** (`aa83af0`): interrupted-task recovery, /stop and /merge per core, the summary waits for specialists to finish speaking (found with real Claude + voice), CORE_DEBUG voice timing.
 - **M-008** (`6e6d0d7`): chat redesign at the user's request: bubble chat with orb avatars, rotating core wheel, orb-pill @ autocomplete; fixed the wheel turning back when an orb slid under a resting pointer.
 - **M-009** (`e343244`): read-only project tools (list/read/find), realpath containment, secret refusal, caps, audit log, specialist tool rounds, Settings → Projects folder picker. Validated with real Claude: Forge searched, Prime read, .env refused.
-- **M-010:** approved file changes: file= fenced proposals, diff card, Apply with stale-file refusal, backup, atomic write, Undo, audit. Validated with real Claude (Forge read, proposed, applied, undone).
+- **M-010** (`937aff2`): approved file changes: file= fenced proposals, diff card, Apply with stale-file refusal, backup, atomic write, Undo, audit. Validated with real Claude (Forge read, proposed, applied, undone).
+- **M-011:** research doc (Archicad JSON API, pyRevit Routes, Windows UIA, Android pairing design) + read-only Archicad skill (localhost, allowlisted read commands, off by default), tested with a mock API only.

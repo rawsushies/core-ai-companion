@@ -162,7 +162,7 @@ function loadPlugins(dir) {
   return out.slice(0, 30);
 }
 
-const BUILTIN = ['note', 'notes', 'timer', 'weather', 'music', 'open', 'search', 'calendar'];
+const BUILTIN = ['note', 'notes', 'timer', 'weather', 'music', 'open', 'search', 'calendar', 'archicad'];
 
 // ------------------------------------------------------------------ run
 
@@ -226,6 +226,15 @@ async function runSkill(name, args, ctx) {
       const range = /tomorrow/i.test(a) ? 'tomorrow' : /week/i.test(a) ? 'week' : 'today';
       const [from, to] = CAL.rangeFor(range, ctx.now ? ctx.now() : new Date());
       return { result: CAL.describe(CAL.occurrences(CAL.parseIcs(text), from, to), range) };
+    }
+    case 'archicad': {
+      // Read-only BIM proof of concept (local Archicad JSON API). Off by default.
+      if (cfg.archicad !== true) return { result: 'Archicad access is off. The user can turn it on in Settings, Skills (read-only).' };
+      try {
+        return await require('./archicad').archicadSkill(a, ctx.fetch);
+      } catch (err) {
+        return { error: `Archicad did not answer: ${err.message}` };
+      }
     }
     default: {
       const p = (ctx.plugins || []).find((x) => x.name === n);
