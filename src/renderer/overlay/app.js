@@ -801,6 +801,8 @@
       if (k === 'g') { gi = (gi + 1) % G.NAMES.length; startGesture(G.NAMES[gi], { n: 3 }); showCaption(G.NAMES[gi]); }
     });
 
+    if (params.get('theme')) cfg.orb = { ...cfg.orb, theme: params.get('theme') };
+    if (params.get('bg') === 'brand') document.body.style.background = '#05070A';
     // Deterministic poses for screenshots: ?pose=idle|speaking|point|explain|attention|move
     const rq = Number(params.get('r'));
     if (rq > 8) body.r = rq;

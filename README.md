@@ -1,6 +1,6 @@
 # COre
 
-![COre states](assets/states.png)
+![COre: your desktop companion, made of smoke](assets/brand/banner-readme.png)
 
 A desktop companion that lives on your screen as a **sphere of glowing smoke**. It talks with a deep robotic
 voice (sarcastic by default), listens, looks at your screen when you ask, points at things with smoke hands,
@@ -161,6 +161,10 @@ reset, uninstall). Settings are saved in `config.json` in COre's data folder.
 
 The smoke uses simplex noise with analytic gradients by Ian McEwan and Stefan Gustavson (ashima/webgl-noise,
 MIT). The liquid style uses signed-distance-field techniques from Inigo Quilez's articles.
+
+## Brand
+
+Logo, icons, banners, colours and voice: see [docs/BRAND.md](docs/BRAND.md).
 
 ## Develop
 

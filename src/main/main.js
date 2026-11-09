@@ -639,6 +639,7 @@ function openSettings() {
     backgroundColor: '#00000000',
     alwaysOnTop: true,
     title: 'COre settings',
+    icon: path.join(ROOT, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(PRELOAD, 'settings.cjs'),
       contextIsolation: true,
