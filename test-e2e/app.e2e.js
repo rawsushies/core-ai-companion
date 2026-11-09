@@ -244,6 +244,14 @@ test('Meiosis: @Scout splits off and answers with its own name', async () => {
   assert.ok(clone || app.windows().length >= 4, 'a helper window exists');
 });
 
+test('a shared task shows a live card with each specialist', async () => {
+  await send('@Scout @Sentinel compare SQLite and LevelDB');
+  await overlay.waitForFunction(() => { const g = window.__coreGlance(); return g && g.kind === 'task'; }, null, { timeout: 15000 });
+  await overlay.waitForFunction(() => { const rows = [...document.querySelectorAll('.g-list li.step')]; return rows.length === 2 && rows.every((r) => r.classList.contains('completed')); }, null, { timeout: 20000 });
+  const names = await overlay.$$eval('.g-list li.step span', (n) => n.map((x) => x.textContent));
+  assert.deepStrictEqual(names.sort(), ['Scout', 'Sentinel']);
+});
+
 test('approved file changes: Forge proposes, nothing is written until Apply, Undo restores', async () => {
   await send('@Forge rewrite the readme');
   await dock.waitForSelector('.msg.proposal', { timeout: 20000 });

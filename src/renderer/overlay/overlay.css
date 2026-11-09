@@ -97,3 +97,13 @@ body.demo {
 .g-id { min-width: 0; flex: 1; }
 .g-art { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; border: 1px solid #1d3327; background: #0b1f15; }
 .g-art[hidden] { display: none; }
+
+/* Shared task: one row per specialist with a live status. */
+.g-list li.step { display: grid; grid-template-columns: 8px 1fr auto; gap: 8px; align-items: center; }
+.g-list li.step i { width: 8px; height: 8px; border-radius: 50%; background: #86a595; }
+.g-list li.step em { font: 11px "COre Mono", monospace; font-style: normal; color: #86a595; }
+.g-list li.step.running em { color: #7dffb0; animation: g-pulse 1.2s ease-in-out infinite; }
+.g-list li.step.completed em { color: #3dff85; }
+.g-list li.step.failed em { color: #ff8f99; }
+@keyframes g-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .g-list li.step.running em { animation: none; } }

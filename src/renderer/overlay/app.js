@@ -271,6 +271,29 @@
       requestAnimationFrame(() => glanceEl.classList.add('show'));
       return;
     }
+    if (g.kind === 'task') {
+      GE.kicker.textContent = 'Shared task';
+      GE.title.textContent = g.title || '';
+      GE.sub.textContent = '';
+      const label = { pending: 'waiting', running: 'working…', completed: 'done', failed: 'failed', cancelled: 'stopped' };
+      for (const st of g.steps || []) {
+        const li = document.createElement('li');
+        li.className = `step ${st.status}`;
+        const dot = document.createElement('i');
+        if (/^#[0-9a-f]{6}$/i.test(st.color || '')) dot.style.background = st.color;
+        const n = document.createElement('span');
+        n.textContent = st.name;
+        const s2 = document.createElement('em');
+        s2.textContent = label[st.status] || st.status;
+        li.append(dot, n, s2);
+        GE.list.append(li);
+      }
+      GE.lyrics.hidden = true;
+      GE.bar.hidden = true;
+      GE.art.hidden = true;
+      requestAnimationFrame(() => glanceEl.classList.add('show'));
+      return;
+    }
     if (g.kind === 'card') {
       GE.kicker.textContent = '';
       GE.title.textContent = g.title || '';

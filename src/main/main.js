@@ -1406,6 +1406,20 @@ function glanceCard(title, lines, ms = 25000) {
   glanceTimer = setTimeout(hideGlance, ms);
 }
 
+// Live progress of a shared task: one row per specialist. Never covers a song or
+// lyrics card; goes away a few seconds after the last specialist finishes.
+function glanceTask(task) {
+  if (config.data.skills.glance === false) return;
+  if (glance && (glance.what === 'music' || glance.what === 'lyrics')) return;
+  stopGlanceReader();
+  clearTimeout(glanceTimer);
+  glance = { what: 'card' };
+  const steps = task.steps.map((st) => { const c = coreById(st.core) || {}; return { name: c.name || st.core, color: c.color || '', status: st.status }; });
+  toOverlay('glance', { kind: 'task', title: String(task.text).replace(/\s+/g, ' ').slice(0, 60), steps });
+  const finished = task.steps.every((st) => !['pending', 'running'].includes(st.status));
+  glanceTimer = setTimeout(hideGlance, finished ? 6000 : 10 * 60e3);
+}
+
 // A live countdown card for a timer, for a few seconds after it's set or asked about.
 function glanceCountdown(at, text, ms = 9000) {
   if (config.data.skills.glance === false) return;
@@ -1970,13 +1984,15 @@ async function runSharedTask(targets, text) {
   saveTask(task);
   const names = task.steps.map((s) => coreById(s.core).name).join(', ');
   addTranscript('system', `Shared task: ${names} working in parallel. COre will sum up.`, { author: 'prime', kind: 'progress', task: task.id });
+  for (const step of task.steps) step.status = 'running';
+  glanceTask(task);
   await Promise.all(task.steps.map(async (step) => {
-    step.status = 'running';
     saveTask(task);
     const r = await askCore(step.core, text, { task });
     step.status = r.ok ? 'completed' : r.error === 'cancelled' ? 'cancelled' : 'failed';
     if (r.ok) step.result = r.reply.slice(0, 4000); else step.error = r.error;
     saveTask(task);
+    glanceTask(task);
   }));
   const done = task.steps.filter((s) => s.status === 'completed');
   task.status = done.length === task.steps.length ? 'completed' : done.length ? 'partial' : task.steps.every((s) => s.status === 'cancelled') ? 'cancelled' : 'failed';

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Live task card
+- When several cores work on one request (for example `@Scout @Sentinel compare…`), a card beside the orb shows
+  each specialist with a live status: working…, done, failed. It never covers a song or lyrics card, and it goes
+  away a few seconds after the last one finishes.
+
 ### Voice starts sooner on long openings
 - When a reply opens with a long sentence without a comma, the first few words are now spoken on their own as soon
   as 48 characters have arrived (was 70). Measured with the voice model: each spoken chunk costs about 0.7 s plus

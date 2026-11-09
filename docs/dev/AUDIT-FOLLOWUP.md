@@ -69,6 +69,7 @@ Each loop: audit → fix → test → plan → build the most urgent item first.
 | 3 | Lyrics announced line by line to screen readers | Fixed; phone media remote |
 | 4 | Linux media path untested; no album art | Album art (Windows + Linux), fake player in e2e |
 | 5 | Voice start on long openings | First chunk earlier (measured 0.25–0.45 s sooner); dependency audit |
+| 6 | Remaining items need a relay, native app or real GPU | Live shared-task card (best available expansion) |
 
 ### Accepted risks
 - `npm audit`: 0 production vulnerabilities. 6 moderate ones in build tooling (minimatch inside electron-builder),
