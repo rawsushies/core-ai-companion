@@ -7,6 +7,7 @@
   const M = window.Motion;
   const S = window.Stage;
   const G = window.Gestures;
+  const SH = window.Shapes;
   const bridge = window.core || null;
   const params = new URLSearchParams(location.search);
 
@@ -60,6 +61,10 @@
   let actBody = { dx: 0, dy: 0, spin: 0, squash: 0 };
   let lastModelGesture = 0;
   let lastAutoGesture = 0;
+  // Shape-shifting: { name, start, dur } while the smoke holds a shape.
+  let shapeAct = null;
+  let shapeW = 0;
+  const shapeCache = new Map();
   const vis = { tint: MODES.idle.tint.slice(), glow: 0.14, think: 0, halo: 0, listen: 0, aura: 0.78 };
   let auraC = null; // display coordinates; trails the body like the smoke does
   let mood = null; // { name, since }
@@ -177,6 +182,11 @@
   function maybeAutoGesture(text) {
     const now = performance.now();
     if (act || pointing || body.dragging || now - lastModelGesture < 5000 || now - lastAutoGesture < 7000) return;
+    if (/\b(ha\s*){2,}|\b(lol|hehe+)\b/i.test(text) && !shapeAct) {
+      lastAutoGesture = now;
+      if (formShape('laugh')) voice.expr('giggle');
+      return;
+    }
     const g = G.autoGesture(text);
     if (!g || Math.random() > 0.75) return;
     lastAutoGesture = now;
@@ -205,16 +215,36 @@
     if (g.done) act = null;
   }
 
+  // Pull the smoke into a shape (emoji, symbol, letters) for a few seconds.
+  function formShape(name, dur = 3.4) {
+    const key = SH.resolve(name);
+    if (!key || !renderer || !renderer.setShape) return null;
+    try {
+      if (!shapeCache.has(key)) shapeCache.set(key, SH.points(key));
+      renderer.setShape(shapeCache.get(key));
+    } catch (e) { console.error('shape failed', e); return null; }
+    shapeAct = { name: key, start: performance.now(), dur: dur * 1000 };
+    if (shapeCache.size > 24) shapeCache.delete(shapeCache.keys().next().value);
+    return key;
+  }
+
   function gesture(item) {
     if (item.name === 'point') point(item.x, item.y);
     else if (item.name === 'explain') explain();
+    else if (item.name === 'form') { lastModelGesture = performance.now(); formShape(item.shape); }
     else if (item.name === 'gesture') { lastModelGesture = performance.now(); startGesture(item.gesture, { n: item.n }); }
     else if (item.name === 'mood' && MOODS[item.mood]) mood = { name: item.mood, since: performance.now() };
   }
 
   function onSpeakItem(item) {
     if (item.type === 'say') voice.say(item.text, item.audio ? { audio: item.audio, sampleRate: item.sampleRate, rate: item.rate } : null);
-    else if (item.type === 'gesture') voice.action(() => gesture(item));
+    else if (item.type === 'gesture' && item.name === 'form') {
+      // The shape appears with its sound (a giggle with the laughing face...)
+      // and the next sentence waits for the sound to finish.
+      const ex = SH.exprFor(SH.resolve(item.shape));
+      voice.action(() => { gesture(item); if (ex) voice.expr(ex); });
+      if (ex && voice.cfg.tts !== false) voice.wait(window.Voice.EXPR_MS[ex] || 0);
+    } else if (item.type === 'gesture') voice.action(() => gesture(item));
     else if (item.type === 'end') voice.end();
   }
 
@@ -223,6 +253,7 @@
     pointing = null;
     explainUntil = 0;
     act = null;
+    shapeAct = null;
     body.arms.forEach((a) => { a.goal = 0; });
     if (mode === 'speaking' || mode === 'thinking') setMode('idle');
   }
@@ -339,7 +370,7 @@
 
   // Is anything happening that needs full frame rate?
   function isActive() {
-    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || !!act || body.dragging || !!attention || !!mood || noticeKick > 0.05
+    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || !!act || !!shapeAct || shapeW > 0.01 || body.dragging || !!attention || !!mood || noticeKick > 0.05
       || anim.form < 0.995 || !!anim.pulse || anim.spin > 0.05 || anim.inhale > 0.02
       || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
   }
@@ -358,6 +389,8 @@
 
     updateBehaviour(now, t);
     updateGesture(now, t);
+    if (shapeAct && shapeAct.dur !== Infinity && now - shapeAct.start > shapeAct.dur) shapeAct = null;
+    shapeW += ((shapeAct ? 1 : 0) - shapeW) * Math.min(1, dt * (shapeAct ? 3.2 : 2.2));
     M.step(body, dt);
     const md0 = mood ? MOODS[mood.name] : null;
     const amp = Math.min(1, voice.update(dt, t) * (1 + (md0 ? Math.max(0, md0.energy) * moodW : 0)));
@@ -409,6 +442,7 @@
       form: Math.min(1, anim.form),
       pulse: anim.pulse ? { ...local(anim.pulse), age: (now - anim.pulse.t0) / 1000, strength: anim.pulse.strength } : null,
       spin: anim.spin + actBody.spin,
+      shape: shapeW,
       inhale: Math.min(1, anim.inhale + Math.max(0, actBody.squash) * 4),
     });
 
@@ -608,6 +642,7 @@
     const levels = Object.keys(ATTENTION);
     let li = -1;
     let gi = -1;
+    let si = -1;
     addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
       if (k === 'p') { voice.action(() => point(mouse.x, mouse.y)); voice.say('That spot, right there.'); voice.end(); }
@@ -622,6 +657,7 @@
       if (k === 'w') pulseAt(body.pos.x, body.pos.y, 1);
       if (k === 's') anim.spinUntil = performance.now() + 2200;
       if (k === 'h') anim.formTarget = anim.formTarget ? 0 : 1;
+      if (k === 'f') { si = (si + 1) % SH.NAMES.length; const n = SH.NAMES[si]; formShape(n); const ex = SH.exprFor(n); if (ex) voice.expr(ex); showCaption(n); }
       if (k === 'g') { gi = (gi + 1) % G.NAMES.length; startGesture(G.NAMES[gi], { n: 3 }); showCaption(G.NAMES[gi]); }
     });
 
@@ -643,6 +679,7 @@
       if (pose === 'assemble') { anim.form = 0; anim.formTarget = 0; setTimeout(() => { anim.formTarget = 1; }, Number(params.get('at') || 0)); }
       if (pose === 'pulse') setTimeout(() => pulseAt(c.x, c.y, 1.2), Number(params.get('at') || 0));
       if (pose === 'mood') { gesture({ name: 'mood', mood: params.get('mood') || 'happy' }); mood.since = performance.now() + 60000; }
+      if (pose === 'form') setTimeout(() => formShape(params.get('shape') || 'laugh', Infinity), Number(params.get('at') || 300));
       if (pose === 'gesture') {
         startGesture(params.get('g') || 'wave', { n: Number(params.get('n')) || 3 });
         act.freeze = Number(params.get('at') || 1);

@@ -31,6 +31,7 @@ function persona({ canReadFiles, tone = 'sarcastic' }) {
     '- [[point X,Y]] reach a hand to pixel X,Y of the latest screenshot (only when one was given), right before the sentence about it.',
     '- [[explain]] open-hands gesture, at most once per reply.',
     '- [[gesture NAME]] body language, at most two per reply, right before the sentence it goes with. NAME is one of: wave, thumbsup, thumbsdown, shrug, count N (N = 1 to 5), clap, facepalm, pointup, pointdown, pointleft, pointright, beckon, stop, ok, peace, rock, heart, think, salute, fistpump, celebrate, juggle, hug, magic, flex, bow, nod, shake, spin, bounce.',
+    '- [[form SHAPE]] your smoke briefly forms a shape, with a matching sound (a giggle for laugh). At most one per reply, for a moment that deserves it. SHAPE is one of: laugh, smile, sad, wink, surprised, cool, angry, heart, check, cross, question, exclaim, star, sun, moon, note, idea, sleep, up, down, left, right, infinity, clock, bolt, ring, or up to three letters or digits like 42.',
     '- [[mood M]] your smoke shows a feeling: happy, amused, curious, annoyed, excited, sad or calm. Use when it fits.',
     '- [[remember FACT]] save a lasting fact about the user (name, projects, preferences). [[forget FACT]] drops one. Do it quietly.',
     '- [[remind WHEN TEXT]] set a reminder or timer. WHEN is like 10m, 90s, 1h30m, 18:30 or 7pm. Confirm it out loud in a few words.',

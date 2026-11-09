@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0 — Shape-shifting
+- COre's smoke can form shapes: emoji faces (laugh, smile, sad, wink, surprised, cool, angry), heart,
+  check, cross, question/exclamation marks, star, sun, moon, music note, light bulb, Zzz, arrows,
+  infinity, clock, lightning, ring, and any one to three letters or digits ("42", "OK").
+- Shapes come with matching voice sounds through the robot voice: a giggle with the laughing face, a hum,
+  a sigh, a gasp, a ding, a buzz or a thoughtful "hmm". The next sentence waits for the sound.
+- `[[form NAME]]` tag for the brain; a "haha" in a reply makes COre laugh in smoke on its own.
+- Cheap by design: each shape is drawn once into 2,048 target points and uploaded as one tiny texture;
+  the smoke simply flows to them.
+
 ## 2.0.0 — Body language
 - 30 gestures, all made from COre's own smoke arms and body, so they cost nothing extra on the GPU:
   wave, thumbs up/down, shrug, count to five, clap, facepalm, point up/down/left/right, beckon, stop,

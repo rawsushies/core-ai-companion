@@ -34,12 +34,12 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
   bow, nod, shake, celebrate, juggle…), all from the same particle arms (no extra GPU work).
 - `[[gesture name]]` tag + automatic gestures from the reply's meaning.
 
-## 🔨 v3.0.0 — Shape-shifting
+## ✅ v3.0.0 — Shape-shifting
 - COre forms shapes/emoji out of its smoke (laughing face, heart, check mark, question mark, star, sun,
   moon, music note, arrows, numbers/letters…) with matching voice expression (giggle, hum, sigh).
 - `[[form laugh]]` tag; particle targets sampled from tiny vector glyphs (cheap).
 
-## ⏳ v4.0.0 — Companion presence
+## 🔨 v4.0.0 — Companion presence
 - Idle chit-chat: after a quiet while, COre starts a short, relevant conversation (time of day, what's on
   screen if allowed, memories, reminders), rate-limited and respectful (do-not-disturb, fullscreen apps,
   meetings).

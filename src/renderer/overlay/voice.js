@@ -160,6 +160,7 @@
     // ------------------------------------------------------------ queue
 
     say(text, rendered) { this._push({ kind: 'say', text, rendered }); }
+    wait(ms) { this._push({ kind: 'wait', ms }); }
     action(fn) { this._push({ kind: 'action', fn }); }
     end() { this._push({ kind: 'end' }); }
 
@@ -196,6 +197,11 @@
       if (item.kind === 'action') {
         try { item.fn(); } catch (e) { console.error(e); }
         return this._next();
+      }
+      if (item.kind === 'wait') {
+        const token = this.token;
+        setTimeout(() => { if (token === this.token) this._next(); }, Math.max(0, item.ms));
+        return;
       }
       if (item.kind === 'end') {
         this.running = false;
@@ -279,10 +285,99 @@
       speechSynthesis.speak(u);
     }
 
+    // ------------------------------------------------------------ expressions
+
+    // Short non-verbal sounds (giggle, hum, sigh, gasp, ding, buzz, hmm),
+    // synthesised and sent through the same robot chain as the voice.
+    // Returns how long it lasts in ms (0 when sound is off).
+    expr(name) {
+      if (this.cfg.tts === false || !Voice.EXPR_MS[name]) return 0;
+      let ctx;
+      try { ctx = this._ensureAudio(); } catch { return 0; }
+      if (ctx.state === 'suspended') ctx.resume();
+      const t0 = ctx.currentTime + 0.02;
+      const out = ctx.createGain();
+      out.gain.value = 0.9;
+      out.connect(this.nodes.input);
+      const pitch = Math.pow(2, (Number(this.cfg.semitones) || -3) / 12);
+      const env = (g, at, peak, a, d) => {
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(peak, at + a);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + a + d);
+      };
+      const voiced = (f0, at, dur, peak, formants = [700, 1150]) => {
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(f0, at);
+        o.frequency.exponentialRampToValueAtTime(f0 * 0.82, at + dur);
+        const g = ctx.createGain();
+        env(g, at, peak, Math.min(0.03, dur / 3), dur);
+        for (const f of formants) {
+          const bp = ctx.createBiquadFilter();
+          bp.type = 'bandpass';
+          bp.frequency.value = f;
+          bp.Q.value = 6;
+          o.connect(bp).connect(g);
+        }
+        g.connect(out);
+        o.start(at);
+        o.stop(at + dur + 0.05);
+      };
+      const noise = (at, dur, peak, from, to, type = 'bandpass') => {
+        const len = Math.ceil(ctx.sampleRate * (dur + 0.05));
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const f = ctx.createBiquadFilter();
+        f.type = type;
+        f.Q.value = 0.8;
+        f.frequency.setValueAtTime(from, at);
+        f.frequency.exponentialRampToValueAtTime(to, at + dur);
+        const g = ctx.createGain();
+        env(g, at, peak, dur * 0.3, dur * 0.7);
+        src.connect(f).connect(g).connect(out);
+        src.start(at);
+        src.stop(at + dur + 0.05);
+      };
+      const tone = (f, at, dur, peak, type = 'sine') => {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.value = f;
+        const g = ctx.createGain();
+        env(g, at, peak, 0.01, dur);
+        o.connect(g).connect(out);
+        o.start(at);
+        o.stop(at + dur + 0.05);
+      };
+      if (name === 'giggle') {
+        for (let i = 0; i < 5; i++) voiced((300 - i * 14) * pitch * (0.97 + Math.random() * 0.06), t0 + i * 0.12, 0.085, 0.5, [800, 1250]);
+      } else if (name === 'hum') {
+        [0, 4, 7, 4].forEach((st, i) => voiced(150 * pitch * Math.pow(2, st / 12), t0 + i * 0.2, 0.22, 0.35, [350, 900]));
+      } else if (name === 'hmm') {
+        voiced(165 * pitch, t0, 0.32, 0.35, [300, 800]);
+        voiced(185 * pitch, t0 + 0.34, 0.3, 0.35, [300, 800]);
+      } else if (name === 'sigh') {
+        noise(t0, 0.85, 0.5, 1500, 380, 'lowpass');
+        voiced(120 * pitch, t0 + 0.1, 0.6, 0.12, [500, 1000]);
+      } else if (name === 'gasp') {
+        noise(t0, 0.28, 0.6, 900, 2600);
+      } else if (name === 'ding') {
+        tone(880, t0, 0.55, 0.35);
+        tone(1320, t0 + 0.08, 0.5, 0.22);
+      } else if (name === 'buzz') {
+        tone(110, t0, 0.32, 0.25, 'square');
+      }
+      const ms = Voice.EXPR_MS[name];
+      this.exprUntil = performance.now() + ms + 200;
+      return ms;
+    }
+
     // Speaking energy 0..1 for this frame.
     update(dt, t) {
       let target = 0;
-      if (this.current && this.nodes) {
+      if (this.nodes && (this.current || performance.now() < (this.exprUntil || 0))) {
         // Real voice: follow the actual output level.
         this.nodes.analyser.getFloatTimeDomainData(this.ampBuf);
         let s = 0;
@@ -298,6 +393,8 @@
       return this.amp;
     }
   }
+
+  Voice.EXPR_MS = { giggle: 650, hum: 850, hmm: 700, sigh: 900, gasp: 320, ding: 600, buzz: 360 };
 
   root.Voice = Voice;
 })(window);

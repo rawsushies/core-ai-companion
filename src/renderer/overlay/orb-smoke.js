@@ -113,6 +113,10 @@
   uniform vec4  uPulse;
   uniform float uSpin;
   uniform float uInhale;
+  // Shape-shifting: uShape 0..1 pulls most of the smoke onto the points of a
+  // drawn shape (64 x 32 RG32F texture of positions in -1..1).
+  uniform sampler2D uShapeTex;
+  uniform float uShape;
   ${NOISE}
 
   vec2 rot2(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(v.x * c - v.y * s, v.x * s + v.y * c); }
@@ -278,6 +282,15 @@
       vec3 desired = flow * speed * (layer > 0.5 ? 0.35 : 1.0)
                    + n * (targetR - r) * 5.0
                    + vec3(uCenterVel, 0.0);
+      float shapeK = 0.0;
+      if (uShape > 0.001 && fract(seed * 331.7) < 0.72) {
+        shapeK = uShape;
+        int idx = int(fract(seed * 7331.1) * 2047.0);
+        vec2 sp = texelFetch(uShapeTex, ivec2(idx % 64, idx / 64), 0).xy;
+        vec3 tgt = uCenter + vec3(sp * uR * 1.6, (h.z - 0.5) * uR * 0.08)
+                 + vec3(sin(uTime * 2.1 + seed * 40.0), cos(uTime * 1.7 + seed * 33.0), 0.0) * uR * 0.008;
+        desired = mix(desired, (tgt - pos) * 12.0 + vec3(uCenterVel, 0.0), uShape);
+      }
       // Shockwave: an expanding ring pushes the smoke outward as it passes.
       if (uPulse.w > 0.0) {
         vec3 o = vec3(uPulse.xy, 0.0);
@@ -288,7 +301,7 @@
       }
       // Each particle catches up at its own pace, so a moving orb trails a
       // diffuse smoke tail instead of a stack of coherent shell outlines.
-      float respond = mix(2.2, 7.5, fract(seed * 517.3));
+      float respond = mix(mix(2.2, 7.5, fract(seed * 517.3)), 14.0, shapeK);
       vel = mix(vel, desired, 1.0 - exp(-uDt * respond));
       pos += vel * uDt;
     }
@@ -320,6 +333,7 @@
   uniform float uBright;
   uniform float uForm;
   uniform vec4  uPulse;
+  uniform float uShape;
   void main() {
     gl_Position = vec4(aPos.x / uView.x * 2.0 - 1.0, 1.0 - aPos.y / uView.y * 2.0, 0.0, 1.0);
     float life = aMeta.x, seed = aMeta.y, maxL = aMeta.z;
@@ -337,7 +351,8 @@
       float d = length(aPos.xy - uPulse.xy);
       flash = 2.6 * exp(-pow((d - uPulse.z * uR * 6.0) / (uR * 0.5), 2.0)) * uPulse.w * exp(-uPulse.z * 1.4);
     }
-    float a = (1.0 + flash) * mix(0.35, 1.0, uForm) * fade * front * (0.022 * (1.0 - 0.5 * dust) * (1.0 + 4.0 * tipGlow) + 0.22 * spark * twinkle) * (1.0 + 1.1 * uAmp + 0.6 * uGlow) * uBright;
+    float shapeDim = mix(1.0, fract(seed * 331.7) < 0.72 && dust < 0.5 ? 1.35 : 0.04, uShape);
+    float a = shapeDim * (1.0 + flash) * mix(0.35, 1.0, uForm) * fade * front * (0.022 * (1.0 - 0.5 * dust) * (1.0 + 4.0 * tipGlow) + 0.22 * spark * twinkle) * (1.0 + 1.1 * uAmp + 0.6 * uGlow) * uBright;
     vCol = vec4(col * a, a);
   }`;
 
@@ -513,6 +528,14 @@
       this.armOn = new Float32Array(2);
       this.armMode = new Float32Array(2);
       this.fing = new Float32Array(10).fill(1);
+      // Shape targets (unit 5): 64 x 32 RG32F, replaced by setShape().
+      this.shapeTex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, this.shapeTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, 64, 32, 0, gl.RG, gl.FLOAT, new Float32Array(64 * 32 * 2));
+      gl.activeTexture(gl.TEXTURE0);
       this.roll = new Float32Array(2);
       this.lastT = null;
       this.trails = null;
@@ -548,6 +571,15 @@
       });
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       this.trailIdx = 0;
+    }
+
+    // pts: Float32Array(2048 * 2) of positions in -1..1 (see shapes.js).
+    setShape(pts) {
+      const gl = this.gl;
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, this.shapeTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 64, 32, gl.RG, gl.FLOAT, pts);
+      gl.activeTexture(gl.TEXTURE0);
     }
 
     render(s) {
@@ -590,6 +622,11 @@
       gl.uniform1fv(su.uFing, this.fing);
       gl.uniform1fv(su.uRoll, this.roll);
       gl.uniform1f(su.uForm, s.form === undefined ? 1 : s.form);
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, this.shapeTex);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(su.uShapeTex, 5);
+      gl.uniform1f(su.uShape, s.shape || 0);
       const pl = s.pulse;
       gl.uniform4f(su.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
       gl.uniform1f(su.uSpin, s.spin || 0);
@@ -646,6 +683,7 @@
       gl.uniform1f(pu.uGlow, s.glow);
       gl.uniform1f(pu.uBright, 24000 / this.count);
       gl.uniform1f(pu.uForm, s.form === undefined ? 1 : s.form);
+      gl.uniform1f(pu.uShape, s.shape || 0);
       gl.uniform4f(pu.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
       gl.bindVertexArray(this.drawVao[this.read]);
       gl.drawArrays(gl.POINTS, 0, this.count);
