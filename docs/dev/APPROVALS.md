@@ -25,6 +25,9 @@ Approval to push is not approval to merge, and approval to merge is not approval
 | M-017 Backups to a local or cloud-synced folder | `a8642a2` | M-016 | PUSHED |
 | M-018 Phone companion (LAN, end-to-end encrypted) | `5eb4f49` | M-017 | PUSHED |
 | M-019 No frames while hidden/locked, ambient and battery caps | `eb03f1b` | M-018 | PUSHED |
+| M-020 Fewer particles while idle | `d8ce38a` | M-019 | PUSHED |
+| (fix) Cloud-folder test on Windows | `7d32340` | M-020 | PUSHED, CI green on Linux + Windows |
+| M-021 Cached quick-answer voice, no screenshots from the phone | `2b03131` | fix | PUSHED |
 
 ## Decisions needed (not code)
 - The published releases v2.0.0 – v10.2.0 are broken (missing installer or blockmap, no `latest.yml`).
@@ -61,4 +64,4 @@ Approval to push is not approval to merge, and approval to merge is not approval
   runs are in progress.
 - A stray branch `dev/core-next` was pushed by mistake and can't be deleted from this environment. It holds
   only commits already on the PR. Please delete it on GitHub.
-- Tests at `eb03f1b`: `npm test` 187 passed, 0 failed. Follow-up audit: `docs/dev/AUDIT-FOLLOWUP.md`.
+- Tests at `2b03131`: `npm test` 190 passed, 0 failed. Follow-up audit: `docs/dev/AUDIT-FOLLOWUP.md`.
