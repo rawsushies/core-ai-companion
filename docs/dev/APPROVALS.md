@@ -17,9 +17,32 @@ Approval to push is not approval to merge, and approval to merge is not approval
 | M-009 Permissioned read-only project access (Phase 4 slice 1) | `e343244` | M-008 | AWAITING USER APPROVAL |
 | M-010 Approved file changes with diff preview, Apply, Undo (Phase 4 slice 2) | `937aff2` | M-009 | AWAITING USER APPROVAL |
 | M-011 Phase 5/6 research + read-only Archicad PoC | `61b8af6` | M-010 | AWAITING USER APPROVAL |
-| M-012 Minimal branded UI: flat chat, bundled brand fonts, brand palette | (see `git log`) | M-011 | AWAITING USER APPROVAL |
+| M-012 Minimal branded UI: flat chat, bundled brand fonts, brand palette | `f13712d` | M-011 | AWAITING USER APPROVAL |
 
 ## Decisions needed (not code)
 - The published releases v2.0.0 – v10.2.0 are broken (missing installer or blockmap, no `latest.yml`).
   Options: delete them, or mark them as pre-release, before the first gated release is published. I will
   not touch them without explicit approval.
+
+## Combined request (all milestones are cumulative: each builds on the previous)
+
+- Range: `b84d355..f13712d` on `dev/core-next` (plus this queue file), 12 milestones.
+- Reply `APPROVE PUSH M-012` to push that exact range to `review/core-M-012`. Or approve a prefix, e.g.
+  `APPROVE PUSH M-002`, to push only `b84d355..5d059a2`.
+- After a push, CI (new `ci.yml`) runs Linux + Windows tests, the Windows packaged-app self-test and the
+  installer install/uninstall test for the first time. Those Windows results are not known yet.
+
+### Tests at f13712d
+- `npm run check`: syntax OK (53 files). `npm test`: 164 passed, 0 failed, 0 skipped (Linux, Node 22).
+- Real Electron (Linux, Xvfb): smoke test of the source and packaged apps; rollback (both paths); corrupt
+  config; calendar secret; watchdog/Continue; memory edit; Meiosis routing, picker, wheel, autocomplete;
+  shared tasks; voice order; interrupted-task recovery; project reads; propose/apply/undo; minimal UI and fonts.
+- With the real Claude (logged-in CLI): expressive tags, Scout/Sentinel shared task, project reads, `.env`
+  refusal, Forge proposal applied and undone.
+
+### Not verified (honest)
+- Anything on Windows: CI has not run yet (nothing pushed). That includes the `.cmd` Claude CLI path, the
+  installer and its uninstall, the release updater (C3), music keys and app launching.
+- The release workflow end to end (needs a tag, which needs your release approval).
+- Archicad, Revit and UI Automation against the real applications. The Android companion is design only.
+- On Linux without a keyring, Electron safeStorage falls back to `plain:` (a Windows/macOS keychain encrypts).
