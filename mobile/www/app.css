@@ -1,0 +1,45 @@
+/* COre for phones. Brand kit: Void, Smoke, Emerald, Mint, Ink, Muted. */
+:root { --void: #05070a; --smoke: #0b1f15; --emerald: #3dff85; --mint: #7dffb0; --ink: #e8fff1; --muted: #86a595; --line: #1d3327; --edge: #1f6b42; --danger: #ff8f99; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--void); color: var(--ink); font: 15px/1.5 Inter, Roboto, "Segoe UI", system-ui, sans-serif; }
+body { display: flex; flex-direction: column; min-height: 100dvh; }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; }
+.head { display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top)) 14px 8px; border-bottom: 1px solid var(--line); }
+.orb { width: 56px; height: 56px; flex: none; }
+.id { flex: 1; min-width: 0; }
+.name { font-weight: 600; font-size: 17px; letter-spacing: -0.03em; }
+.status { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); }
+.status.away::before { background: var(--mint); }
+.status.off::before { background: var(--muted); }
+.icon { width: 42px; height: 42px; border: 0; background: transparent; color: var(--muted); border-radius: 12px; display: grid; place-items: center; }
+.log { flex: 1; overflow-y: auto; padding: 14px 12px 8px; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
+.msg { max-width: 86%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.core { align-self: flex-start; background: var(--smoke); border: 1px solid #18382a; }
+.msg.user { align-self: flex-end; background: var(--void); border: 1px solid var(--edge); }
+.msg.system { align-self: flex-start; font-size: 13px; color: var(--muted); padding: 2px 4px; }
+.msg .via { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.who { display: block; font-size: 11.5px; font-weight: 600; margin-bottom: 2px; }
+.media { display: flex; justify-content: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.media button { min-width: 48px; height: 40px; padding: 0 12px; border-radius: 12px; border: 1px solid #18382a; background: var(--smoke); }
+.composer { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.field { flex: 1; background: var(--smoke); border: 1px solid #18382a; border-radius: 20px; padding: 0 14px; }
+.field:focus-within { border-color: var(--edge); }
+textarea { width: 100%; resize: none; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 9px 0; max-height: 120px; outline: none; }
+textarea::placeholder { color: var(--muted); }
+.send { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--emerald); color: var(--void); display: grid; place-items: center; }
+.sheet { position: fixed; inset: 0; background: var(--void); overflow-y: auto; padding: calc(10px + env(safe-area-inset-top)) 14px 24px; z-index: 5; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.sheet h2 { font-size: 20px; letter-spacing: -0.03em; margin: 6px 0 12px; }
+.card { background: var(--smoke); border: 1px solid #18382a; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.card h3 { margin: 0; font-size: 14.5px; }
+.muted { color: var(--muted); font-size: 13px; margin: 0; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+input, select { background: var(--void); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font: inherit; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.primary { background: var(--emerald); color: var(--void); border: 0; border-radius: 999px; padding: 8px 18px; font-weight: 600; }
+.ghost { background: var(--void); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; }
+.ghost.danger { color: var(--danger); }
+.code { font: 600 30px/1 ui-monospace, monospace; letter-spacing: 0.16em; color: var(--mint); text-align: center; padding: 8px 0; }
+video { width: 100%; border-radius: 12px; background: #000; }

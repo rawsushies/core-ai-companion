@@ -24,6 +24,7 @@ let home;
 let userData;
 let project;
 let script;
+let baseRules = [];
 const errors = [];
 
 test.before(async () => {
@@ -36,7 +37,7 @@ test.before(async () => {
   fs.writeFileSync(cover, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
   const player = JSON.stringify({ status: 'Playing', posUs: 64000000, lenUs: 201000000, artUrl: require('url').pathToFileURL(cover).href, artist: 'The Smoke Choir', album: 'Signals', title: 'Midnight Signal' });
   script = path.join(userData, 'fake-script.json');
-  fs.writeFileSync(script, JSON.stringify([
+  fs.writeFileSync(script, JSON.stringify(baseRules = [
     { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
     { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
     { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
@@ -295,7 +296,8 @@ test('desktop agent: /do clicks and types into another window, with step approva
   const scale = Math.min(1, 1568 / Math.max(geo.w, geo.h));
   const cx = Math.round((120 + 40 + 150) * scale);
   const cy = Math.round((120 + 50 + 20) * scale);
-  fs.writeFileSync(process.env.CORE_E2E_SCRIPT_PATH || script, JSON.stringify([
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
     { match: 'Step 1 of', reply: `Clicking the box. [[act {"type":"click","x":${cx},"y":${cy},"why":"focus the text box"}]]` },
     { match: 'Step 2 of', reply: 'Typing. [[act {"type":"type","text":"hello from the agent"}]]' },
     { match: 'Step 3 of', reply: 'Done. [[act {"type":"done","summary":"typed the greeting"}]]' },
@@ -316,6 +318,57 @@ test('desktop agent: /do clicks and types into another window, with step approva
 test('desktop agent: off by default and refused from the phone', async () => {
   await send('/do anything at all');
   await dock.waitForFunction(() => /desktop agent is off/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
+});
+
+test('mobile app: pairs over Wi-Fi, chats, copies memory, and answers through Gemini when the PC is away', async () => {
+  const MOBILE = path.join(ROOT, 'mobile', 'www');
+  if (!fs.existsSync(path.join(MOBILE, 'nacl.js'))) require('child_process').execFileSync(process.execPath, [path.join(ROOT, 'mobile', 'scripts', 'copy-assets.js')]);
+  await send('please remember my tea preference'); // something for the phone to learn
+  await quickSettings(true); // wait for the fact itself (an older "Remembered" note may still be in the chat)
+  await dock.waitForFunction(() => document.getElementById('memory-list').innerText.includes('green tea'), null, { timeout: 15000 });
+  await quickSettings(false);
+  // The app at its real origin (http://localhost, like Capacitor), at phone size.
+  await app.evaluate(({ BrowserWindow }) => { const w = new BrowserWindow({ width: 390, height: 800, show: true }); w.loadURL('about:blank'); global.__mobile = w; });
+  let phone = null;
+  for (let i = 0; i < 40 && !phone; i++) { phone = app.windows().find((p) => p.url() === 'about:blank'); if (!phone) await wait(250); }
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
+  await phone.route('http://localhost/**', (route) => {
+    const file = path.join(MOBILE, new URL(route.request().url()).pathname.replace(/^\/$/, '/index.html'));
+    if (!file.startsWith(MOBILE) || !fs.existsSync(file)) return route.fulfill({ status: 404, body: '' });
+    return route.fulfill({ status: 200, contentType: types[path.extname(file)] || 'application/octet-stream', body: fs.readFileSync(file) });
+  });
+  let geminiBody = null;
+  await phone.route('https://generativelanguage.googleapis.com/**', async (route) => {
+    geminiBody = JSON.parse(route.request().postData());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Green tea, as usual? (from Gemini)' }] } }] }) });
+  });
+  phone.on('pageerror', (e) => errors.push(`mobile: ${e.message}`));
+  await phone.goto('http://localhost/');
+  assert.ok(['low', 'mid', 'high'].includes(await phone.evaluate(() => window.__orb.tier)), 'orb picked a device class');
+  // Pair with the PC using the link from its QR code.
+  const r = await settings.evaluate(() => window.settingsApi.action('pairPhone'));
+  await phone.click('#open-settings');
+  await phone.fill('#pair-link', r.pair.url);
+  await phone.click('#pair');
+  await phone.waitForFunction(() => /Paired with/.test(document.getElementById('pc-state').textContent), null, { timeout: 15000 });
+  await phone.click('#close-settings');
+  // Chat through the PC.
+  await phone.fill('#input', 'hello from the app');
+  await phone.click('.send');
+  await dock.waitForFunction(() => document.getElementById('log').innerText.includes('hello from the app'), null, { timeout: 10000 });
+  await phone.waitForFunction(() => [...document.querySelectorAll('.msg.core')].some((m) => /Smoke says hi/.test(m.textContent)), null, { timeout: 15000 });
+  await phone.waitForFunction(() => /With your PC|Thinking|Speaking/.test(document.getElementById('status').textContent), null, { timeout: 5000 });
+  // Memory came along.
+  await phone.waitForFunction(() => JSON.parse(localStorage.getItem('core.memory') || '[]').some((m) => /green tea/.test(m.text)), null, { timeout: 15000 });
+  // Away: the PC stops answering; Gemini answers with that memory.
+  await phone.evaluate(() => localStorage.setItem('core.geminiKey', JSON.stringify('test-key')));
+  await phone.route(/^http:\/\/127\.0\.0\.1:\d+\/api$/, (route) => route.abort());
+  await phone.waitForFunction(() => /Away: Gemini/.test(document.getElementById('status').textContent), null, { timeout: 20000 });
+  await phone.fill('#input', 'what do I drink?');
+  await phone.click('.send');
+  await phone.waitForFunction(() => [...document.querySelectorAll('.msg.core')].some((m) => /from Gemini/.test(m.textContent)), null, { timeout: 10000 });
+  assert.match(geminiBody.systemInstruction.parts[0].text, /green tea/, 'Gemini got the synced memory');
+  await app.evaluate(() => { global.__mobile.destroy(); });
 });
 
 test('no renderer errors were thrown', () => {

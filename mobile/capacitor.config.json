@@ -1,0 +1,12 @@
+{
+  "appId": "app.core.companion",
+  "appName": "COre",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "backgroundColor": "#05070a"
+  }
+}

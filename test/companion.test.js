@@ -154,3 +154,19 @@ test('a phone whose clock is off learns the PC time instead of looping', async (
     assert.strictEqual((await post(port, '/api', fixed)).status, 200, 'with the corrected clock it works');
   } finally { c.stop(); }
 });
+
+test('the phone app origin may call the API (CORS), other web pages may not; memory comes back sealed', async () => {
+  const { c } = companion({ getMemory: () => [{ text: 'likes green tea' }] });
+  const port = await c.start();
+  try {
+    const pre = await fetch(`http://127.0.0.1:${port}/api`, { method: 'OPTIONS', headers: { origin: 'http://localhost', 'access-control-request-method': 'POST' } });
+    assert.strictEqual(pre.status, 204);
+    assert.strictEqual(pre.headers.get('access-control-allow-origin'), 'http://localhost');
+    const evil = await fetch(`http://127.0.0.1:${port}/api`, { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' }, body: '{}' });
+    assert.strictEqual(evil.headers.get('access-control-allow-origin'), null);
+    const { deviceId, key } = await pairPhone(c, port);
+    const r = await post(port, '/api', { d: deviceId, ...C.seal({ op: 'memory', ctr: 1, ts: Date.now() }, key) });
+    assert.deepStrictEqual(C.open(r.body, key).memory, [{ text: 'likes green tea' }]);
+    assert.ok(!JSON.stringify(r.body).includes('green tea'));
+  } finally { c.stop(); }
+});

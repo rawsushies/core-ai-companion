@@ -115,6 +115,9 @@ requests like the time or "next song" are answered instantly, without the brain.
 your screen, one step at a time, asking before each click or keystroke. Esc stops it. See
 [docs/dev/AGENT.md](docs/dev/AGENT.md).
 
+**COre for Android.** An app in `mobile/` (built by CI): chat with COre on your PC over Wi-Fi, or with Gemini when
+you're away, and it still knows you. Light enough for older phones. See [docs/dev/MOBILE.md](docs/dev/MOBILE.md).
+
 **Phone companion (optional).** Pair your phone with a QR code (Settings → Phone) and chat with COre from the
 phone's browser on the same Wi-Fi, end-to-end encrypted. See [docs/dev/PHONE.md](docs/dev/PHONE.md).
 

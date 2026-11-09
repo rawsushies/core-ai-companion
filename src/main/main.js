@@ -840,6 +840,8 @@ function ensureCompanion() {
       const cmd = SK.musicCommand(action, process.platform);
       if (cmd) require('child_process').execFile(cmd.file, cmd.args, { timeout: 6000, windowsHide: true }, () => {});
     },
+    // The phone app keeps a copy of what COre knows about you for when it's away from the PC.
+    getMemory: () => (config.data.memory && config.data.memory.enabled === false ? [] : (memory && memory.items ? memory.items : []).slice(-200).map((m) => ({ text: String(m.text || '').slice(0, 300) }))),
     getFeed: phoneFeed,
   });
   return companion;

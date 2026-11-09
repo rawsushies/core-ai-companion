@@ -1,0 +1,20 @@
+{
+  "name": "core-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "COre for Android: talks to COre on your PC over Wi-Fi, or to Gemini when you're away.",
+  "scripts": {
+    "assets": "node scripts/copy-assets.js",
+    "android:add": "npm run assets && npx cap add android && node scripts/patch-android.js",
+    "android:sync": "npm run assets && npx cap sync android && node scripts/patch-android.js",
+    "android:debug": "npm run android:sync && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "tweetnacl": "1.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
+}

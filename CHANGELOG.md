@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### COre for Android (new app)
+- `mobile/` is a real Android app (Capacitor). CI builds an installable debug APK.
+- **With your PC** on the same Wi-Fi, it's paired like the phone page (encrypted) and gets chat, status, the media
+  remote and Stop.
+- **Away from the PC** it answers with Gemini using your own key, and still knows you: it keeps a copy of COre's
+  memory from the PC.
+- **For low and mid-range phones:** a light 2D orb picked by device class (180–520 particles at 24–30 fps). It
+  stops when hidden.
+- The desktop now answers the app's origin only (CORS) and serves a sealed memory copy. See `docs/dev/MOBILE.md`.
+
 ### Fixed (found by the new agent test)
 - **Closing any card beside the orb stopped the phone companion server** (a misplaced line from the phone
   milestone). Phones lost their connection after "hide that" or any card timing out. Fixed, with a regression test.

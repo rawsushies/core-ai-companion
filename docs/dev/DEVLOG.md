@@ -38,3 +38,4 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-026 (loop 5):** first-chunk threshold 70 to 48 chars (cut 20-36); Kokoro cost measured as about 0.7 s fixed + 11 ms/char (21 chars 862 ms, 59 chars 1308 ms, 104 chars 1846 ms).
 - **M-027 (loop 6):** live shared-task card (per-specialist status in core colours), real-app test.
 - **M-028 (loop 7):** desktop agent (/do, validated action set, step approval card, Esc/Stop, xdotool + SendInput drivers, own brain session); P0 fix: hideGlance stopped the phone server (misplaced line from M-018); real-input e2e on Xvfb; CI installs xdotool and uses a 1600x900 screen.
+- **M-029 (loop 8):** Android app (Capacitor 8.5.3, CI APK build): PC mode over the encrypted companion protocol, away mode via Gemini with synced memory, tiered 2D orb; desktop CORS for app origins + memory op; real-app e2e of pairing/chat/memory/away; fixed e2e script pollution between tests.
