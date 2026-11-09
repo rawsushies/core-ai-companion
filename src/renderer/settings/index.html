@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>COre settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="window">
+    <header class="bar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span>COre settings <span id="version" class="version"></span></div>
+      <button id="close" class="icon" aria-label="Close settings" title="Close">✕</button>
+    </header>
+    <div class="body">
+      <nav id="nav" class="nav" aria-label="Settings sections"></nav>
+      <main id="content" class="content"></main>
+    </div>
+    <div id="restart-bar" class="restart-bar" hidden>
+      <span>Some changes apply after a restart.</span>
+      <button id="restart" class="primary">Restart COre</button>
+    </div>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

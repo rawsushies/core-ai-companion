@@ -104,6 +104,7 @@
   }, true);
   document.getElementById('open-panel').addEventListener('click', () => api.openPanel());
   document.getElementById('updates').addEventListener('click', () => api.checkUpdates());
+  document.getElementById('all-settings').addEventListener('click', () => api.openSettings());
   document.getElementById('new-chat').addEventListener('click', () => api.newChat());
   const graphics = document.getElementById('graphics');
   api.graphicsMode().then((g) => { if (g) graphics.value = g.mode; });

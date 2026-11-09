@@ -1,7 +1,7 @@
 {
   "name": "core-companion",
   "productName": "COre",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "private": true,
   "description": "COre: a black liquid orb desktop companion that talks through Claude Code (no API key) or a free local model.",
   "main": "src/main/main.js",
@@ -10,14 +10,17 @@
     "postinstall": "install-electron",
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "check": "node scripts/check-syntax.js"
+    "check": "node scripts/check-syntax.js",
+    "dist": "electron-builder --win nsis --x64"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",
+    "electron-updater": "6.8.10",
     "kokoro-js": "1.2.1"
   },
   "devDependencies": {
-    "electron": "45.0.0"
+    "electron": "45.0.0",
+    "electron-builder": "26.17.0"
   },
   "engines": {
     "node": ">=20"
@@ -30,5 +33,54 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/rawsushies/core-ai-companion.git"
+  },
+  "author": {
+    "name": "rawsushies"
+  },
+  "build": {
+    "appId": "com.rawsushies.core",
+    "productName": "COre",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!**/*.map",
+      "!test/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "artifactName": "COre-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "COre",
+      "uninstallDisplayName": "COre",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "rawsushies",
+        "repo": "core-ai-companion",
+        "releaseType": "release"
+      }
+    ]
   }
 }

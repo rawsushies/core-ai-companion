@@ -5,6 +5,9 @@ const path = require('path');
 const { randomBytes } = require('crypto');
 
 const DEFAULTS = {
+  app: {
+    startWithWindows: false, // launch COre when you sign in
+  },
   brain: {
     // COre tries the primary first, then each fallback in order. Brains that
     // aren't connected (no key) are skipped.

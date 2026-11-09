@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0 — Real app
+- Settings window (tray → Settings…, or ⚙ → All settings… in the chat): every option in one place,
+  grouped into General, Look, Voice, Brain and Privacy. Changes apply instantly where possible; the
+  few that need a restart say so and offer a Restart button. Values are checked before they're saved,
+  and shortcut clashes are refused.
+- Start COre when you sign in (optional).
+- Maintenance: check for updates, copy diagnostics, open the data folder, restart, reset (forget settings,
+  memory and history; downloaded models stay) and uninstall.
+- Windows installer: `COre-Setup-<version>.exe`, built automatically on GitHub for every release, with
+  Start-menu and desktop shortcuts, a choice of folder, and a proper uninstaller in Windows' Apps list.
+  Installed copies update themselves from GitHub Releases; source copies keep updating from `main`.
+
 ## 0.5.0 — Harmony & glass
 - Fixed flicker while dragging and while idle: COre's window is now a fixed-size square that only moves
   (moving doesn't redraw; resizing did). It resizes once when a drag or far point starts and once after.

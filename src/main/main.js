@@ -14,8 +14,10 @@ const { SpeechToText } = require('./stt');
 const { TextToSpeech, OrderedVoicePipeline } = require('./tts');
 const { startNotifyServer } = require('./notifyServer');
 const { Updater } = require('./updater');
+const { ReleaseUpdater } = require('./releaseUpdater');
 const { Memory } = require('./memory');
 const { Reminders } = require('./reminders');
+const SCHEMA = require('./settingsSchema');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -559,6 +561,140 @@ function applySetting(key, value) {
   if (key === 'personality.tone' && !current) warmClaude();
 }
 
+// ---------------------------------------------------------------- settings window
+
+let settingsWin = null;
+
+function openSettings() {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.show();
+    settingsWin.focus();
+    return;
+  }
+  settingsWin = new BrowserWindow({
+    width: 780,
+    height: 580,
+    minWidth: 620,
+    minHeight: 440,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    title: 'COre settings',
+    webPreferences: {
+      preload: path.join(PRELOAD, 'settings.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  settingsWin.loadFile(path.join(RENDERER, 'settings', 'index.html'));
+  settingsWin.once('ready-to-show', () => { settingsWin.center(); settingsWin.show(); });
+  settingsWin.on('closed', () => { settingsWin = null; });
+}
+
+// Only the values the window shows: never secrets.
+function settingsValues() {
+  const out = {};
+  for (const key of SCHEMA.FIELDS.keys()) {
+    let v = SCHEMA.getPath(config.data, key);
+    if (key === 'app.startWithWindows') v = startsWithWindows();
+    SCHEMA.setPath(out, key, v);
+  }
+  return out;
+}
+
+function startsWithWindows() {
+  if (!['win32', 'darwin'].includes(process.platform)) return !!(config.data.app && config.data.app.startWithWindows);
+  try { return app.getLoginItemSettings().openAtLogin; } catch { return false; }
+}
+
+function setStartWithWindows(on) {
+  if (!['win32', 'darwin'].includes(process.platform)) return;
+  // Source installs launch through electron.exe + the app folder.
+  const args = app.isPackaged ? [] : [ROOT];
+  try { app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args }); } catch (err) { console.warn('[core] login item:', err.message); }
+}
+
+// Apply one validated change right away where that's possible.
+function applyLive(key, value) {
+  if (key === 'app.startWithWindows') setStartWithWindows(value);
+  if (key.startsWith('hotkeys.')) registerHotkeys();
+  if (key.startsWith('voice.') || key.startsWith('orb.')) toOverlay('config', overlayConfig());
+  if (key === 'voice.kokoroVoice' || key === 'voice.engine') { if (config.data.voice.engine === 'kokoro') tts.warm(); }
+  if (key.startsWith('brain.')) {
+    try {
+      if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
+      if (brain) brain.reload(config.data); else brain = makeBrain();
+    } catch (err) { addTranscript('system', err.message); }
+    refreshBrainStatus().then(() => warmClaude());
+  }
+  if (key === 'personality.tone' && !current) warmClaude();
+  toDock('dock:settings', dockSettings());
+}
+
+function changeSetting(key, value) {
+  const v = SCHEMA.validate(key, value);
+  if (v === undefined) return { ok: false, error: 'That value is not allowed.' };
+  if (key.startsWith('hotkeys.')) {
+    const clash = Object.entries(config.data.hotkeys).find(([k, acc]) => `hotkeys.${k}` !== key && acc === v);
+    if (clash) return { ok: false, error: 'Another COre shortcut already uses that key.' };
+  }
+  SCHEMA.setPath(config.data, key, v);
+  config.save();
+  applyLive(key, v);
+  return { ok: true, values: settingsValues() };
+}
+
+function removeUserData(names) {
+  const dir = app.getPath('userData');
+  for (const n of names) {
+    try { fs.rmSync(path.join(dir, n), { recursive: true, force: true }); } catch {}
+  }
+}
+
+async function settingsAction(name) {
+  switch (name) {
+    case 'update':
+      checkForUpdates(false);
+      return { message: 'Checking for updates…' };
+    case 'diagnostics':
+      await copyDiagnostics();
+      return { message: 'Diagnostics copied to the clipboard.' };
+    case 'openData':
+      shell.openPath(app.getPath('userData'));
+      return { message: 'Opened COre\'s data folder.' };
+    case 'restart':
+      setTimeout(restartApp, 300);
+      return { message: 'Restarting…' };
+    case 'reset':
+      // Settings, memory and window state go; downloaded models stay.
+      state.set('transcript', []);
+      state.flush();
+      config.save = () => {}; // nothing may write the old settings back
+      state.flush = () => {};
+      state.set = () => {};
+      removeUserData(['config.json', 'state.json', 'memory.json', 'claude-workspace']);
+      setTimeout(restartApp, 300);
+      return { message: 'Reset. Restarting fresh…' };
+    case 'uninstall': {
+      const uninstaller = path.join(path.dirname(app.getPath('exe')), 'Uninstall COre.exe');
+      if (app.isPackaged && process.platform === 'win32' && fs.existsSync(uninstaller)) {
+        setStartWithWindows(false);
+        spawn(uninstaller, [], { detached: true, stdio: 'ignore' }).unref();
+        setTimeout(() => { app.isQuitting = true; app.quit(); }, 500);
+        return { message: 'Opening the uninstaller…' };
+      }
+      setStartWithWindows(false);
+      shell.openPath(ROOT);
+      return { message: `COre runs from a folder here. Quit COre, then delete ${ROOT} (and optionally ${app.getPath('userData')}).` };
+    }
+    default:
+      return { message: 'Unknown action.' };
+  }
+}
+
 function createPanel() {
   panel = new BrowserWindow({
     width: 400,
@@ -628,7 +764,7 @@ function createTray() {
     { type: 'separator' },
     { label: 'Hide / show COre', click: toggleOrb },
     { label: 'New conversation', click: resetConversation },
-    { label: 'Settings (config.json)', click: openConfig },
+    { label: 'Settings…', click: openSettings },
     { label: 'Check for updates', click: () => checkForUpdates(false) },
     { label: 'Log in to Claude', click: loginClaude },
     {
@@ -1163,6 +1299,12 @@ function wireIpc() {
   });
   ipcMain.on('dock:setting', (e, { key, value } = {}) => { if (fromDock(e)) applySetting(key, value); });
   ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
+  ipcMain.on('dock:openSettings', (e) => { if (fromDock(e)) openSettings(); });
+  const fromSettings = (e) => settingsWin && !settingsWin.isDestroyed() && e.sender === settingsWin.webContents;
+  ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), version: app.getVersion() } : null));
+  ipcMain.handle('settings:set', (e, { key, value } = {}) => (fromSettings(e) ? changeSetting(String(key), value) : { ok: false }));
+  ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
+  ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
   ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { memory.forget(String(id)); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
@@ -1369,7 +1511,7 @@ function setGraphicsMode(mode) {
 
 // ---------------------------------------------------------------- updates
 
-function relaunchAfterUpdate(version, needsInstall) {
+function relaunchAfterUpdate(version, needsInstall, install) {
   if (needsInstall) state.set('pendingInstall', true);
   state.flush();
   // Don't cut COre off mid-answer: wait (up to 3 minutes) until it's idle.
@@ -1381,7 +1523,11 @@ function relaunchAfterUpdate(version, needsInstall) {
     }
     toOverlay('attention', { level: 'info', title: 'COre updated' });
     speakLine(`Upgrade complete. Version ${version}. Try to contain your excitement.`);
-    setTimeout(restartApp, 4500);
+    setTimeout(() => {
+      if (!install) return restartApp();
+      app.isQuitting = true;
+      install();
+    }, 4500);
   };
   tryRestart();
 }
@@ -1411,12 +1557,10 @@ app.whenReady().then(async () => {
   } catch (err) {
     dialog.showErrorBox('COre', err.message);
   }
-  updater = new Updater({
-    appRoot: ROOT,
-    getConfig: () => config.data.update,
-    log: (msg) => addTranscript('system', msg),
-  });
-  if (state.get('pendingInstall')) {
+  updater = app.isPackaged
+    ? new ReleaseUpdater({ getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg) })
+    : new Updater({ appRoot: ROOT, getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg) });
+  if (!app.isPackaged && state.get('pendingInstall')) {
     // Finish an update that changed packages, before anything native loads.
     try {
       await updater.installDependencies();

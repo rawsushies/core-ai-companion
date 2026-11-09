@@ -22,13 +22,13 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
 - Chat tab redesign: smaller, translucent glass, shows only the latest exchange, fades out when idle,
   full on hover/focus; history expandable.
 
-## 🔨 v1.0.0 — Real app
+## ✅ v1.0.0 — Real app
 - Windows installer (.exe, NSIS) with Start-menu/desktop shortcuts and a proper **uninstaller**; built by
   GitHub Actions on Windows and attached to GitHub Releases; updater learns release installs.
 - Settings window (all options in a UI, not config.json): brains, voice, look, hotkeys, privacy, startup.
 - Start with Windows (optional), single-click "Quit/Restart/Reset" maintenance tools.
 
-## ⏳ v2.0.0 — Body language
+## 🔨 v2.0.0 — Body language
 - Gesture library: 20+ cheap hand/body animations (wave, thumbs up, shrug, count on fingers, clap, facepalm,
   point up/down/left/right, beckon, stop palm, OK sign, peace, heart hands, thinking chin, salute, spin,
   bow, nod, shake, celebrate, juggle…), all from the same particle arms (no extra GPU work).
