@@ -633,13 +633,17 @@
       gl.uniform4f(su.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
       gl.uniform1f(su.uSpin, s.spin || 0);
       gl.uniform1f(su.uInhale, s.inhale || 0);
+      // Idle detail: only a random share of the particles (seeds are random per
+      // index, so a prefix is a fair sample) is simulated and drawn.
+      const n = Math.max(2000, Math.min(this.count, Math.round(this.count * (s.detail === undefined ? 1 : s.detail))));
+      this.drawn = n;
       const write = 1 - this.read;
       gl.bindVertexArray(this.simVao[this.read]);
       gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.tf);
       gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.bufs[write]);
       gl.enable(gl.RASTERIZER_DISCARD);
       gl.beginTransformFeedback(gl.POINTS);
-      gl.drawArrays(gl.POINTS, 0, this.count);
+      gl.drawArrays(gl.POINTS, 0, n);
       gl.endTransformFeedback();
       gl.disable(gl.RASTERIZER_DISCARD);
       gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
@@ -683,12 +687,12 @@
       gl.uniform3f(pu.uTint, s.tint[0], s.tint[1], s.tint[2]);
       gl.uniform1f(pu.uAmp, s.amp);
       gl.uniform1f(pu.uGlow, s.glow);
-      gl.uniform1f(pu.uBright, 24000 / this.count);
+      gl.uniform1f(pu.uBright, 24000 / n); // same overall brightness with fewer particles
       gl.uniform1f(pu.uForm, s.form === undefined ? 1 : s.form);
       gl.uniform1f(pu.uShape, s.shape || 0);
       gl.uniform4f(pu.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
       gl.bindVertexArray(this.drawVao[this.read]);
-      gl.drawArrays(gl.POINTS, 0, this.count);
+      gl.drawArrays(gl.POINTS, 0, n);
       gl.disable(gl.BLEND);
 
       // 4. bloom mips + composite to the transparent window

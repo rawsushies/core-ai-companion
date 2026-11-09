@@ -539,7 +539,7 @@
   // Frame counters for diagnostics and performance tests.
   const stats = { draws: 0, active: 0 };
   let idleTimer = null;
-  window.__coreStats = () => ({ ...stats, why: activeReasons() });
+  window.__coreStats = () => ({ ...stats, why: activeReasons(), drawn: renderer && renderer.drawn });
   function activeReasons() {
     if (!body) return [];
     const r = [];
@@ -565,6 +565,7 @@
   // (very slow idle) while nobody is at the PC, capped on battery.
   let renderMode = { paused: false, ambient: false, battery: false };
   let sleeping = false;
+  let detail = 1;
   window.__coreRender = () => ({ ...renderMode, sleeping }); // test hooks
   window.__coreSetRender = (m) => setRenderMode(m);
   function setRenderMode(m) {
@@ -633,7 +634,12 @@
     const local = (p) => ({ x: p.x - ox, y: p.y - oy });
     const localArms = arms.map((g) => (g ? { ...g, pts: g.pts.map(local) } : null));
 
+    // Idle detail: fewer particles while nothing happens, eased so it never pops.
+    const idleDetail = cfg.orb && cfg.orb.idleDetail !== undefined ? cfg.orb.idleDetail : 0.5;
+    const wantDetail = isActive() ? 1 : renderMode.ambient ? Math.min(idleDetail, 0.35) : idleDetail;
+    detail += (wantDetail - detail) * (wantDetail > detail ? 0.35 : 0.04);
     renderer.render({
+      detail,
       t,
       pos: local(pos),
       vel: body.vel,

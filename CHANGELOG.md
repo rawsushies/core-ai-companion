@@ -7,6 +7,10 @@
   graphics mode: **53% → 1.7%** CPU. Before, the hidden window kept rendering in the background.
 - Nobody at the PC for 5 minutes: the idle smoke slows to 4 fps until you're back.
 - On battery: idle is capped at 10 fps and animations at 30 fps.
+- While idle only half the smoke particles are simulated and drawn (a random half, same brightness; 35% when you're
+  away), easing back to all of them the moment COre does anything. Measured in safe graphics: idle 51.6% → 45.5%
+  CPU. Larger profiles have more particles, so they should save more (not measured on a real GPU). Setting:
+  `orb.idleDetail`.
 
 ### Phone companion (off by default)
 - Chat with COre from your phone's browser on the same Wi-Fi: see the chat and COre's status, send messages, stop it
