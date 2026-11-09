@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed (loop 1 audit)
+- Backups no longer contain paired phones' keys (on Linux without a keyring they were unencrypted), and restoring a
+  backup keeps the phones paired with this PC.
+- A phone whose clock is more than 2 minutes off no longer retries endlessly: COre tells it the right time, and it
+  retries once.
+- Scrolling over a gap between chat messages scrolls the chat (Windows and macOS), instead of the app underneath.
+
+### Tests
+- New end-to-end suite against the real app (`npm run e2e`, also in CI on Linux): chat reply, instant answers, the
+  glance card, paused rendering, plain-text notes, every Settings section, backup to a cloud folder without secrets,
+  phone pairing / chat / removal, and no renderer errors.
+
 ### Instant answers sound instant
 - Short spoken lines are kept after the first time, and the quick-answer lines ("Paused.", "Next one."…) are
   rendered in the background a little after start, only while COre is quiet. They're rendered again when you change

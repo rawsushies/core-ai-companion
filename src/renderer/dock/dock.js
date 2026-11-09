@@ -328,7 +328,10 @@
   // Floating bubbles: only bubbles catch the mouse; the gaps between them
   // let clicks through to the app underneath (main applies this on Windows
   // and macOS, where mouse moves are forwarded while clicks pass through).
-  const BUBBLE = '.dock-head, .msg, .row.core, .composer, .settings, .core-menu, .banner, .action, .proposal';
+  // The chat is one framed panel: all of it takes the mouse (scrolling over a gap
+  // between messages must scroll the chat, not the app below); only the
+  // window's empty margin outside the frame lets clicks through.
+  const BUBBLE = '.shell';
   let overBubble = true;
   function setOver(v) { if (v !== overBubble) { overBubble = v; api.setInteractive(v); } }
   document.addEventListener('mousemove', (e) => setOver(!!(e.target && e.target.closest && e.target.closest(BUBBLE))));

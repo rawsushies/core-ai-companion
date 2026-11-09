@@ -813,7 +813,7 @@ function phoneFeed(since) {
 function ensureCompanion() {
   if (companion) return companion;
   companion = new Companion({
-    port: Number(config.data.phone.port) || 47330,
+    port: Number.isInteger(config.data.phone.port) ? config.data.phone.port : 47330, // 0 = any free port (tests)
     host: /^[\w.:-]{3,60}$/.test(config.data.phone.host || '') ? config.data.phone.host : '',
     staticDir: path.join(__dirname, '..', 'renderer', 'phone'),
     naclFile: require.resolve('tweetnacl/nacl-fast.min.js'),

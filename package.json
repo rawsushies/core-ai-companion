@@ -11,7 +11,8 @@
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "check": "node scripts/check-syntax.js",
-    "dist": "electron-builder --win nsis --x64"
+    "dist": "electron-builder --win nsis --x64",
+    "e2e": "node --test --test-concurrency=1 test-e2e/app.e2e.js"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",
@@ -22,7 +23,8 @@
   },
   "devDependencies": {
     "electron": "45.0.0",
-    "electron-builder": "26.17.0"
+    "electron-builder": "26.17.0",
+    "playwright-core": "1.63.0"
   },
   "engines": {
     "node": ">=20"

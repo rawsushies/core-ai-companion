@@ -210,7 +210,10 @@ class Companion {
     const m = open(body, d.key);
     if (!m) return this._send(res, 401, { error: 'unreadable' });
     const t = this.now();
-    if (!Number.isSafeInteger(m.ctr) || m.ctr <= d.ctr || Math.abs(t - Number(m.ts)) > 120000) return this._send(res, 409, seal({ error: 'replay', ctr: d.ctr }, d.key));
+    // Old counter: a replay. Clock too far off: tell the phone our time so it can
+    // correct itself (it retries once, never in a loop).
+    if (!Number.isSafeInteger(m.ctr) || m.ctr <= d.ctr) return this._send(res, 409, seal({ error: 'replay', ctr: d.ctr, now: t }, d.key));
+    if (Math.abs(t - Number(m.ts)) > 120000) return this._send(res, 409, seal({ error: 'clock', ctr: d.ctr, now: t }, d.key));
     d.ctr = m.ctr;
     const seenBefore = d.lastSeen;
     d.lastSeen = t;

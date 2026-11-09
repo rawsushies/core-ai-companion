@@ -134,3 +134,19 @@ test('both sides compute the same pairing code', () => {
   assert.strictEqual(C.pairCode(secret, 'device-abc', key), code);
   assert.notStrictEqual(C.pairCode(secret, 'device-abd', key), code);
 });
+
+test('a phone whose clock is off learns the PC time instead of looping', async () => {
+  const { c } = companion();
+  const port = await c.start();
+  try {
+    const { deviceId, key } = await pairPhone(c, port);
+    const skewed = { d: deviceId, ...C.seal({ op: 'sync', ctr: 5, ts: Date.now() - 10 * 60e3 }, key) };
+    const r = await post(port, '/api', skewed);
+    assert.strictEqual(r.status, 409);
+    const body = C.open(r.body, key);
+    assert.strictEqual(body.error, 'clock');
+    assert.ok(Math.abs(body.now - Date.now()) < 5000);
+    const fixed = { d: deviceId, ...C.seal({ op: 'sync', ctr: 6, ts: body.now }, key) };
+    assert.strictEqual((await post(port, '/api', fixed)).status, 200, 'with the corrected clock it works');
+  } finally { c.stop(); }
+});

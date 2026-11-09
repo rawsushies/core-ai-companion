@@ -39,6 +39,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ud" && echo '{"orb":{"graphics":"software"}}' > "$RUNNER_TEMP/ud/config.json"
           xvfb-run -a npx electron --no-sandbox . --smoke-test="$RUNNER_TEMP/smoke.json" --user-data-dir="$RUNNER_TEMP/ud"
           cat "$RUNNER_TEMP/smoke.json"
+      - name: End-to-end tests against the real app (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run e2e
 
   package-windows:
     needs: test
