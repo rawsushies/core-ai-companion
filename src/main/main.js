@@ -1070,7 +1070,8 @@ function skillCtx() {
     config: config.data.skills || {},
     notes,
     reminders: { add: (when, text) => { const r = reminders.add(when, text); toDock('dock:reminders', reminders.items); return r; } },
-    fetch: (url) => fetch(url, { signal: AbortSignal.timeout(10_000) }),
+    // Chromium's network stack: follows the system proxy and certificate settings.
+    fetch: (url) => require('electron').net.fetch(url, { signal: AbortSignal.timeout(10_000) }),
     launch: async (a) => {
       if (a.uri) await shell.openExternal(a.uri);
       else if (a.exe) spawn(a.exe, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
@@ -1343,7 +1344,10 @@ async function runClone(c) {
     c.reply = String(reply || '').trim();
     if (!clones.has(c.id)) return;
     c.state = 'done';
-    toDock('dock:message', { role: 'helper', label: `${c.look.emoji} ${c.name} · ${c.task.slice(0, 60)}`, color: `rgb(${c.look.tint.map((v) => Math.round(v * 255)).join(',')})`, text: c.reply || '(no answer)' });
+    // The first paragraph is the spoken summary; the chat shows the details (or the whole answer if that's all there is).
+    const paras = c.reply.split(/\n\s*\n/);
+    const details = paras.slice(1).join('\n\n').trim();
+    toDock('dock:message', { role: 'helper', label: `${c.look.emoji} ${c.name} · ${c.task.slice(0, 60)}`, color: `rgb(${c.look.tint.map((v) => Math.round(v * 255)).join(',')})`, text: details || c.reply || '(no answer)' });
     toClone(c, 'state', 'idle');
     toClone(c, 'attention', { level: 'success' });
     floor.request(c.id, () => speakForClone(c, CL.spokenSummary(c.reply) || 'Done.'));
@@ -1583,10 +1587,12 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       onText: (t) => { if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t); },
       onItem: (item) => {
         if (ac.signal.aborted) return;
+        if (process.env.CORE_DEBUG && item.type !== 'say') console.log('[core] item', JSON.stringify(item));
         if (item.type === 'gesture' && item.name === 'point') {
           if (!shot || !shot.canPoint) return; // nothing real to point at on this monitor
           let { x, y } = item;
           try { if (shot.bitmap) ({ x, y } = refinePoint(shot.bitmap(), x, y)); } catch {}
+          if (process.env.CORE_DEBUG) console.log(`[core] point model=${item.x},${item.y} refined=${x},${y} shot=${shot.width}x${shot.height}`);
           pipeline.push({ ...item, ...mapPoint(shot, x, y) });
           return;
         }

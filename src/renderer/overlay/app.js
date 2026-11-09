@@ -207,6 +207,7 @@
   function startGesture(name, opts = {}) {
     const key = G.resolve(name);
     if (!key || !body) return false;
+    if (pointing && /^point/.test(key)) return false; // already pointing at the real thing
     act = { name: key, start: performance.now(), opts };
     explainUntil = 0;
     lastGestureAt = performance.now();
@@ -267,7 +268,8 @@
   }
 
   function gesture(item) {
-    if (item.name === 'point') point(item.x, item.y);
+    // A real point wins over a pointing gesture (the model sometimes sends both).
+    if (item.name === 'point') { if (act && /^point|beckon/.test(act.name)) act = null; point(item.x, item.y); }
     else if (item.name === 'explain') explain();
     else if (item.name === 'form') { lastModelGesture = performance.now(); formShape(item.shape); }
     else if (item.name === 'gesture') { lastModelGesture = performance.now(); startGesture(item.gesture, { n: item.n }); }

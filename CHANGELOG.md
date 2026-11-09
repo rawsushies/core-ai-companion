@@ -1,5 +1,18 @@
 # Changelog
 
+## 10.1.0 — Tested with the real Claude
+- First full test against real Claude (not a stand-in). Notes, skill lookups, helper clones and screen
+  pointing all worked; pointing landed within a few pixels of the target.
+- COre is now visibly expressive with Claude: replies come with fitting body language (a wave for good
+  morning, a laughing smoke face after a pun, a shrug for "who knows", counting to three for three tips).
+  Before, Claude rarely used its gestures.
+- More automatic gestures when the brain doesn't pick one: "three tips" counts to three, "hard to say"
+  shrugs, jokes and puns get a flourish.
+- Skills now use the system network settings (proxy and certificates), so weather and calendar work behind
+  corporate proxies.
+- Helper results in the chat no longer repeat their spoken summary.
+- A real point no longer fights with a "point right" gesture sent at the same time.
+
 ## 10.0.0 — Release
 - Full audit across every system at once (chat, voice, gestures, shapes, skills, helpers, hands-free,
   settings), in the real app and in the packaged build. No page errors, an empty crash log, and about 1% CPU
