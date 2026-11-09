@@ -69,6 +69,7 @@ class Brain {
   // automatically chosen model.
   constructor({ config, workDir, state, getKey, onModelChange }) {
     this.ctx = { config, workDir, state, getKey, onModelChange };
+    this.stats = {}; // provider id -> health counters (see health())
     this.reload(config);
   }
 
@@ -102,17 +103,55 @@ class Brain {
   // typed: the message came from the chat box (normal-chat answer, only the
   // opening is spoken). onText receives the reply text as it streams.
   // context: extra blocks for the model ([Memory], [Clipboard]), appended to the message.
+  // Per-provider health, for diagnostics and the brain panel.
+  health() {
+    return this.chain.map((p) => ({ id: p.id, name: p.name || p.label, ...((this.stats || {})[p.id] || { ok: 0, fail: 0 }) }));
+  }
+
+  _record(p, ok, info = {}) {
+    this.stats = this.stats || {};
+    const s = this.stats[p.id] || (this.stats[p.id] = { ok: 0, fail: 0, firstTokenMs: null, lastError: null, lastOkAt: null });
+    if (ok) {
+      s.ok++;
+      s.lastOkAt = Date.now();
+      if (info.firstTokenMs != null) s.firstTokenMs = s.firstTokenMs == null ? info.firstTokenMs : Math.round(s.firstTokenMs * 0.7 + info.firstTokenMs * 0.3);
+    } else {
+      s.fail++;
+      s.lastError = String(info.error || '').slice(0, 300);
+      s.lastErrorAt = Date.now();
+    }
+  }
+
+  // onItem receives {type:'say'|'gesture'|'end', ...}; onStatus receives
+  // {kind:'provider'|'tool'|'fallback', ...} for the panel.
+  // typed: the message came from the chat box (normal-chat answer, only the
+  // opening is spoken). onText receives the reply text as it streams.
+  // context: extra blocks for the model ([Memory], [Clipboard]), appended to the message.
+  // Returns { reply, provider, truncated?, error? }: when a provider fails
+  // after it already started answering, the partial reply is kept (truncated).
   async ask({ text, shot, typed = false, context = '', signal, onItem, onText, onStatus = () => {} }) {
     // Providers without a key are skipped quietly instead of failing loudly.
     const providers = this.chain.filter((p) => !p.available || p.available());
     const failures = [];
     const pc = this.ctx.config.personality || {};
     const tone = toneKey(pc.tone || 'sarcastic', pc.language);
+    const limits = { ...TIMEOUTS, ...((this.ctx.config.brain && this.ctx.config.brain.timeouts) || {}) };
     let lastErr;
     for (let i = 0; i < providers.length; i++) {
       const p = providers[i];
       const planner = new SpeechPlanner(onItem, { onText });
       let streamed = false;
+      const started = Date.now();
+      let firstTokenMs = null;
+      // Watchdog: a provider that never starts, or stalls mid-answer, is
+      // abandoned (and the next one tried if nothing was said yet).
+      const wd = new AbortController();
+      let stalled = null;
+      const onOuterAbort = () => wd.abort();
+      if (signal) { if (signal.aborted) wd.abort(); else signal.addEventListener('abort', onOuterAbort, { once: true }); }
+      let timer = null;
+      const arm = (ms, why) => { clearTimeout(timer); timer = setTimeout(() => { stalled = why; wd.abort(); }, ms); };
+      arm(limits.firstTokenMs, `no answer within ${Math.round(limits.firstTokenMs / 1000)} s`);
       onStatus({ kind: 'provider', label: p.label });
       try {
         if (p.detect && shot) await p.detect().catch(() => {}); // know whether images can go inline
@@ -120,19 +159,32 @@ class Brain {
           prompt: buildPrompt(p, `${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}`, shot),
           tone,
           image: shot && shot.base64 ? { base64: shot.base64, mediaType: shot.mediaType || 'image/png' } : null,
-          signal,
-          onDelta: (d) => { streamed = true; planner.feed(d); },
-          onTool: (name) => onStatus({ kind: 'tool', name }),
+          signal: wd.signal,
+          onDelta: (d) => {
+            if (!streamed) firstTokenMs = Date.now() - started;
+            streamed = true;
+            arm(limits.idleMs, `stopped answering for ${Math.round(limits.idleMs / 1000)} s`);
+            planner.feed(d);
+          },
+          onTool: (name) => { arm(limits.idleMs, 'stalled while using a tool'); onStatus({ kind: 'tool', name }); },
         });
+        clearTimeout(timer);
+        if (stalled) throw new Error(stalled); // provider ignored the abort but we already gave up on it
         const reply = planner.finish();
+        this._record(p, true, { firstTokenMs });
         return { reply, provider: p.label };
-      } catch (err) {
-        if (err.aborted) throw err;
+      } catch (err0) {
+        clearTimeout(timer);
+        if (signal && signal.aborted) throw Object.assign(err0 instanceof Error ? err0 : new Error('aborted'), { aborted: true });
+        const err = stalled ? Object.assign(new Error(`${p.name || p.label} ${stalled}`), { timeout: true }) : err0;
+        if (err.aborted && !stalled) throw err;
         lastErr = err;
+        this._record(p, false, { error: err.message });
         failures.push(`${p.name || p.label}: ${err.message}`);
         if (streamed) {
-          planner.finish();
-          throw err;
+          // Keep what was already said instead of throwing it away.
+          const reply = planner.finish();
+          return { reply, provider: p.label, truncated: true, error: err.message };
         }
         if (i === providers.length - 1) {
           planner.finish();
@@ -143,10 +195,17 @@ class Brain {
           throw e;
         }
         onStatus({ kind: 'fallback', from: p.name || p.label, to: providers[i + 1].name || providers[i + 1].label, reason: err.message });
+      } finally {
+        if (signal) signal.removeEventListener('abort', onOuterAbort);
       }
     }
     throw lastErr || new Error('No brain is connected. Open ⚙ → Brain in the chat to connect one.');
   }
 }
 
-module.exports = { Brain, buildPrompt, screenContext, chainIds, NAMES };
+// Watchdog limits (overridable with brain.timeouts in config.json). The first
+// token can take a while (cold Claude session, a local model loading); after
+// that, long silences mean the stream is dead.
+const TIMEOUTS = { firstTokenMs: 90_000, idleMs: 45_000 };
+
+module.exports = { Brain, buildPrompt, screenContext, chainIds, NAMES, TIMEOUTS };

@@ -1,48 +1,86 @@
-name: Windows installer
+name: Release
 
-# Builds COre-Setup-<version>.exe and publishes it as a GitHub Release
-# whenever the version in package.json changes on main (or on a v* tag).
+# Releases happen ONLY when a maintainer pushes a version tag (vX.Y.Z) or runs
+# this workflow by hand for an existing tag. A package.json change alone never
+# publishes anything. All gates must pass, and the result is a DRAFT release:
+# a human reviews it and clicks "Publish" (installed copies only see published
+# releases). See docs/dev/RELEASING.md.
 on:
   push:
-    branches: [main]
-    paths: ['package.json']
-    tags: ['v*']
+    tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build (e.g. v10.4.0)
+        required: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  build:
+  release:
     runs-on: windows-latest
+    permissions:
+      contents: write # create the draft release
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Skip if this version is already released
-        id: check
+      - name: Tag must match package.json
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          [ "v$v" = "$TAG" ] || { echo "tag $TAG does not match package.json version $v"; exit 1; }
+      - name: Refuse to overwrite an existing release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          v=$(node -p "require('./package.json').version")
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          if gh release view "v$v" >/dev/null 2>&1; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
-      - if: steps.check.outputs.skip != 'true'
-        run: npm ci
-      - if: steps.check.outputs.skip != 'true'
-        run: npm test
-        continue-on-error: true
-      - if: steps.check.outputs.skip != 'true'
-        run: npx electron-builder --win nsis --x64 --publish always
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "release $TAG already exists"; exit 1; fi
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Build installer
+        run: npx electron-builder --win nsis --x64 --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional code signing: add these repository secrets to get a signed installer.
+          # Optional code signing (repository secrets). Without them the build is unsigned.
           CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+      - name: Self-test the packaged app
+        shell: pwsh
+        run: |
+          $ud = Join-Path $env:RUNNER_TEMP 'ud'; New-Item -ItemType Directory -Force $ud | Out-Null
+          '{"orb":{"graphics":"software"}}' | Set-Content -Encoding utf8 (Join-Path $ud 'config.json')
+          $r = Join-Path $env:RUNNER_TEMP 'packaged-smoke.json'
+          $p = Start-Process -FilePath 'dist\win-unpacked\COre.exe' -ArgumentList "--smoke-test=$r", "--user-data-dir=$ud" -PassThru -Wait
+          Get-Content $r
+          if ($p.ExitCode -ne 0) { throw "packaged smoke test failed" }
+      - name: Installer install / self-test / uninstall
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist\COre-Setup-*.exe | Select-Object -First 1
+          ./scripts/ci/installer-smoke.ps1 -Installer $exe.FullName
+      - name: Checksums and update metadata
+        shell: bash
+        run: |
+          cd dist
+          test -f latest.yml || { echo "latest.yml missing"; exit 1; }
+          sha256sum COre-Setup-*.exe COre-Setup-*.exe.blockmap latest.yml > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create DRAFT release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$TAG" --draft --verify-tag --title "COre ${TAG#v}" --notes-file RELEASE_NOTES.md \
+            dist/COre-Setup-*.exe dist/COre-Setup-*.exe.blockmap dist/latest.yml dist/SHA256SUMS.txt

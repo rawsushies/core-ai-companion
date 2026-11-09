@@ -12,11 +12,15 @@ Groq, OpenRouter, a local Ollama model, or any OpenAI-compatible endpoint) take 
 
 ## Install
 
-### Windows installer (recommended)
+### Windows installer
 
-Download **COre-Setup-x.y.z.exe** from [Releases](https://github.com/rawsushies/core-ai-companion/releases)
-and run it. You get Start-menu and desktop shortcuts and a normal uninstaller (Windows Settings → Apps, or
-COre's Settings → Maintenance → Uninstall). Installed copies update themselves from Releases.
+> **Status:** installers published before the new release process (v2.0.0 – v10.2.0) are incomplete: some
+> contain only a `.blockmap`, and none can update itself. Until a release built by the new gated process
+> is published, **install from source** (below). See [docs/dev/RELEASING.md](docs/dev/RELEASING.md).
+
+A verified release contains **COre-Setup-x.y.z.exe**, `latest.yml` and `SHA256SUMS.txt`. Run the installer to
+get Start-menu and desktop shortcuts and a normal uninstaller (Windows Settings → Apps, or COre's Settings →
+Maintenance → Uninstall). Installed copies then update themselves from published releases.
 
 For the Claude brain, install [Claude Code](https://docs.claude.com/en/docs/claude-code) and log in once.
 COre's chat shows a **Log in to Claude** button if you aren't logged in.
@@ -34,7 +38,8 @@ npm install
 npm start
 ```
 
-Source copies update themselves from the `main` branch. The first time you talk, COre downloads its speech
+Source copies update themselves from **published releases** (backed up first, rolled back automatically if
+an update fails or won't start). Developers can switch to the `main` channel in Settings → Privacy. The first time you talk, COre downloads its speech
 recognition (~80 MB) and voice (~90 MB) models once. Both then run offline on your PC.
 
 > **Black box behind the orb?** Some graphics drivers can't draw transparent windows on the GPU. COre notices
@@ -78,23 +83,40 @@ at the computer but paused, never in quiet hours, at most a few times a day, and
 Pet it, tickle it, poke it (double click) or toss it across the screen, and it reacts. Ask for **trivia, a
 riddle or 20 questions**.
 
-**Helpers ("Many COres").** Ask for several things at once, or type `/clone <task>`. COre splits off up to 3
-helper copies in a meiosis-style burst. Each has its own colour, voice, conversation and spot on screen,
-away from COre, the chat and each other. Helpers queue to speak so voices never overlap, and their results land
-in the chat. Click a finished helper (or `/merge`) to fold it back in.
+**Meiosis Mode: four cores, one chat.** COre coordinates three specialists that split off as smoke helpers:
+**Scout** (research), **Forge** (build) and **Sentinel** (review/QA). Start a message with `@Scout`, `@Forge` or
+`@Sentinel` (or pick one with the chip beside the input; `@` autocompletes) to talk to one directly. Address
+several to run a shared task that COre then sums up. Every reply in the single chat is labelled with who
+said it, subtitles name the speaker, and only one core speaks at a time. Specialists can't touch files or
+the web yet. See [docs/dev/MEIOSIS.md](docs/dev/MEIOSIS.md).
 
 **Screen partner.** When an error dialog, crash report or "(Not Responding)" window appears, COre offers a
 **Take a look** button. It notices from window titles only; a screenshot is taken when you click. When it points
 at something, the smoke finger snaps onto the nearest button or label. Summon it on another monitor and it moves there.
 
+**Project reading (read-only).** Share one folder in Settings → Projects and COre and its cores can list,
+read and search it to answer from your actual files. Nothing outside the folder is reachable, `.env`, keys
+and credential files are never read, nothing is ever run, and every access shows in the chat and in
+`logs/tools.log`. Optionally (off by default) cores can **propose** file changes: you see a diff card and
+nothing is written until you click Apply. Every applied change can be undone.
+
 **Skills.** Notes, timers and reminders, weather (free Open-Meteo; set your city), music control
 (play/pause/next/volume), opening apps from a safe list, web search buttons, and your calendar via a private
-ICS link. Lookups come back as a spoken answer. **Plugins:** put JSON files in COre's data folder under
+ICS link. Lookups come back as a spoken answer. **Glance:** ask "what's playing?" or "show me the lyrics" and a
+small card appears beside the orb with the song or its synced lyrics (from lrclib.net, only when you ask). Short
+requests like the time or "next song" are answered instantly, without the brain. **Plugins:** put JSON files in COre's data folder under
 `skills/`, for example:
 
 ```json
 { "name": "wiki", "description": "search Wikipedia", "url": "https://en.wikipedia.org/wiki/Special:Search?search={q}" }
 ```
+
+**Phone companion (optional).** Pair your phone with a QR code (Settings → Phone) and chat with COre from the
+phone's browser on the same Wi-Fi, end-to-end encrypted. See [docs/dev/PHONE.md](docs/dev/PHONE.md).
+
+**Backups.** Settings → Backup keeps copies of your settings, memories, notes and plugins in a folder you choose.
+Pick a OneDrive, Google Drive or Dropbox folder and they're cloud backups. API keys are never included, and a
+passphrase can encrypt them.
 
 **Memory, clipboard, moods.** COre remembers facts about you across conversations (see or delete them in
 ⚙ → Memory), can work with what you copied ("explain what I copied"), and its smoke shows moods.

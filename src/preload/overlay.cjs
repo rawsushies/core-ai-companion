@@ -42,4 +42,7 @@ contextBridge.exposeInMainWorld('core', {
   onDissolve: on('dissolve'),
   onAssemble: on('assemble'),
   onRelocate: on('relocate'),
+  onSpeaker: on('speaker'),
+  onGlance: on('glance'),
+  onRender: on('render'),
 });

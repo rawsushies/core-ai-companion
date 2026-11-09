@@ -93,62 +93,35 @@ async function weather(city, fetchImpl) {
 
 // ------------------------------------------------------------------ calendar (ICS)
 
-function parseIcsDate(v) {
-  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(String(v).trim());
-  if (!m) return null;
-  const [, y, mo, d, h, mi, s, z] = m;
-  if (!h) return { date: new Date(+y, +mo - 1, +d), allDay: true };
-  const args = [+y, +mo - 1, +d, +h, +mi, +(s || 0)];
-  return { date: z ? new Date(Date.UTC(...args)) : new Date(...args), allDay: false };
-}
-
-function parseIcs(text) {
-  const lines = String(text || '').replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '').split(/\r?\n/);
-  const events = [];
-  let ev = null;
-  for (const line of lines) {
-    if (line === 'BEGIN:VEVENT') ev = {};
-    else if (line === 'END:VEVENT') { if (ev && ev.start) events.push(ev); ev = null; } else if (ev) {
-      const i = line.indexOf(':');
-      if (i < 0) continue;
-      const key = line.slice(0, i).split(';')[0].toUpperCase();
-      const val = line.slice(i + 1);
-      if (key === 'SUMMARY') ev.title = val.replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
-      if (key === 'DTSTART') { const p = parseIcsDate(val); if (p) { ev.start = p.date; ev.allDay = p.allDay; } }
-      if (key === 'LOCATION') ev.location = val.replace(/\\,/g, ',').trim();
-    }
-  }
-  return events.sort((a, b) => a.start - b.start);
-}
-
-function eventsIn(events, range, now = new Date()) {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = range === 'tomorrow' ? [1, 2] : range === 'week' ? [0, 7] : [0, 1];
-  const from = new Date(start.getTime() + days[0] * 86400_000);
-  const to = new Date(start.getTime() + days[1] * 86400_000);
-  return events.filter((e) => e.start >= from && e.start < to);
-}
-
-function describeEvents(list, range) {
-  if (!list.length) return `Nothing on the calendar ${range === 'week' ? 'this week' : range}.`;
-  return list.slice(0, 12).map((e) => {
-    const when = e.allDay ? 'all day' : e.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const day = range === 'week' ? `${e.start.toLocaleDateString([], { weekday: 'short' })} ` : '';
-    return `${day}${when}: ${e.title || 'untitled'}${e.location ? ` (${e.location})` : ''}`;
-  }).join('; ');
-}
+const CAL = require('./calendar');
 
 // ------------------------------------------------------------------ notes
 
 class Notes {
   constructor(file) {
     this.file = file;
-    try { this.items = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { this.items = []; }
-    if (!Array.isArray(this.items)) this.items = [];
+    this.items = [];
+    this.recovered = null;
+    let text = null;
+    try { text = fs.readFileSync(file, 'utf8'); } catch {}
+    if (text !== null) {
+      try {
+        const v = JSON.parse(text);
+        if (!Array.isArray(v)) throw new Error('not a list');
+        this.items = v;
+      } catch {
+        this.recovered = require('./config').quarantine(file); // never overwrite unreadable notes
+      }
+    }
   }
 
   _save() {
-    try { fs.mkdirSync(path.dirname(this.file), { recursive: true }); fs.writeFileSync(this.file, JSON.stringify(this.items, null, 2)); } catch {}
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const tmp = `${this.file}.tmp`; // atomic: a crash mid-write can't corrupt the notes
+      fs.writeFileSync(tmp, JSON.stringify(this.items, null, 2));
+      fs.renameSync(tmp, this.file);
+    } catch {}
   }
 
   add(text) {
@@ -189,7 +162,7 @@ function loadPlugins(dir) {
   return out.slice(0, 30);
 }
 
-const BUILTIN = ['note', 'notes', 'timer', 'weather', 'music', 'open', 'search', 'calendar'];
+const BUILTIN = ['note', 'notes', 'timer', 'weather', 'music', 'open', 'search', 'calendar', 'archicad', 'glance'];
 
 // ------------------------------------------------------------------ run
 
@@ -203,7 +176,7 @@ async function runSkill(name, args, ctx) {
   switch (n) {
     case 'note': {
       const note = ctx.notes.add(a);
-      return note ? { message: `📝 Noted: ${note.text}` } : { error: 'Nothing to note.' };
+      return note ? { message: `Noted: ${note.text}` } : { error: 'Nothing to note.' };
     }
     case 'notes': {
       const list = ctx.notes.find(a);
@@ -212,7 +185,7 @@ async function runSkill(name, args, ctx) {
     case 'timer': {
       const m = /^(\S+)\s*(.*)$/.exec(a);
       const r = m && ctx.reminders.add(m[1], m[2] || 'Timer');
-      return r ? { message: `⏰ Timer set: ${r.text}` } : { error: `Could not understand the timer ${a}.` };
+      return r ? { message: `Timer set: ${r.text}` } : { error: `Could not understand the timer ${a}.` };
     }
     case 'weather': {
       if (off('weather')) return { error: 'The weather skill is turned off in Settings.' };
@@ -225,14 +198,14 @@ async function runSkill(name, args, ctx) {
       const cmd = musicCommand(a, ctx.platform);
       if (!cmd) return { error: `Music control ${a} is not available here.` };
       await ctx.runFixed(cmd);
-      return { message: `🎵 ${a}` };
+      return { message: `Music: ${a}` };
     }
     case 'open': {
       if (off('apps')) return { error: 'Opening apps is turned off in Settings.' };
       const app = appFor(a, ctx.platform);
       if (!app) return { error: `I can only open apps from my list, and ${a} is not on it.` };
       await ctx.launch(app);
-      return { message: `🚀 Opening ${a}` };
+      return { message: `Opening ${a}` };
     }
     case 'search': {
       if (!a) return { error: 'Nothing to search for.' };
@@ -241,9 +214,37 @@ async function runSkill(name, args, ctx) {
     case 'calendar': {
       if (off('calendar') || !cfg.calendarUrl) return { result: 'No calendar is connected. The user can paste a calendar feed link (ICS) in Settings, Skills.' };
       const url = String(cfg.calendarUrl).replace(/^webcal:/i, 'https:');
-      const text = await (await ctx.fetch(url)).text();
+      // The feed link is a password: never let it into chat, the brain or logs.
+      let text;
+      try {
+        const res = await ctx.fetch(url);
+        if (!res.ok) return { error: `The calendar feed answered with HTTP ${res.status}. The link may have expired; paste a new one in Settings, Skills.` };
+        text = await res.text();
+      } catch {
+        return { error: 'Could not reach the calendar feed (offline, or the link is wrong).' };
+      }
       const range = /tomorrow/i.test(a) ? 'tomorrow' : /week/i.test(a) ? 'week' : 'today';
-      return { result: describeEvents(eventsIn(parseIcs(text), range), range) };
+      const [from, to] = CAL.rangeFor(range, ctx.now ? ctx.now() : new Date());
+      return { result: CAL.describe(CAL.occurrences(CAL.parseIcs(text), from, to), range) };
+    }
+    case 'glance': {
+      // The card beside the orb: music, lyrics, off, or "Title | line | line".
+      if (off('glance')) return { error: 'The glance card is turned off in Settings.' };
+      const w = a.toLowerCase();
+      if (/^(music|now playing|playing|song)$/.test(w)) return { glance: { what: 'music' } };
+      if (/^lyrics?$/.test(w)) return { glance: { what: 'lyrics' } };
+      if (/^(off|hide|close)$/.test(w)) return { glance: { what: 'off' } };
+      const card = require('./glance').parseCard(a);
+      return card ? { glance: { what: 'card', card } } : { error: 'Nothing to show.' };
+    }
+    case 'archicad': {
+      // Read-only BIM proof of concept (local Archicad JSON API). Off by default.
+      if (cfg.archicad !== true) return { result: 'Archicad access is off. The user can turn it on in Settings, Skills (read-only).' };
+      try {
+        return await require('./archicad').archicadSkill(a, ctx.fetch);
+      } catch (err) {
+        return { error: `Archicad did not answer: ${err.message}` };
+      }
     }
     default: {
       const p = (ctx.plugins || []).find((x) => x.name === n);
@@ -253,4 +254,4 @@ async function runSkill(name, args, ctx) {
   }
 }
 
-module.exports = { runSkill, appFor, musicCommand, parseIcs, eventsIn, describeEvents, Notes, loadPlugins, weather, BUILTIN };
+module.exports = { runSkill, appFor, musicCommand, Notes, loadPlugins, weather, BUILTIN };

@@ -21,6 +21,25 @@ class TextToSpeech {
     this.failed = null; // message once loading failed, so callers fall back fast
     this.ready = false; // model loaded; until then COre uses the system voice
     this.chain = Promise.resolve(); // one sentence at a time, in order
+    // Short phrases ("Paused.", "Next one.") are kept, so saying them again is
+    // instant. Bounded by entries and by total samples (about 12 MB).
+    this.cache = new Map();
+    this.cacheSamples = 0;
+    this.busy = 0;
+  }
+
+  static cacheKey(text, voice, rate, speed) { return `${voice}|${rate.toFixed(3)}|${speed}|${text}`; }
+
+  _remember(key, r) {
+    const n = r.audio ? r.audio.length : 0;
+    if (!n || n > 24000 * 6) return; // keep only short clips
+    this.cache.set(key, r);
+    this.cacheSamples += n;
+    while (this.cache.size > 60 || this.cacheSamples > 3_000_000) {
+      const [k, v] = this.cache.entries().next().value;
+      this.cache.delete(k);
+      this.cacheSamples -= v.audio.length;
+    }
   }
 
   _ensure() {
@@ -60,15 +79,42 @@ class TextToSpeech {
   // parallel they'd all finish late).
   synth(text, { voice, semitones, speed }) {
     const rate = pitchRate(semitones);
+    const sp = Math.min(2, Math.max(0.5, (speed || 1) / rate));
+    const short = String(text).length <= 80;
+    const key = short ? TextToSpeech.cacheKey(String(text), voice, rate, sp) : null;
+    if (key && this.cache.has(key)) {
+      const hit = this.cache.get(key);
+      this.cache.delete(key); this.cache.set(key, hit); // most recently used last
+      return Promise.resolve({ ...hit, rate, cached: true });
+    }
     const job = () => new Promise((resolve, reject) => {
       const id = this.nextId++;
-      this.pending.set(id, { resolve: (r) => resolve({ ...r, rate }), reject });
-      this._ensure().postMessage({ type: 'speak', id, text, voice, speed: Math.min(2, Math.max(0.5, (speed || 1) / rate)) });
+      this.busy++;
+      this.pending.set(id, {
+        resolve: (r) => { this.busy--; if (key) this._remember(key, r); resolve({ ...r, rate }); },
+        reject: (e) => { this.busy--; reject(e); },
+      });
+      this._ensure().postMessage({ type: 'speak', id, text, voice, speed: sp });
     });
     const result = this.chain.then(job, job);
     this.chain = result.catch(() => {});
     return result;
   }
+
+  // Render phrases ahead of time, one by one, only while nothing else is
+  // being spoken (a real sentence never waits behind this).
+  prewarm(phrases, opts) {
+    const list = phrases.slice();
+    const step = () => {
+      if (!list.length || this.failed) return;
+      if (!this.ready || this.busy) { setTimeout(step, 3000).unref(); return; }
+      const text = list.shift();
+      this.synth(text, opts).catch(() => {}).finally(() => setTimeout(step, 400).unref());
+    };
+    setTimeout(step, 0).unref();
+  }
+
+  clearCache() { this.cache.clear(); this.cacheSamples = 0; }
 
   // Resolves once the worker thread has fully stopped.
   dispose() {

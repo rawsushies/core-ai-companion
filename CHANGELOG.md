@@ -1,5 +1,228 @@
 # Changelog
 
+## Unreleased
+
+### Instant answers sound instant
+- Short spoken lines are kept after the first time, and the quick-answer lines ("Paused.", "Next one."…) are
+  rendered in the background a little after start, only while COre is quiet. They're rendered again when you change
+  the voice or pitch. Measured with the real voice model: about 300 ms to synthesise a short phrase, 0 ms from the
+  cache.
+
+### Safety
+- Messages from the phone never trigger a screenshot, even with "look at this": a screenshot needs someone at the PC.
+
+### Zero cost when you're not looking
+- Hidden (Ctrl+Alt+H), screen locked or PC asleep: COre and its helpers draw no frames at all. Measured in safe
+  graphics mode: **53% → 1.7%** CPU. Before, the hidden window kept rendering in the background.
+- Nobody at the PC for 5 minutes: the idle smoke slows to 4 fps until you're back.
+- On battery: idle is capped at 10 fps and animations at 30 fps.
+- While idle only half the smoke particles are simulated and drawn (a random half, same brightness; 35% when you're
+  away), easing back to all of them the moment COre does anything. Measured in safe graphics: idle 51.6% → 45.5%
+  CPU. Larger profiles have more particles, so they should save more (not measured on a real GPU). Setting:
+  `orb.idleDetail`.
+
+### Phone companion (off by default)
+- Chat with COre from your phone's browser on the same Wi-Fi: see the chat and COre's status, send messages, stop it
+  talking. Settings → Phone → **Pair a phone** shows a QR code; scan it, compare the 6-digit code on both screens,
+  click Allow.
+- End-to-end encrypted with a per-phone key, with replay protection, and private networks only. Nothing goes through
+  the internet. Remove a phone any time and it's locked out at once. Details and honest limits:
+  `docs/dev/PHONE.md`.
+
+### Backups (local or cloud folder)
+- Settings → Backup keeps copies of your settings, memories, notes, reminders, chat state and plugins in any
+  folder. **Use my cloud folder** finds OneDrive, Google Drive, Dropbox or iCloud Drive and uses a `COre Backups`
+  folder inside it, so your cloud app syncs the backups. COre itself never talks to a cloud service.
+- Automatic backups every day or week (default: daily, once a folder is chosen); the newest 3–30 are kept.
+- An optional passphrase encrypts each backup (AES-256-GCM, key from scrypt). The passphrase is stored encrypted
+  on this PC and never goes into a backup.
+- Never in a backup: API keys, the calendar link, the notification token.
+- **Restore…** checks the backup (format, checksum, passphrase), saves your current data first as a
+  `pre-restore` snapshot, keeps this PC's keys, and restarts.
+- Settings messages no longer stack on top of each other.
+
+### Glance: a card beside the orb
+- "What's playing?" shows the current song, artist and progress next to COre. "Show me the lyrics" shows the
+  synced lyrics, with the line being sung in Emerald. "Hide that" closes it. COre can also show any short list or
+  numbers on its own ("show me today's plan").
+- The song comes from the system media session: Windows media controls (Spotify, browsers, most players) or
+  playerctl on Linux. It's read only while a music or lyrics card is open, and the card closes by itself after a
+  minute of pause.
+- Lyrics come from lrclib.net (free, no account). Only the song title and artist are sent, and only when you ask
+  for lyrics. There's an off switch (`skills.lyrics`).
+
+### Instant answers
+- Short requests are answered on the spot without the brain: the time, the date, play / pause / next / previous /
+  louder / quieter / mute, show or hide the lyrics or now-playing card. Measured in the app: about 40–200 ms
+  instead of a model round trip, and no usage. Anything longer still goes to the brain. Switch: `skills.quick`.
+- Notes in the chat lost their emoji (Noted, Music, Opening, Timer set).
+
+### Chat redesign (brand kit)
+- The chat under the orb is one clear panel: no fill (your screen shows through), a solid brand-coloured
+  frame and dividers. A header shows COre's real mark, its status (Online / Thinking… / Speaking / Offline),
+  and history, settings and hide buttons.
+- Replies are Smoke bubbles grouped under the speaker's avatar (COre's mark, or the specialist's colour orb).
+  Your messages are Void bubbles with an Emerald edge. The input is one filled pill with the recipient orb and
+  mic inside it, plus a round Emerald send button.
+- Notes like "Remembered…" are plain text with a dark halo, not a bubble. Emoji removed from notes.
+- Quick settings are cards in the same style. Back and the title sit in the header, empty reminders are hidden,
+  and slider values show in brand mono.
+- Gaps in the panel click through to the app below (Windows and macOS).
+- Brand audit across windows: the subtitle no longer uppercases names (it showed "CORE"), the old green and
+  off-palette greys and whites are replaced with brand colours, the History panel and Settings use the real
+  mark and Inter Display, and the History panel matches the chat.
+
+### Lighter on CPU and GPU (measured)
+- While idle, COre now sleeps between frames instead of keeping the compositor awake at the display rate.
+- New light rendering path: 8-bit buffers, lower resolution and an active-frame cap. It's used by safe
+  graphics, the Battery profile and every helper core.
+- Measured idle CPU in safe graphics mode (software rendering): **173% → 37%** of one core. On a real GPU these
+  savings are GPU time and power instead.
+- Profiles retuned: Battery (8,000 particles, 65% resolution, 10 fps idle, 30 fps cap), Balanced (20,000,
+  90%, 20 fps idle), Best quality (40,000, full, 45 fps idle). Default idle frame rate 30 → 20.
+- Helper cores render at 4,000 particles, 70% resolution and 10 fps idle, light buffers.
+- Overlay frame counters (`window.__coreStats()`) and, with `CORE_DEBUG=1`, latency logs (first text, first
+  speech). Measured with the real Claude: about 0.7 s to the first word of text and 1.7 s to the first audio on
+  warm turns.
+
+### Archicad (read-only proof of concept)
+- Turn on Settings → Skills → "Read my open Archicad project" and ask COre how many doors, walls or windows the
+  open project has. COre talks to Archicad's built-in JSON API on this PC only (127.0.0.1, ports 19723–19743)
+  and can only use read commands; nothing in the model can be changed. Not yet tested against a real
+  Archicad. See docs/dev/RESEARCH-PHASE5-6.md for the integration research (Archicad, Revit via pyRevit
+  Routes, Windows UI Automation) and the secure Android companion design.
+
+### Approved file changes (you click Apply)
+- With Settings → Projects → "Let cores propose changes" on (off by default), a core can propose a whole file:
+  it writes the new file in a code block tagged `file=path`. The chat shows a card with the file, +/− counts
+  and a red/green diff. **Nothing is written until you click Apply**, and Reject throws it away.
+- Apply refuses if the file changed since the proposal (so your edits are never overwritten), backs the
+  original up, and writes atomically. Every applied change has **Undo**, which also refuses if you edited the
+  file afterwards.
+- New files only inside existing folders of the shared project. Same containment and secret rules as
+  reading, text only, size-capped. No deleting, renaming or running anything. Every write, rejection and
+  undo goes into `logs/tools.log`.
+
+### Cores can read your project (read-only, with permission)
+- Share one project folder in Settings → Projects (system folder picker; Stop sharing at any time). COre and
+  its cores can then list, read and search it with `[[list]]`, `[[read]]` and `[[find]]`, and answer from
+  the actual files ("Forge searched for TODO (1 hit)").
+- Read-only by design: no writing, no running anything, no shell. Paths are resolved through symlinks, so
+  nothing outside the folder is reachable. Secret-looking files (`.env`, keys, `credentials.json`…) are always
+  refused, dependency folders are skipped, and file size and output are capped.
+- Every access appears in the chat as it happens and is written to `logs/tools.log`.
+- Specialists can take up to three rounds of reading in their own session before answering.
+
+### Meiosis Mode: four cores, one chat
+- **Minimal, on-brand chat** (replaces the glass bubbles from earlier in this cycle):
+  - A flat Void panel at 88% opacity with a hairline border, narrower at 320 px. When idle it fades to 28% so
+    it blends back into your screen.
+  - Replies are plain text under a small coloured name ("Scout · Research"). Your messages are a quiet block
+    on the right, and system notes are muted text.
+  - The core wheel and @ chips are flat coloured dots. The rings and highlights stay subtle.
+- COre's brand type (Inter, Inter Display, JetBrains Mono, all OFL) is now bundled with the app and used in the
+  chat, Settings, history and subtitles, so it looks the same on every PC. Settings and history use the brand
+  palette.
+- New chat look: replies are glassy bubbles tinted in each core's colour, each with a small swirling
+  smoke-orb avatar. Consecutive replies from the same core share one avatar. Your messages show which
+  cores they went to as coloured chips, and progress and errors are small centred pills. The old coloured
+  side bars are gone.
+- The **core wheel**: the orb next to the input shows who you're talking to. Click it and a ring of the four
+  cores spins in, turning the chosen one to the top. Arrow keys turn it, Enter or a click picks. Typing `@`
+  shows the cores as orb pills. Animations stop with reduced motion, and names are always written out.
+- COre is now four cores total: **COre** (Prime, the coordinator and default recipient) and three
+  specialists that split off as smoke helpers. **Scout** researches and compares, **Forge** builds and drafts,
+  **Sentinel** reviews and finds problems. They are role profiles over the same brain you already use, not
+  extra AI services.
+- One chat for all of them. Every reply is labelled with the core's name and role in its colour. Progress,
+  errors and actions are marked, and messages you send to a specialist say who they went to.
+- Talk to a core by starting with `@Scout`, `@Forge`, `@Sentinel` or `@COre` (autocomplete pops up when you
+  type `@`), with the recipient chip next to the input, by clicking a specialist's smoke, or by voice:
+  "Scout, …". With no name, the message goes to COre. Unknown names aren't guessed: COre lists the names it knows.
+- Address several at once (`@Scout @Sentinel review this`) to start a shared task. They work in parallel,
+  then COre sums up the results in one answer.
+- Each specialist keeps its own conversation (separate context) while it's on screen, handles messages to
+  it one at a time, and merges back after 10 idle minutes (or when poked). Stop also stops specialists.
+- COre can hand work to a specialist itself (`[[delegate Scout …]]`). The older `[[clone …]]` and `/clone`
+  pick a fitting specialist.
+- Floating subtitles show who is speaking, and only one core speaks at a time (COre first).
+- Specialists can't open files, run commands or browse yet (that's the coming permissioned task engine); their
+  instructions say so, so they won't pretend.
+- Names, aliases, colours and voices are configurable in `config.json` → `meiosis.cores`.
+- `/stop @Scout` and `/merge @Forge` act on specific cores (`/stop` and `/merge` alone act on all).
+- A shared task interrupted by COre closing is marked as interrupted, and COre tells you when it next starts.
+  It is never re-run on its own.
+- COre's summary of a shared task waits until every specialist has finished speaking, instead of cutting
+  them off. Only you talking to COre interrupts a specialist.
+
+### Release engineering
+- Releases now come only from an explicit version tag, never from a `package.json` change. They go through
+  blocking gates (syntax check, tests, packaged-app self-test, Windows installer install/uninstall test) and
+  land as a **draft** for a human to publish. See docs/dev/RELEASING.md.
+- New CI on every branch and pull request (Linux + Windows), with blocking tests.
+- Fixed the release build: it ran two GitHub publishers that raced, so releases lost files and never
+  included `latest.yml`. Builds now upload the installer, blockmap, `latest.yml` and SHA256SUMS together.
+- Removed the code-signing publisher check from unsigned builds (it would have made installed copies reject
+  every update).
+- `--smoke-test=<file>`: COre can self-test (windows load, orb draws, native modules and worker files
+  present) and exit with a pass/fail code. Used by CI and the release gates.
+- The Claude CLI tests now also run on Windows, through a `.cmd` shim like the real CLI.
+
+### Updates you can trust, and undo
+- Source installs now update from **published releases** by default (Settings → Privacy → Update from),
+  not from every change on `main`. The downloaded code must carry the release's version, or it's refused.
+  Developers can opt into the `main` channel.
+- Every source update first backs up the current version and puts it back if applying fails halfway (disk
+  full, a locked file). If the updated COre then fails to start twice in a row, it restores the previous
+  version automatically and tells you. This works even when the new version can't load at all, thanks to a
+  small bootstrap (`boot.js`) that updates never replace.
+- After a rollback, packages are reinstalled only if the failed update had changed them.
+
+### Your data is never overwritten
+- A damaged `config.json`, `state.json`, `memory.json` or `notes.json` (a hand-edit typo, a disk problem) is
+  now kept as `<file>.corrupt-<time>`, and COre tells you where. Before, it was silently replaced, losing
+  settings, API keys, memories or notes.
+- Memory keeps a `.bak` of the previous good file and skips invalid entries. Notes are written atomically.
+
+### Fixes
+- Messages arriving from a window while it closes (during restart or quit) no longer throw errors in the
+  main process.
+
+### Calendar you can rely on
+- Recurring events now show (daily, weekly on chosen days, monthly like "2nd Tuesday" or "last Friday",
+  yearly), with `COUNT`/`UNTIL`/`INTERVAL`, cancelled occurrences (`EXDATE`) and moved occurrences.
+  Before, a weekly meeting only appeared on the day of its very first occurrence.
+- Event times are read in their own time zone (with daylight-saving), including Outlook's Windows zone
+  names. Before, a 09:00 meeting in another zone showed at 09:00 local time.
+- The private calendar link is stored encrypted like API keys (an existing plain-text link is moved over
+  automatically), is never shown again in Settings ("Saved (hidden)" with Remove), and can't leak into the
+  chat, the brain or logs through error messages.
+
+### A sturdier brain (same brains, better behaved)
+- Watchdogs on every provider: one that doesn't start answering within 90 s, or goes silent for 45 s
+  mid-answer, is abandoned (configurable via `brain.timeouts`). If nothing was said yet, the next brain in
+  your chain takes over. Before, a stalled provider could hold a turn for four minutes.
+- An answer that breaks off midway keeps what was already said, says why, and offers **Continue the
+  answer** instead of discarding everything.
+- Stopping a reply yourself is no longer counted as a provider failure.
+- Per-provider health (successes, failures, last error, typical time to first word) appears in Copy diagnostics.
+- Conversation history for Gemini/Groq/OpenRouter/Ollama is bounded by size as well as count, so long pastes
+  can't overflow small local models. Ollama keeps the model loaded between turns instead of reloading it.
+
+### Memory that stays consistent
+- A new fact about the same thing replaces the old one instead of contradicting it ("lives in Bandung"
+  supersedes "lives in Jakarta"; favourites are per thing). The old value is kept in the fact's history and
+  COre says "🧠 Updated: … (was: …)". Detection is deliberately conservative: only facts clearly about you.
+- Project facts: `[[remember #Tower the client wants a glass facade]]` is kept per project and comes up when
+  that project is mentioned.
+- Every fact records when and where it came from (voice, chat, or you).
+- Edit facts in place in the chat's memory panel (✎), next to Forget. Hover a fact to see its date, source
+  and earlier wording.
+
+### Problems are no longer silent
+- If something unexpected breaks inside COre, it now says so once in the chat (and tints the orb if it keeps
+  happening) instead of only writing to the crash log.
+
 ## 10.3.0 — New look, fewer loose ends
 - New brand: a logo made of smoke filaments, new app and tray icons, a wordmark where the orb is the "O",
   README banner, social preview, promo images for every major format, and a brand guide (docs/BRAND.md).

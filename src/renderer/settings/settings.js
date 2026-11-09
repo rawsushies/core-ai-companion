@@ -11,6 +11,7 @@
   const get = (key) => key.split('.').reduce((o, k) => (o == null ? undefined : o[k]), data.values);
 
   function toast(msg) {
+    document.querySelectorAll('.toast').forEach((x) => x.remove()); // one message at a time
     const t = document.createElement('div');
     t.className = 'toast';
     t.textContent = msg;
@@ -22,6 +23,7 @@
     const r = await api.set(field.key, value);
     if (!r || !r.ok) { toast(r && r.error ? r.error : 'That value is not allowed.'); render(); return; }
     data.values = r.values;
+    if (r.secrets) { data.secrets = r.secrets; if (field.secret) { render(); toast(r.secrets[field.key] ? 'Saved, encrypted on this PC.' : 'Removed.'); } }
     if (field.restart) restartBar.hidden = false;
   }
 
@@ -77,6 +79,88 @@
       input.addEventListener('input', () => { out.textContent = fmt(field, Number(input.value)); });
       input.addEventListener('change', () => save(field, Number(input.value)));
       wrap.append(input, out);
+      return wrap;
+    }
+    if (field.type === 'devices') {
+      const list = document.createElement('div');
+      list.className = 'devices';
+      list.id = 'device-list';
+      list.textContent = 'Loading…';
+      api.action('phoneDevices').then((r) => renderDevices((r && r.devices) || []));
+      return list;
+    }
+    if (field.type === 'actions') {
+      const wrap = document.createElement('span');
+      wrap.className = 'secret folder buttons';
+      for (const [name, text] of field.items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ghost';
+        b.textContent = text;
+        b.addEventListener('click', async () => {
+          if (name === 'restoreBackup' && !confirm('Restore a backup? Your current settings, memories and notes are saved first, then replaced, and COre restarts.')) return;
+          b.disabled = true;
+          const r = await api.action(name);
+          b.disabled = false;
+          if (r && r.values) { data.values = r.values; if (r.secrets) data.secrets = r.secrets; render(); }
+          if (r && r.pair) showPair(r.pair);
+          if (r && r.devices) renderDevices(r.devices);
+          if (r && r.message) toast(r.message);
+        });
+        wrap.append(b);
+      }
+      return wrap;
+    }
+    if (field.type === 'folder') {
+      // Folders are chosen with the system picker (in the main process).
+      const wrap = document.createElement('span');
+      wrap.className = 'secret folder';
+      const p = document.createElement('span');
+      p.className = 'path';
+      p.textContent = v ? String(v).split(/[\\/]/).filter(Boolean).pop() : (field.action ? 'Not set' : 'Not shared');
+      p.title = v || '';
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'ghost';
+      pick.textContent = v ? 'Change…' : 'Choose…';
+      pick.addEventListener('click', async () => {
+        const r = await api.action(field.action || 'pickProjectFolder');
+        if (r && r.values) { data.values = r.values; render(); }
+        if (r && r.message) toast(r.message);
+      });
+      wrap.append(p, pick);
+      if (v) {
+        const stop = document.createElement('button');
+        stop.type = 'button';
+        stop.className = 'ghost';
+        stop.textContent = field.action ? 'Clear' : 'Stop sharing';
+        stop.addEventListener('click', async () => { await save(field, ''); render(); });
+        wrap.append(stop);
+      }
+      return wrap;
+    }
+    if (field.type === 'text' && field.secret) {
+      // Secret: never shown back. Paste to replace, Remove to clear.
+      const wrap = document.createElement('span');
+      wrap.className = 'secret';
+      const input = document.createElement('input');
+      input.type = 'password';
+      input.id = id;
+      input.autocomplete = 'off';
+      input.maxLength = field.maxLength || 200;
+      const saved = data.secrets && data.secrets[field.key];
+      input.placeholder = saved ? 'Saved (hidden)' : 'Paste it here';
+      input.title = saved ? 'Saved and encrypted on this PC. Paste a new one to replace it.' : 'Stored encrypted on this PC, never shown again.';
+      input.addEventListener('change', () => { if (input.value.trim()) save(field, input.value); });
+      wrap.append(input);
+      if (saved) {
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'ghost';
+        rm.textContent = 'Remove';
+        rm.addEventListener('click', () => save(field, ''));
+        wrap.append(rm);
+      }
       return wrap;
     }
     if (field.type === 'text') {
@@ -158,6 +242,65 @@
     }
     content.append(h, box);
   }
+
+  function renderDevices(devices) {
+    const list = document.getElementById('device-list');
+    if (!list) return;
+    list.textContent = '';
+    if (!devices.length) { const p = document.createElement('span'); p.className = 'muted'; p.textContent = 'None yet.'; list.append(p); return; }
+    for (const d of devices) {
+      const row = document.createElement('div');
+      row.className = 'device';
+      const t = document.createElement('span');
+      t.textContent = d.name;
+      const seen = document.createElement('span');
+      seen.className = 'muted';
+      seen.textContent = d.lastSeen ? `seen ${new Date(d.lastSeen).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : '';
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'ghost danger';
+      x.textContent = 'Remove';
+      x.addEventListener('click', async () => {
+        const r = await api.action(`revokePhone:${d.id}`);
+        if (r && r.devices) renderDevices(r.devices);
+        if (r && r.message) toast(r.message);
+      });
+      row.append(t, seen, x);
+      list.append(row);
+    }
+  }
+
+  // The pairing QR code, over the settings window until paired or closed.
+  function showPair(p) {
+    document.querySelectorAll('.pair-modal').forEach((m) => m.remove());
+    const m = document.createElement('div');
+    m.className = 'pair-modal';
+    const card = document.createElement('div');
+    card.className = 'pair-card';
+    const h = document.createElement('h3');
+    h.textContent = 'Scan with your phone';
+    const qr = document.createElement('div');
+    qr.className = 'qr';
+    qr.innerHTML = p.svg; // generated in the main process from COre's own URL
+    const note = document.createElement('p');
+    note.textContent = 'Use the phone camera, on the same Wi-Fi as this PC. COre then asks you to compare a 6-digit code. This code works once, for 5 minutes.';
+    const url = document.createElement('code');
+    url.textContent = p.url.replace(/#.*/, '');
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ghost';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => m.remove());
+    card.append(h, qr, note, url, close);
+    m.append(card);
+    document.body.append(m);
+    setTimeout(() => m.remove(), Math.max(0, p.expires - Date.now()));
+  }
+  if (api.onPhone) api.onPhone((v) => {
+    document.querySelectorAll('.pair-modal').forEach((m) => m.remove());
+    if (v && v.paired) toast(`Paired with ${v.paired}.`);
+    api.action('phoneDevices').then((r) => renderDevices((r && r.devices) || []));
+  });
 
   function render() {
     content.textContent = '';

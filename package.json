@@ -4,7 +4,7 @@
   "version": "10.3.0",
   "private": true,
   "description": "COre: a black liquid orb desktop companion that talks through Claude Code (no API key) or a free local model.",
-  "main": "src/main/main.js",
+  "main": "boot.js",
   "license": "MIT",
   "scripts": {
     "postinstall": "install-electron",
@@ -16,7 +16,9 @@
   "dependencies": {
     "@huggingface/transformers": "4.3.1",
     "electron-updater": "6.8.10",
-    "kokoro-js": "1.2.1"
+    "kokoro-js": "1.2.1",
+    "qrcode-generator": "1.4.4",
+    "tweetnacl": "1.0.3"
   },
   "devDependencies": {
     "electron": "45.0.0",
@@ -45,6 +47,7 @@
       "output": "dist"
     },
     "files": [
+      "boot.js",
       "src/**/*",
       "assets/**/*",
       "package.json",
@@ -61,10 +64,7 @@
         }
       ],
       "icon": "assets/icon.png",
-      "artifactName": "COre-Setup-${version}.${ext}",
-      "signtoolOptions": {
-        "publisherName": "rawsushies"
-      }
+      "artifactName": "COre-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,

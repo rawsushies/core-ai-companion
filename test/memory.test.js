@@ -69,3 +69,56 @@ test('long tags like [[copy ...]] survive streaming and are never spoken', () =>
   assert.ok(out.some((s) => s.type === 'tag' && s.tag.name === 'copy' && s.tag.text.length === 900));
   assert.ok(!out.some((s) => s.type === 'text' && s.text.includes('xxx')));
 });
+
+test('a new fact about the same thing supersedes the old one, keeping history', () => {
+  const { Memory } = require('../src/main/memory');
+  const m = new Memory(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'core-mem-slot-')), 'memory.json'));
+  m.remember('The user lives in Jakarta', { source: { via: 'voice' } });
+  m.remember('Likes green tea');
+  const r = m.remember('The user lives in Bandung now', { source: { via: 'chat' } });
+  assert.equal(r.replaced, 'The user lives in Jakarta');
+  const homes = m.list().filter((i) => /lives in/.test(i.text));
+  assert.equal(homes.length, 1, 'no contradictory duplicates');
+  assert.equal(homes[0].text, 'The user lives in Bandung now');
+  assert.equal(homes[0].history[0].text, 'The user lives in Jakarta');
+  assert.equal(homes[0].source.via, 'chat');
+  // favourites are per thing
+  m.remember("The user's favorite color is green");
+  m.remember("The user's favorite food is rendang");
+  assert.equal(m.list().filter((i) => /favorite/i.test(i.text)).length, 2);
+  const c = m.remember("The user's favorite color is black");
+  assert.equal(c.replaced, "The user's favorite color is green");
+});
+
+test('project facts are scoped and boosted when the project comes up', () => {
+  const { Memory, splitProject } = require('../src/main/memory');
+  assert.deepEqual(splitProject('#Tower client wants glass'), { project: 'Tower', text: 'client wants glass' });
+  const m = new Memory(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'core-mem-proj-')), 'memory.json'));
+  m.remember('#Tower the client wants a glass facade');
+  m.remember('#Villa the client wants a timber facade');
+  assert.equal(m.list().length, 2, 'same slotless fact in two projects is kept twice');
+  const ctx = m.contextFor('What did the Tower client want for the facade?', 1);
+  assert.match(ctx, /\[Tower\] the client wants a glass facade/);
+});
+
+test('editing a fact by hand records it and keeps the old wording', () => {
+  const { Memory } = require('../src/main/memory');
+  const m = new Memory(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'core-mem-edit-')), 'memory.json'));
+  const { item } = m.remember('Works at Acme');
+  const e = m.edit(item.id, 'Works at Acme Architects');
+  assert.equal(e.text, 'Works at Acme Architects');
+  assert.equal(e.source.via, 'you');
+  assert.equal(e.history[0].text, 'Works at Acme');
+  assert.equal(m.edit('nope', 'x y z'), null);
+  assert.equal(m.edit(item.id, ' '), null);
+});
+
+test('slot detection never merges facts about other things', () => {
+  const { slotOf } = require('../src/main/memory');
+  assert.equal(slotOf("The user's name is Bhaz"), 'name');
+  assert.equal(slotOf('I live in Jakarta'), 'home');
+  assert.equal(slotOf('The user works as an architect'), 'work');
+  for (const t of ['The user is building a desktop companion called COre', 'The user has a cat named Mochi', "The user's sister lives in Bali", 'The client works for a bank', 'Favorite color is green']) {
+    assert.equal(slotOf(t), null, t);
+  }
+});

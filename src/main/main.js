@@ -13,19 +13,25 @@ const { Brain } = require('./brain');
 const { SpeechToText } = require('./stt');
 const { TextToSpeech, OrderedVoicePipeline } = require('./tts');
 const { startNotifyServer } = require('./notifyServer');
-const { Updater } = require('./updater');
+const { Updater, depsChanged } = require('./updater');
 const { ReleaseUpdater } = require('./releaseUpdater');
 const { Memory } = require('./memory');
 const { Reminders } = require('./reminders');
 const SCHEMA = require('./settingsSchema');
 const { Presence, chitchatPrompt } = require('./presence');
 const CL = require('./clones');
+const CORES = require('./cores');
 const { matchWake } = require('./handsfree');
 const { ScreenWatch } = require('./watch');
 const { refinePoint } = require('./pointing');
 const SK = require('./skills');
+const { ProjectTools } = require('./tools');
+const { ChangeManager, extractProposals } = require('./changes');
 const { toneKey } = require('./brain/persona');
 const { CrashLog } = require('./crashlog');
+const { smokeTarget, SmokeTest } = require('./smoke');
+const SMOKE = smokeTarget(); // CI / release self-test (see smoke.js)
+let smoke = null;
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -65,8 +71,25 @@ if (IS_LINUX) {
 // Local crash log (never uploaded). Uncaught errors are recorded instead of
 // taking COre down with a dialog.
 const crashLog = new CrashLog(path.join(EARLY_DIR, 'logs'));
-process.on('uncaughtException', (err) => { console.error('[core] uncaught:', err); crashLog.record('main-exception', err); });
-process.on('unhandledRejection', (err) => { console.error('[core] unhandled rejection:', err); crashLog.record('main-rejection', err); });
+// The first one in a session is mentioned in the chat (once), so problems
+// aren't silent; repeated errors also tint the orb.
+const mainErrors = [];
+function onMainError(kind, err) {
+  console.error(`[core] ${kind}:`, err);
+  crashLog.record(kind, err);
+  const now = Date.now();
+  mainErrors.push(now);
+  while (mainErrors.length && now - mainErrors[0] > 60_000) mainErrors.shift();
+  try {
+    if (!onMainError.told && typeof addTranscript === 'function' && config) {
+      onMainError.told = true;
+      addTranscript('system', 'Something went wrong inside me. It is written to the crash log (Settings → Maintenance → Open crash logs). If I start acting strange, restart me from the tray.');
+    }
+    if (mainErrors.length >= 5) toOverlay('attention', { level: 'warn', title: 'COre is having trouble' });
+  } catch {}
+}
+process.on('uncaughtException', (err) => onMainError('main-exception', err));
+process.on('unhandledRejection', (err) => onMainError('main-rejection', err));
 app.on('render-process-gone', (_e, wc, d) => crashLog.record('renderer-gone', `${wc.getURL().split('/').slice(-2).join('/')} ${d.reason} (${d.exitCode})`));
 app.on('child-process-gone', (_e, d) => { if (d.reason !== 'clean-exit') crashLog.record('process-gone', `${d.type} ${d.reason} (${d.exitCode})`); });
 
@@ -102,11 +125,13 @@ const clones = new Map(); // id -> helper clone
 let cloneSeq = 0;
 let mainSpeaking = false; // the main orb has sentences queued or playing
 let mainSpeakingSince = 0;
+let timingTurnStart = 0; // CORE_DEBUG latency measurement
 let floor = null;
 let lastReaction = 0;
 let notes = null;
 let plugins = [];
-let turnSkills = null; // skill lookups started during the current turn
+let turnSkills = null;
+let turnVia = 'chat'; // where the current turn came from (memory provenance) // skill lookups started during the current turn
 let followUpPending = false; // conversation mode: listen again when this spoken reply ends
 const actions = new Map(); // one-click actions offered in the chat: id -> { kind, value }
 // Spoken questions: the chat reveals each sentence as it is spoken, then the
@@ -139,14 +164,21 @@ const toOverlay = (c, p) => send(overlay, c, p);
 const toPanel = (c, p) => send(panel, c, p);
 const toDock = (c, p) => send(dock, c, p);
 
-function addTranscript(role, text) {
-  const entry = { role, text, ts: Date.now() };
+// One timeline for everything (Meiosis): meta.author is who wrote it
+// ('prime' | 'scout' | 'forge' | 'sentinel'; entries from older versions have
+// none and read as Prime), meta.kind is message/progress/tool/error/permission,
+// meta.to lists the cores a user message was addressed to.
+let transcriptSeq = 0; // cursor for the phone companion
+function addTranscript(role, text, meta = {}) {
+  const entry = { role, text, ts: Date.now(), ...meta, seq: ++transcriptSeq };
   transcript.push(entry);
   if (transcript.length > 200) transcript.shift();
   state.set('transcript', transcript.slice(-100));
   toPanel('transcript:add', entry);
-  // COre's own replies reach the dock as a live stream instead.
-  if (role !== 'core') toDock('dock:message', { role: role === 'notice' ? 'system' : role, text });
+  // Prime's own replies reach the dock as a live stream instead.
+  if (role !== 'core' || (meta.author && meta.author !== 'prime')) {
+    toDock('dock:message', { role: role === 'notice' ? 'system' : role, text, author: meta.author, kind: meta.kind, to: meta.to });
+  }
 }
 
 // The display COre lives on (follows you to the monitor you use when
@@ -499,7 +531,7 @@ function updateHitTest() {
 
 // ---------------------------------------------------------------- chat dock
 
-const DOCK_WIDTH = 340; // compact glass chat
+const DOCK_WIDTH = 320; // compact, flat chat (brand: minimal)
 
 function createDock() {
   dock = new BrowserWindow({
@@ -616,6 +648,7 @@ function applySetting(key, value) {
   toOverlay('config', overlayConfig());
   toDock('dock:settings', dockSettings());
   if (key === 'personality.tone' && !current) warmClaude();
+  if (key.startsWith('voice.')) schedulePrewarm();
 }
 
 // ---------------------------------------------------------------- settings window
@@ -658,8 +691,16 @@ function settingsValues() {
   for (const key of SCHEMA.FIELDS.keys()) {
     let v = SCHEMA.getPath(config.data, key);
     if (key === 'app.startWithWindows') v = startsWithWindows();
+    if (SCHEMA.FIELDS.get(key).secret) v = ''; // secrets never go back to a window
     SCHEMA.setPath(out, key, v);
   }
+  return out;
+}
+
+// Which secret settings have a value saved (shown as "saved", never revealed).
+function settingsSecrets() {
+  const out = {};
+  for (const [key, f] of SCHEMA.FIELDS) if (f.secret) out[key] = !!getSecret(f.secret);
   return out;
 }
 
@@ -677,13 +718,14 @@ function setStartWithWindows(on) {
 
 // Performance profiles: one choice sets the smoke's cost.
 const PROFILES = {
-  battery: { particles: 9000, renderScale: 0.7, idleFps: 15 },
-  balanced: { particles: 24000, renderScale: 1, idleFps: 30 },
-  quality: { particles: 40000, renderScale: 1, idleFps: 60 },
+  battery: { particles: 8000, renderScale: 0.65, idleFps: 10, maxFps: 30, lite: true },
+  balanced: { particles: 20000, renderScale: 0.9, idleFps: 20, maxFps: 0, lite: false },
+  quality: { particles: 40000, renderScale: 1, idleFps: 45, maxFps: 0, lite: false },
 };
 
 // Apply one validated change right away where that's possible.
 function applyLive(key, value) {
+  if (key === 'phone.enabled') syncPhone();
   if (key === 'app.startWithWindows') setStartWithWindows(value);
   if (key === 'orb.profile' && PROFILES[value]) { Object.assign(config.data.orb, PROFILES[value]); config.save(); }
   if (key.startsWith('a11y.')) { toOverlay('config', overlayConfig()); toDock('dock:settings', dockSettings()); }
@@ -691,6 +733,7 @@ function applyLive(key, value) {
   if (key.startsWith('voice.') || key.startsWith('orb.')) toOverlay('config', overlayConfig());
   if (key === 'voice.wakeWord') { if (value) stt.warm(); if (tray) { createTrayMenu(); trayTooltip(); } }
   if (key === 'voice.kokoroVoice' || key === 'voice.engine') { if (config.data.voice.engine === 'kokoro') tts.warm(); }
+  if (['voice.kokoroVoice', 'voice.engine', 'voice.semitones', 'voice.speed', 'voice.tts'].includes(key)) schedulePrewarm();
   if (key.startsWith('brain.')) {
     try {
       if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
@@ -709,10 +752,17 @@ function changeSetting(key, value) {
     const clash = Object.entries(config.data.hotkeys).find(([k, acc]) => `hotkeys.${k}` !== key && acc === v);
     if (clash) return { ok: false, error: 'Another COre shortcut already uses that key.' };
   }
+  const field = SCHEMA.FIELDS.get(key);
+  if (field.secret) {
+    setSecret(field.secret, v); // encrypted; the plain value is never written to config
+    SCHEMA.setPath(config.data, key, '');
+    config.save();
+    return { ok: true, values: settingsValues(), secrets: settingsSecrets() };
+  }
   SCHEMA.setPath(config.data, key, v);
   config.save();
   applyLive(key, v);
-  return { ok: true, values: settingsValues() };
+  return { ok: true, values: settingsValues(), secrets: settingsSecrets() };
 }
 
 function removeUserData(names) {
@@ -720,6 +770,118 @@ function removeUserData(names) {
   for (const n of names) {
     try { fs.rmSync(path.join(dir, n), { recursive: true, force: true }); } catch {}
   }
+}
+
+function toSettings(channel, payload) {
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send(channel, payload);
+}
+
+// ---------------------------------------------------------------- phone companion
+// Off by default. See companion.js and docs/dev/PHONE.md for the security model.
+const { Companion } = require('./companion');
+let companion = null;
+
+function loadPhoneDevices() {
+  const out = [];
+  for (const d of state.get('phoneDevices') || []) {
+    try {
+      const raw = String(d.key || '');
+      const k = raw.startsWith('enc:') ? safeStorage.decryptString(Buffer.from(raw.slice(4), 'base64')) : raw.startsWith('plain:') ? raw.slice(6) : '';
+      const key = new Uint8Array(Buffer.from(k, 'base64'));
+      if (key.length === 32) out.push({ ...d, key });
+    } catch {}
+  }
+  return out;
+}
+
+function savePhoneDevices(list) {
+  state.set('phoneDevices', list.map((d) => {
+    const k = Buffer.from(d.key).toString('base64');
+    const key = safeStorage.isEncryptionAvailable() ? `enc:${safeStorage.encryptString(k).toString('base64')}` : `plain:${k}`;
+    return { id: d.id, name: d.name, key, ctr: d.ctr, created: d.created, lastSeen: d.lastSeen };
+  }));
+}
+
+function phoneFeed(since) {
+  const events = transcript.filter((e) => e.seq > since && e.role !== 'system' && e.text).slice(-50).map((e) => {
+    const c = e.author ? coreById(e.author) : null;
+    return { seq: e.seq, role: e.role, text: String(e.text).slice(0, 8000), author: e.author, name: c && c.name, color: c && c.color };
+  });
+  return { events, status: { busy: !!current, speaking: mainSpeaking } };
+}
+
+function ensureCompanion() {
+  if (companion) return companion;
+  companion = new Companion({
+    port: Number(config.data.phone.port) || 47330,
+    host: /^[\w.:-]{3,60}$/.test(config.data.phone.host || '') ? config.data.phone.host : '',
+    staticDir: path.join(__dirname, '..', 'renderer', 'phone'),
+    naclFile: require.resolve('tweetnacl/nacl-fast.min.js'),
+    iconFile: path.join(ROOT, 'assets', 'brand', 'icon-128.png'),
+    devices: loadPhoneDevices(),
+    saveDevices: savePhoneDevices,
+    confirmPair: async ({ name, code }) => {
+      // End-to-end tests only (unpackaged dev runs): there is nobody to click Allow.
+      if (process.env.CORE_E2E_PAIR_ALLOW === '1' && !app.isPackaged) { toSettings('settings:phone', { paired: name }); return true; }
+      const parent = settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined;
+      const r = await dialog.showMessageBox(parent, {
+        type: 'question', buttons: ['Allow', 'Deny'], defaultId: 1, cancelId: 1, noLink: true,
+        title: 'Pair a phone', message: `Allow "${name}" to talk to COre?`,
+        detail: `Allow only if your phone shows this code:\n\n${code}\n\nThe phone can read the chat, send messages and stop COre talking. You can remove it any time in Settings, Phone.`,
+      });
+      const ok = r.response === 0;
+      if (ok) toSettings('settings:phone', { paired: name });
+      return ok;
+    },
+    onMessage: (text, device) => { handleUserText(text, { typed: true, remote: true }); toolAudit(`phone ${device.name}: message`); },
+    onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
+    getFeed: phoneFeed,
+  });
+  return companion;
+}
+
+async function syncPhone() {
+  const on = config.data.phone && config.data.phone.enabled;
+  if (on) {
+    try { await ensureCompanion().start(); } catch (err) {
+      addTranscript('system', `The phone companion could not start: ${err.code === 'EADDRINUSE' ? `port ${config.data.phone.port} is in use` : err.message}.`, { kind: 'error' });
+    }
+  } else if (companion) companion.stop();
+}
+
+function phoneQr(url) {
+  const qr = require('qrcode-generator')(0, 'M');
+  qr.addData(url);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
+}
+
+// ---------------------------------------------------------------- backups
+const BK = require('./backup');
+
+function flushData() {
+  try { config.save(); } catch {}
+  try { state.flush(); } catch {}
+}
+
+function runBackup(kind) {
+  const b = config.data.backup || {};
+  if (!b.folder) return { ok: false, error: 'Choose a backup folder first (Settings, Backup).' };
+  try {
+    flushData();
+    const r = BK.createBackup({ dataDir: app.getPath('userData'), destDir: b.folder, passphrase: getSecret('backup'), appVersion: app.getVersion(), keep: b.keep || 10 });
+    state.set('lastBackup', new Date().toISOString());
+    return { ok: true, ...r };
+  } catch (err) {
+    if (kind === 'auto') console.error(`[core] automatic backup failed: ${err.message}`);
+    return { ok: false, error: `Backup failed: ${err.message}` };
+  }
+}
+
+// Automatic backups: checked at start and every hour; cheap when not due.
+function checkAutoBackup() {
+  const b = config.data.backup || {};
+  if (b.folder && BK.isDue(state.get('lastBackup'), Number(b.auto) || 0)) runBackup('auto');
 }
 
 async function settingsAction(name) {
@@ -730,6 +892,60 @@ async function settingsAction(name) {
     case 'diagnostics':
       await copyDiagnostics();
       return { message: 'Diagnostics copied to the clipboard.' };
+    case 'pickProjectFolder': {
+      const r = await dialog.showOpenDialog(settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined, { title: 'Share a project folder with COre (read-only)', properties: ['openDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return { message: 'Nothing changed.' };
+      const res = changeSetting('tools.projectRoot', r.filePaths[0]);
+      return { message: res.ok ? `COre can now read ${path.basename(r.filePaths[0])} (never change it).` : res.error, values: res.values, secrets: res.secrets };
+    }
+    case 'pickBackupFolder': {
+      const r = await dialog.showOpenDialog(settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined, { title: 'Where should COre keep its backups?', properties: ['openDirectory', 'createDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return { message: 'Nothing changed.' };
+      const res = changeSetting('backup.folder', r.filePaths[0]);
+      return { message: res.ok ? `Backups go to ${path.basename(r.filePaths[0])}.` : res.error, values: res.values, secrets: res.secrets };
+    }
+    case 'useCloudFolder': {
+      const found = BK.cloudFolders({ home: app.getPath('home') });
+      if (!found.length) return { message: 'No OneDrive, Google Drive, Dropbox or iCloud Drive folder found on this PC. Choose any folder instead.' };
+      try { fs.mkdirSync(found[0].suggested, { recursive: true }); } catch (err) { return { message: `Could not create the folder: ${err.message}` }; }
+      const res = changeSetting('backup.folder', found[0].suggested);
+      return { message: res.ok ? `Backups go to ${found[0].name}, in COre Backups. ${getSecret('backup') ? '' : 'Tip: set a passphrase so the cloud copy is encrypted.'}`.trim() : res.error, values: res.values, secrets: res.secrets };
+    }
+    case 'backupNow': {
+      const r = runBackup('manual');
+      return { message: r.ok ? `Backed up ${r.count} files${r.encrypted ? ', encrypted' : ''}.` : r.error };
+    }
+    case 'restoreBackup': {
+      const dir = config.data.backup.folder;
+      const r = await dialog.showOpenDialog(settingsWin && !settingsWin.isDestroyed() ? settingsWin : undefined, { title: 'Restore a COre backup', defaultPath: dir || app.getPath('home'), properties: ['openFile'], filters: [{ name: 'COre backups', extensions: ['json'] }] });
+      if (r.canceled || !r.filePaths[0]) return { message: 'Nothing restored.' };
+      let b;
+      try { b = BK.readBackup(r.filePaths[0], getSecret('backup')); } catch (err) {
+        return { message: err.code === 'NEED_PASSPHRASE' || err.code === 'BAD_PASSPHRASE' ? `${err.message} Set it under Backup, then try again.` : err.message };
+      }
+      try {
+        flushData();
+        const res = BK.restoreBackup({ dataDir: app.getPath('userData'), backup: b, snapshotDir: path.join(app.getPath('userData'), 'backups'), appVersion: app.getVersion() });
+        // Nothing may write the old in-memory data back before the restart.
+        config.save = () => {}; state.flush = () => {}; state.set = () => {};
+        setTimeout(restartApp, 600);
+        return { message: `Restored ${res.restored.length} files from ${new Date(b.created).toLocaleString()}. Restarting… (your previous data was saved first)` };
+      } catch (err) {
+        return { message: `Nothing was restored: ${err.message}` };
+      }
+    }
+    case 'pairPhone': {
+      if (!config.data.phone.enabled) changeSetting('phone.enabled', true);
+      try { await ensureCompanion().start(); } catch (err) { return { message: `The phone companion could not start: ${err.message}` }; }
+      const p = companion.startPairing();
+      if (!p.url) return { message: "This PC doesn't seem to be on a local network (no Wi-Fi or LAN address)." };
+      return { pair: { svg: phoneQr(p.url), url: p.url, expires: p.expires }, values: settingsValues() };
+    }
+    case 'phoneDevices':
+      return { devices: companion ? companion.list() : loadPhoneDevices().map(({ key, ...d }) => d) };
+    case 'revokeAllPhones':
+      if (companion) companion.revokeAll(); else state.set('phoneDevices', []);
+      return { message: 'All phones removed. They must pair again.', devices: [] };
     case 'logs':
       fs.mkdirSync(crashLog.dir, { recursive: true });
       shell.openPath(crashLog.dir);
@@ -766,6 +982,13 @@ async function settingsAction(name) {
       return { message: `COre runs from a folder here. Quit COre, then delete ${ROOT} (and optionally ${app.getPath('userData')}).` };
     }
     default:
+      if (name.startsWith('revokePhone:')) {
+        const id = name.slice(12);
+        let ok = false;
+        if (companion) ok = companion.revoke(id);
+        else { const all = state.get('phoneDevices') || []; ok = all.some((d) => d.id === id); state.set('phoneDevices', all.filter((d) => d.id !== id)); }
+        return { message: ok ? 'Phone removed.' : 'That phone was already removed.', devices: companion ? companion.list() : (state.get('phoneDevices') || []).map(({ key, ...d }) => d) };
+      }
       return { message: 'Unknown action.' };
   }
 }
@@ -875,13 +1098,43 @@ function createTrayMenu() {
 }
 
 let orbHidden = false;
+
+// ---------------------------------------------------------------- render mode (CPU / GPU)
+// Hidden, locked or asleep: no frames at all. Nobody at the PC for 5 minutes:
+// ambient idle (4 fps). On battery: idle at 10 fps and active frames at 30.
+const renderState = { locked: false, idleSec: 0, battery: false };
+let lastRenderMode = '';
+function pushRenderMode(force) {
+  const m = {
+    paused: orbHidden || renderState.locked,
+    ambient: renderState.idleSec >= 300 && !current && !listening,
+    battery: renderState.battery,
+  };
+  const key = JSON.stringify(m);
+  if (key === lastRenderMode && !force) return;
+  lastRenderMode = key;
+  toOverlay('render', m);
+  for (const c of clones.values()) toClone(c, 'render', m);
+}
+function watchPower() {
+  try { renderState.battery = powerMonitor.isOnBatteryPower(); } catch {}
+  for (const [ev, fn] of [
+    ['lock-screen', () => { renderState.locked = true; }], ['unlock-screen', () => { renderState.locked = false; }],
+    ['suspend', () => { renderState.locked = true; }], ['resume', () => { renderState.locked = false; }],
+    ['on-battery', () => { renderState.battery = true; }], ['on-ac', () => { renderState.battery = false; }],
+  ]) powerMonitor.on(ev, () => { fn(); pushRenderMode(); });
+  setInterval(() => {
+    try { renderState.idleSec = powerMonitor.getSystemIdleTime(); } catch {}
+    pushRenderMode();
+  }, 15000).unref();
+}
 function toggleOrb() {
   if (!overlay) return;
   orbHidden = !orbHidden;
   if (orbHidden) {
     // Dissolve into smoke first, then hide.
     toOverlay('dissolve');
-    setTimeout(() => { if (orbHidden && overlay && !overlay.isDestroyed()) overlay.hide(); }, 650);
+    setTimeout(() => { if (orbHidden && overlay && !overlay.isDestroyed()) { overlay.hide(); pushRenderMode(); } }, 650);
     if (dock && dock.isVisible()) dock.hide();
     for (const c of clones.values()) if (c.win && !c.win.isDestroyed()) c.win.hide(); // helpers hide too
     const key = prettyKey(config.data.hotkeys.hide);
@@ -891,6 +1144,7 @@ function toggleOrb() {
     }
     trayTooltip();
   } else {
+    pushRenderMode(); // frames back on before it reassembles
     overlay.showInactive();
     toOverlay('assemble');
     for (const c of clones.values()) if (c.win && !c.win.isDestroyed()) { c.win.showInactive(); toClone(c, 'assemble'); }
@@ -925,8 +1179,10 @@ function reloadConfig() {
 
 function overlayConfig() {
   const { orb, voice } = config.data;
+  // Software rendering (safe graphics) is CPU-bound: 8-bit buffers, lower
+  // resolution and frame caps cut idle CPU ~3.6x (measured 173% -> 48%).
   const orbCfg = SAFE_GRAPHICS
-    ? { ...orb, particles: Math.min(orb.particles || 24000, 9000), renderScale: Math.min(orb.renderScale || 1, 0.8), idleFps: Math.min(orb.idleFps || 30, 24) }
+    ? { ...orb, particles: Math.min(orb.particles || 24000, 6000), renderScale: Math.min(orb.renderScale || 1, 0.6), idleFps: Math.min(orb.idleFps || 30, 10), maxFps: 30, lite: true }
     : orb;
   return {
     orb: orbCfg,
@@ -934,6 +1190,7 @@ function overlayConfig() {
     lightTheme: !nativeTheme.shouldUseDarkColors,
     view: viewSize(),
     a11y: config.data.a11y || {},
+    speaker: primarySpeaker(),
     stage,
     defaultHome: defaultHome(),
   };
@@ -1025,24 +1282,31 @@ function fmtTime(ts) {
 
 // Tags that act instead of animating. Returns true when handled here.
 function handleActionTag(item) {
+  if (item.name === 'tool') {
+    const job = Promise.resolve(runToolTag(item, 'prime'));
+    if (turnSkills) turnSkills.push(job);
+    return true;
+  }
   if (item.name === 'do') { runSkillTag(item); return true; }
-  if (item.name === 'clone') { spawnClone(item.task); return true; }
+  if (item.name === 'clone') { delegate(null, item.task); return true; }
+  if (item.name === 'delegate') { delegate(item.core, item.task); return true; }
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
-    const r = memory.remember(item.text);
-    if (r && r.created) toDock('dock:message', { role: 'system', text: `🧠 Remembered: ${r.item.text}` });
+    const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
+    if (r && r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
+    else if (r && r.replaced) toDock('dock:message', { role: 'system', text: `Updated: ${r.item.text} (was: ${r.replaced})` });
     toDock('dock:memory', memory.list());
     return true;
   }
   if (item.name === 'forget') {
     const gone = memory && memory.forget(item.text);
-    if (gone) toDock('dock:message', { role: 'system', text: `🧠 Forgot: ${gone.text}` });
+    if (gone) toDock('dock:message', { role: 'system', text: `Forgot: ${gone.text}` });
     toDock('dock:memory', memory ? memory.list() : []);
     return true;
   }
   if (item.name === 'remind') {
     const r = reminders.add(item.when, item.text);
-    toDock('dock:message', { role: 'system', text: r ? `⏰ Reminder at ${fmtTime(r.at)}: ${r.text}` : `⏰ I couldn't understand the time "${item.when}".` });
+    toDock('dock:message', { role: 'system', text: r ? `Reminder set for ${fmtTime(r.at)}: ${r.text}` : `I couldn't understand the time "${item.when}".` });
     toDock('dock:reminders', reminders.items);
     return true;
   }
@@ -1070,7 +1334,7 @@ function handleActionTag(item) {
 function skillCtx() {
   return {
     platform: process.platform,
-    config: config.data.skills || {},
+    config: { ...(config.data.skills || {}), calendarUrl: getSecret('calendar') },
     notes,
     reminders: { add: (when, text) => { const r = reminders.add(when, text); toDock('dock:reminders', reminders.items); return r; } },
     // Chromium's network stack: follows the system proxy and certificate settings.
@@ -1091,6 +1355,7 @@ function runSkillTag(item) {
     let r;
     try { r = await SK.runSkill(item.skill, item.args, skillCtx()); } catch (err) { r = { error: err.message }; }
     if (r.message) toDock('dock:message', { role: 'system', text: r.message });
+    if (r.glance) showGlance(r.glance);
     if (r.action) {
       const id = require('crypto').randomUUID();
       actions.set(id, { kind: r.action.kind, value: r.action.value });
@@ -1105,6 +1370,210 @@ function runSkillTag(item) {
   return job;
 }
 
+// ---------------------------------------------------------------- glance (card beside the orb)
+// Now playing, synced lyrics, or a short card. The media session is read only
+// while a music or lyrics card is open; see glance.js for the cost rules.
+
+const GL = require('./glance');
+let glance = null; // { what: 'music'|'lyrics'|'card', track, key, lyrics, linesSent, note }
+let glanceReader = null;
+let glanceTimer = null;
+let glanceIdleSince = 0;
+
+function stopGlanceReader() {
+  if (glanceReader) { glanceReader.stop(); glanceReader.removeAllListeners(); glanceReader = null; }
+}
+
+function hideGlance() {
+  glance = null;
+  clearTimeout(glanceTimer);
+  glanceIdleSince = 0;
+  stopGlanceReader();
+  if (companion) companion.stop();
+  toOverlay('glance', null);
+}
+
+function glanceCard(title, lines, ms = 25000) {
+  stopGlanceReader();
+  clearTimeout(glanceTimer);
+  glance = { what: 'card' };
+  toOverlay('glance', { kind: 'card', title, lines });
+  glanceTimer = setTimeout(hideGlance, ms);
+}
+
+function pushGlance() {
+  if (!glance || glance.what === 'card') return;
+  const t = glance.track;
+  const out = { kind: glance.what, waiting: !t };
+  if (t) Object.assign(out, { title: t.title, artist: t.artist, posMs: t.posMs, durMs: t.durMs, playing: t.playing, at: t.at });
+  if (glance.what === 'lyrics') {
+    const L = glance.lyrics;
+    out.note = glance.note || (!L ? 'Finding the lyrics…' : L.instrumental ? 'Instrumental' : !L.synced && !L.plain ? 'No lyrics found for this song.' : '');
+    if (L && !glance.linesSent) {
+      out.lines = L.synced ? L.synced.slice(0, 400) : null;
+      out.plain = !L.synced && L.plain ? L.plain.split(/\r?\n/).filter((x) => x.trim()).slice(0, 12) : null;
+      glance.linesSent = true;
+    }
+  }
+  toOverlay('glance', out);
+}
+
+function loadLyrics(track) {
+  const key = glance.key;
+  glance.lyrics = null;
+  glance.linesSent = false;
+  glance.note = '';
+  if (config.data.skills.lyrics === false) { glance.note = 'Lyrics lookup is off in Settings, Skills.'; return; }
+  GL.fetchLyrics(track, (url, opts) => require('electron').net.fetch(url, opts)).then((r) => {
+    if (!glance || glance.key !== key) return;
+    glance.lyrics = r;
+    glance.linesSent = false;
+    pushGlance();
+  }, () => {
+    if (!glance || glance.key !== key) return;
+    glance.note = "I couldn't reach the lyrics service.";
+    pushGlance();
+  });
+}
+
+function onGlanceMedia(m) {
+  if (!glance || glance.what === 'card') return;
+  if (!m) return;
+  clearTimeout(glanceTimer);
+  const key = `${m.title}\u0000${m.artist}`;
+  const changed = glance.key !== key;
+  glance.track = m;
+  glance.key = key;
+  // Paused or stopped for a minute: the card goes away by itself.
+  if (m.playing) glanceIdleSince = 0;
+  else if (!glanceIdleSince) glanceIdleSince = Date.now();
+  else if (Date.now() - glanceIdleSince > 60000) { hideGlance(); return; }
+  if (changed && glance.what === 'lyrics') loadLyrics(m);
+  pushGlance();
+}
+
+function showGlance(req) {
+  if (!req || config.data.skills.glance === false) return;
+  if (req.what === 'off') { hideGlance(); return; }
+  if (req.what === 'card') { glanceCard(req.card.title, req.card.lines); return; }
+  const prev = glance && glance.what !== 'card' ? glance : null;
+  glance = { what: req.what, track: prev ? prev.track : null, key: prev ? prev.key : null, lyrics: null, linesSent: false, note: '' };
+  if (glance.track && req.what === 'lyrics') loadLyrics(glance.track);
+  if (!glanceReader) {
+    const reader = new GL.MediaReader();
+    if (!reader.supported) { glanceCard('Now playing', ["I can't read what's playing on this system yet."], 8000); return; }
+    glanceReader = reader;
+    reader.on('update', onGlanceMedia);
+    reader.start();
+  }
+  pushGlance();
+  clearTimeout(glanceTimer);
+  glanceTimer = setTimeout(() => {
+    if (glance && glance.what !== 'card' && !glance.track) glanceCard('Now playing', ['Nothing is playing right now.'], 6000);
+  }, 6000);
+}
+
+// ---------------------------------------------------------------- quick replies (no brain)
+// Short, unambiguous requests are answered on the spot: no waiting and no
+// usage. Everything else goes to the brain as usual.
+
+const QUICK_LINES = {
+  music: { play: 'Playing.', pause: 'Paused.', next: 'Next one.', previous: 'Going back.', louder: 'Louder.', quieter: 'Quieter.', mute: 'Muted.' },
+  lyrics: 'Lyrics, coming up.',
+  music_card: "Here's what's playing.",
+};
+
+// Render the fixed quick-reply lines ahead of time (in the background, only
+// while COre is quiet) so instant answers also sound instant.
+let prewarmTimer = null;
+function schedulePrewarm() { clearTimeout(prewarmTimer); prewarmTimer = setTimeout(prewarmQuickVoice, 3000); } // sliders fire often
+
+function prewarmQuickVoice() {
+  const v = config.data.voice;
+  if (!tts || v.tts === false || v.engine !== 'kokoro' || config.data.skills.quick === false) return;
+  tts.clearCache();
+  tts.prewarm([...Object.values(QUICK_LINES.music), QUICK_LINES.lyrics, QUICK_LINES.music_card], { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed });
+}
+
+function quickReply(text, { typed }) {
+  if (config.data.skills.quick === false) return false;
+  const q = GL.quickIntent(text);
+  if (!q) return false;
+  let line = null;
+  const now = new Date();
+  if (q.kind === 'time') line = `It's ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+  else if (q.kind === 'date') line = `It's ${now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}.`;
+  else if (q.kind === 'glance') {
+    if (config.data.skills.glance === false) return false;
+    showGlance({ what: q.what });
+    line = q.what === 'off' ? null : q.what === 'lyrics' ? QUICK_LINES.lyrics : QUICK_LINES.music_card;
+  } else if (q.kind === 'music') {
+    if (config.data.skills.music === false) return false;
+    const cmd = SK.musicCommand(q.action, process.platform);
+    if (!cmd) return false; // let the brain explain
+    require('child_process').execFile(cmd.file, cmd.args, { timeout: 6000, windowsHide: true }, () => {});
+    line = QUICK_LINES.music[q.action];
+  }
+  addTranscript('user', text);
+  if (presence) presence.noteInteraction();
+  if (line) {
+    addTranscript('core', line);
+    toDock('dock:message', { role: 'core', text: line, author: 'prime' });
+    if (!typed || config.data.voice.speakTyped !== false) speakLine(line);
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------- project tools (read-only)
+
+function projectTools() {
+  const t = config.data.tools || {};
+  return new ProjectTools({ root: t.projectRoot, enabled: t.enabled !== false });
+}
+
+function toolAudit(entry) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+  } catch {}
+}
+
+let changes = null;
+function changeManager() {
+  if (!changes) changes = new ChangeManager({ getTools: projectTools, backupDir: path.join(app.getPath('userData'), 'change-backups'), log: toolAudit });
+  return changes;
+}
+
+// A core's reply may propose whole files (```lang file=PATH). Offer each as a
+// diff card; nothing is written until the user clicks Apply.
+function offerProposals(reply, coreId) {
+  const props = extractProposals(reply);
+  if (!props.length) return;
+  const who = coreById(coreId) ? coreById(coreId).name : 'COre';
+  if (!(config.data.tools && config.data.tools.allowWrites === true)) {
+    addTranscript('system', `${who} proposed changes to ${props.length} file${props.length > 1 ? 's' : ''}. To review and apply them, turn on Settings → Projects → "Let cores propose changes".`, { author: coreId, kind: 'progress' });
+    return;
+  }
+  for (const pr of props) {
+    try {
+      const p = changeManager().prepare(pr, coreId);
+      toDock('dock:proposal', { id: p.id, author: coreId, rel: p.rel, isNew: p.isNew, added: p.added, removed: p.removed, preview: p.preview });
+    } catch (err) {
+      addTranscript('system', `${who}'s change to ${pr.path} can't be offered: ${err.message}`, { author: coreId, kind: 'error' });
+    }
+  }
+}
+
+// Every tool call is visible in the chat and written to logs/tools.log.
+function runToolTag(item, coreId) {
+  const r = projectTools().run(item);
+  const name = coreById(coreId) ? coreById(coreId).name : 'COre';
+  toolAudit({ core: coreId, tool: item.tool, arg: String(item.arg).slice(0, 200), ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
+  addTranscript('system', r.ok ? `${name} ${r.summary}` : `${name} couldn't ${item.tool} ${item.arg}: ${r.error}`, { author: coreId, kind: r.ok ? 'progress' : 'error' });
+  return r.ok ? `${item.tool} ${item.arg}:\n${r.text}` : `${item.tool} ${item.arg} failed: ${r.error}`;
+}
+
 // Runs only when the user clicks the button in the chat.
 function runAction(id) {
   const a = actions.get(id);
@@ -1112,6 +1581,7 @@ function runAction(id) {
   actions.delete(id);
   if (a.kind === 'open' && /^https?:\/\//i.test(a.value)) shell.openExternal(a.value);
   if (a.kind === 'copy') Promise.resolve(require('electron').clipboard.writeText(a.value)).catch(() => {});
+  if (a.kind === 'continue') handleUserText('Please continue your previous answer exactly where it stopped.', { typed: true });
   if (a.kind === 'look') {
     const t = String(a.value).replace(/["&|<>^%!]/g, '');
     handleUserText(`Take a look at my screen. A window called ${t} just appeared. What does it say, and how do I fix it?`, { withScreen: true });
@@ -1214,7 +1684,11 @@ function makeVoicePipeline({ speak }) {
     synth: useKokoro ? (text) => tts.synth(text, { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed }) : null,
     forward: (item) => {
       if (item.type === 'say' && !speak) return;
-      if (item.type === 'say') { mainSpeaking = true; mainSpeakingSince = Date.now(); stopCloneSpeech(); }
+      if (item.type === 'say') {
+        if (!mainSpeaking && process.env.CORE_DEBUG) console.log(`[core] voice prime start ${Date.now()}${timingTurnStart ? ` (first-speech ${Date.now() - timingTurnStart}ms)` : ''}`);
+        timingTurnStart = 0;
+        mainSpeaking = true; mainSpeakingSince = Date.now(); stopCloneSpeech();
+      }
       toOverlay('speak:item', item);
     },
     onError: (err) => {
@@ -1284,24 +1758,42 @@ function stopCloneSpeech() {
   floor.release(floor.holder);
 }
 
-function spawnClone(task) {
-  task = String(task || '').trim();
-  if (!task) return null;
-  if (clones.size >= CL.MAX_CLONES) {
-    addTranscript('system', `All ${CL.MAX_CLONES} helpers are busy. Merge one first (click it when it glows).`);
-    return null;
-  }
-  const used = new Set([...clones.values()].map((c) => c.look.name));
-  const look = CL.LOOKS.find((l) => !used.has(l.name)) || CL.LOOKS[0];
-  const id = `h${++cloneSeq}`;
+// ---------------------------------------------------------------- Meiosis Mode
+// Four cores total: Prime is COre itself (this session, orb and chat);
+// Scout, Forge and Sentinel are specialist role profiles that run as helper
+// clones over the same Brain chain, each with its own session (isolated
+// context) while it's on screen. See docs/dev/MEIOSIS.md.
+
+let cores = CORES.buildCores();
+const HELPER_IDLE_MS = 10 * 60_000; // an unused specialist merges back after this
+const hexTint = (hex) => [1, 3, 5].map((i) => parseInt(String(hex).slice(i, i + 2), 16) / 255);
+
+function refreshCores() {
+  cores = CORES.buildCores(config.data.meiosis && config.data.meiosis.cores);
+  toDock('dock:cores', coresForUi());
+}
+
+function coreById(id) { return cores.find((c) => c.id === id) || null; }
+
+function coresForUi() {
+  return cores.map((c) => ({ id: c.id, name: c.name, role: c.role, color: c.color, active: c.id === 'prime' || clones.has(c.id) }));
+}
+
+// Bring a specialist on screen with the meiosis split. Returns the helper,
+// or null when it can't (unknown core, no room on screen, merging back).
+function ensureHelper(coreId) {
+  const existing = clones.get(coreId);
+  if (existing) return existing.merging ? null : existing;
+  const core = coreById(coreId);
+  if (!core || core.id === 'prime') return null;
   const r = cloneRadius();
   const d = primaryDisplay();
   const from = { x: d.bounds.x + orbBounds.x, y: d.bounds.y + orbBounds.y };
   const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: Math.max(r * 5.2, CLONE_WIN * 0.8), near: from });
-  if (!slot) { addTranscript('system', 'No free spot on the screen for a helper.'); return null; }
-  const name = `Helper ${look.name}`;
-  const c = { id, look, name, task, r, slot, state: 'working', reply: '', brain: null, win: null, ac: new AbortController() };
-  clones.set(id, c);
+  if (!slot) { addTranscript('system', `No free spot on the screen for ${core.name}.`, { kind: 'error' }); return null; }
+  const look = { name: core.name, tint: hexTint(core.color), color: core.color, voice: core.voice, semitones: core.semitones };
+  const c = { id: core.id, core, look, name: core.name, r, slot, state: 'idle', brain: null, win: null, ac: new AbortController(), queue: Promise.resolve(), busy: 0 };
+  clones.set(core.id, c);
 
   c.win = new BrowserWindow({
     x: Math.round(from.x - CLONE_WIN / 2),
@@ -1318,56 +1810,163 @@ function spawnClone(task) {
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: false,
-    title: name,
+    title: core.name,
     webPreferences: { preload: path.join(PRELOAD, 'clone.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   c.win.setAlwaysOnTop(true, 'screen-saver');
   c.win.setIgnoreMouseEvents(true, { forward: true });
-  c.win.loadFile(path.join(RENDERER, 'overlay', 'index.html'), { query: { clone: id } });
+  c.win.loadFile(path.join(RENDERER, 'overlay', 'index.html'), { query: { clone: core.id } });
   c.win.once('ready-to-show', () => {
     if (!orbHidden) c.win.showInactive(); // shown with COre later if it's hidden now
-    // Meiosis: COre stretches and pushes apart while the helper condenses
+    // Meiosis: COre stretches and pushes apart while the specialist condenses
     // out of its smoke and drifts to its own spot.
     toOverlay('speak:item', { type: 'gesture', name: 'gesture', gesture: 'split' });
-    setTimeout(() => animateWindow(c.win, from, slot, 900, () => toClone(c, 'state', 'thinking')), 350);
+    setTimeout(() => animateWindow(c.win, from, slot, 900, () => toClone(c, 'state', c.busy ? 'thinking' : 'idle')), 350);
   });
-  c.win.on('closed', () => { clones.delete(id); if (floor) floor.release(id); });
-  addTranscript('system', `${look.emoji} ${name} split off to work on: ${task}`);
-  runClone(c);
+  c.win.on('closed', () => {
+    if (clones.get(core.id) === c) clones.delete(core.id);
+    if (floor) floor.release(core.id);
+    disposeHelperBrain(c);
+    toDock('dock:cores', coresForUi());
+    toOverlay('speaker', primarySpeaker());
+  });
+  addTranscript('system', `${core.name} (${core.role}) split off from COre.`, { author: core.id, kind: 'progress' });
+  toDock('dock:cores', coresForUi());
+  toOverlay('speaker', primarySpeaker());
   return c;
 }
 
-async function runClone(c) {
-  const mem = {};
-  try {
+function helperBrain(c) {
+  if (!c.brain) {
+    const mem = {}; // its own session id lives here: isolated from Prime's
     c.brain = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
-    let context = '';
-    if (memory && config.data.memory.enabled !== false) context = memory.contextFor(c.task) || '';
-    const { reply } = await c.brain.ask({ text: CL.cloneTaskPrompt(c.task, c.name), typed: true, context, signal: c.ac.signal, onItem: () => {} });
-    c.reply = String(reply || '').trim();
-    if (!clones.has(c.id)) return;
-    c.state = 'done';
-    // The first paragraph is the spoken summary; the chat shows the details (or the whole answer if that's all there is).
-    const paras = c.reply.split(/\n\s*\n/);
-    const details = paras.slice(1).join('\n\n').trim();
-    toDock('dock:message', { role: 'helper', label: `${c.look.emoji} ${c.name} · ${c.task.slice(0, 60)}`, color: `rgb(${c.look.tint.map((v) => Math.round(v * 255)).join(',')})`, text: details || c.reply || '(no answer)' });
-    toClone(c, 'state', 'idle');
-    toClone(c, 'attention', { level: 'success' });
-    floor.request(c.id, () => speakForClone(c, CL.spokenSummary(c.reply) || 'Done.'));
-    c.mergeTimer = setTimeout(() => mergeClone(c.id), 4 * 60_000);
-  } catch (err) {
-    if (err.aborted || !clones.has(c.id)) return;
-    c.state = 'failed';
-    addTranscript('system', `${c.name} could not finish: ${err.message}`);
-    toClone(c, 'attention', { level: 'warn' });
-    c.mergeTimer = setTimeout(() => mergeClone(c.id), 60_000);
-  } finally {
-    if (c.brain) for (const p of c.brain.chain) if (p.dispose) p.dispose();
   }
+  return c.brain;
+}
+
+function disposeHelperBrain(c) {
+  if (c.brain) for (const p of c.brain.chain) if (p.dispose) p.dispose();
+  c.brain = null;
+}
+
+// Send one message to a specialist. Messages to the same core run one at a
+// time (its context is sequential). Resolves { ok, reply?, error? }.
+function askCore(coreId, text, { task } = {}) {
+  const c = ensureHelper(coreId);
+  if (!c) return Promise.resolve({ ok: false, error: 'not available' });
+  clearTimeout(c.mergeTimer);
+  const run = async () => {
+    if (c.merging || !clones.has(c.id)) return { ok: false, error: 'merged back' };
+    c.busy++;
+    c.state = 'working';
+    toClone(c, 'state', 'thinking');
+    const ac = new AbortController();
+    c.ac = ac;
+    try {
+      const context = memory && config.data.memory.enabled !== false ? memory.contextFor(text) || '' : '';
+      // Up to 3 rounds of read-only project tools before the final answer.
+      let msg = CL.corePrompt(c.core, text, task);
+      let reply = ''; let truncated = false; let error = null;
+      for (let round = 0; ; round++) {
+        const reqs = [];
+        ({ reply, truncated, error } = await helperBrain(c).ask({ text: msg, typed: true, context: round ? '' : context, signal: ac.signal, onItem: (it) => { if (it.type === 'gesture' && it.name === 'tool') reqs.push(it); } }));
+        if (!reqs.length || round >= 3 || ac.signal.aborted || truncated) break;
+        const results = reqs.slice(0, 5).map((q) => runToolTag(q, c.id));
+        msg = `[skill] Results of your project reads:\n${results.join('\n\n')}\n\nNow answer the request, in the same answer format.`;
+      }
+      const full = String(reply || '').trim();
+      if (!clones.has(c.id) || ac.signal.aborted) return { ok: false, error: 'cancelled' };
+      // The first paragraph is the spoken summary; the chat shows the details
+      // (or the whole answer if that's all there is).
+      const details = full.split(/\n\s*\n/).slice(1).join('\n\n').trim();
+      addTranscript('core', details || full || '(no answer)', { author: c.id, ...(task ? { task: task.id } : {}) });
+      offerProposals(full, c.id);
+      if (truncated) addTranscript('system', `${c.name}'s answer was cut off (${error}).`, { author: c.id, kind: 'error' });
+      toClone(c, 'state', 'idle');
+      floor.request(c.id, () => speakForClone(c, CL.spokenSummary(full) || 'Done.'));
+      return { ok: true, reply: full };
+    } catch (err) {
+      if (err.aborted || ac.signal.aborted) return { ok: false, error: 'cancelled' };
+      addTranscript('system', `${c.name} could not answer: ${err.message}`, { author: c.id, kind: 'error' });
+      toClone(c, 'attention', { level: 'warn' });
+      return { ok: false, error: err.message };
+    } finally {
+      c.busy--;
+      if (!c.busy) {
+        c.state = 'idle';
+        toClone(c, 'state', 'idle');
+        c.mergeTimer = setTimeout(() => mergeClone(c.id), HELPER_IDLE_MS);
+      }
+    }
+  };
+  const p = c.queue.then(run, run);
+  c.queue = p.catch(() => {});
+  return p;
+}
+
+// Stop what specialists are doing right now (the chat's Stop button).
+function cancelHelpers() {
+  for (const c of clones.values()) { try { c.ac.abort(); } catch {} toClone(c, 'speech:stop'); }
+}
+
+// ---- shared tasks: several cores addressed at once ------------------------
+
+function saveTask(task) {
+  const list = (state.get('tasks') || []).filter((t) => t.id !== task.id);
+  list.push(JSON.parse(JSON.stringify(task)));
+  state.set('tasks', list.slice(-20));
+}
+
+// Wait until COre isn't busy and no specialist is speaking or waiting to
+// speak, so COre's summary never cuts their spoken summaries off.
+async function waitPrimeIdle(maxMs = 120_000) {
+  const t0 = Date.now();
+  const busy = () => current || listening || mainSpeaking || (floor && (floor.holder || floor.queue.length));
+  while (busy() && Date.now() - t0 < maxMs) await new Promise((r) => setTimeout(r, 400));
+}
+
+// Specialists work in parallel on the same request; Prime then gives the
+// user one short, unified answer. Returns the task record.
+async function runSharedTask(targets, text) {
+  const task = { id: `task-${Date.now().toString(36)}`, text: String(text).slice(0, 2000), createdAt: Date.now(), status: 'running', steps: targets.filter((t) => t !== 'prime').map((core) => ({ core, status: 'pending' })) };
+  saveTask(task);
+  const names = task.steps.map((s) => coreById(s.core).name).join(', ');
+  addTranscript('system', `Shared task: ${names} working in parallel. COre will sum up.`, { author: 'prime', kind: 'progress', task: task.id });
+  await Promise.all(task.steps.map(async (step) => {
+    step.status = 'running';
+    saveTask(task);
+    const r = await askCore(step.core, text, { task });
+    step.status = r.ok ? 'completed' : r.error === 'cancelled' ? 'cancelled' : 'failed';
+    if (r.ok) step.result = r.reply.slice(0, 4000); else step.error = r.error;
+    saveTask(task);
+  }));
+  const done = task.steps.filter((s) => s.status === 'completed');
+  task.status = done.length === task.steps.length ? 'completed' : done.length ? 'partial' : task.steps.every((s) => s.status === 'cancelled') ? 'cancelled' : 'failed';
+  saveTask(task);
+  if (task.status === 'cancelled') return task;
+  // Prime coordinates: wait for any conversation in progress, then sum up.
+  await waitPrimeIdle();
+  const lines = task.steps.map((s) => `- ${coreById(s.core).name} (${s.status}): ${s.status === 'completed' ? s.result.slice(0, 1500) : s.error}`).join('\n');
+  handleUserText(`[task ${task.id}] The user asked: ${text}\nYour specialists reported:\n${lines}\nGive the user a short unified answer: the key findings, what was produced, and anything that needs attention or failed. Do not repeat their full text.`, { internal: true, typed: true });
+  return task;
+}
+
+// Prime handing work to a specialist ([[delegate ROLE TASK]] / [[clone TASK]]).
+function delegate(coreName, task) {
+  const core = CORES.findCore(cores, coreName) || coreById(CORES.roleForTask(task));
+  if (!core || core.id === 'prime' || !String(task || '').trim()) return null;
+  addTranscript('system', `COre asked ${core.name}: ${String(task).slice(0, 140)}`, { author: 'prime', kind: 'progress' });
+  return askCore(core.id, task);
+}
+
+function primarySpeaker() {
+  const p = coreById('prime');
+  return { name: p.name, color: p.color, show: clones.size > 0 };
 }
 
 function speakForClone(c, text) {
   if (!c.win || c.win.isDestroyed()) { floor.release(c.id); return; }
+  if (process.env.CORE_DEBUG) console.log(`[core] voice ${c.id} start ${Date.now()}`);
   const v = config.data.voice;
   const useKokoro = v.tts !== false && v.engine !== 'system' && !tts.failed && tts.ready;
   const p = new OrderedVoicePipeline({
@@ -1419,13 +2018,15 @@ function cloneFrom(e) {
 function cloneConfig(c) {
   const { orb, voice } = config.data;
   return {
-    orb: { ...orb, radius: c.r, home: null, particles: Math.min(orb.particles || 24000, 9000), idleFps: Math.min(orb.idleFps || 30, 24) },
+    // Helpers are small: fewer particles, lower resolution, light buffers.
+    orb: { ...orb, radius: c.r, home: null, particles: Math.min(orb.particles || 24000, 4000), renderScale: Math.min(orb.renderScale || 1, 0.7), idleFps: Math.min(orb.idleFps || 30, 10), maxFps: 30, lite: true },
     voice: { ...voice, tts: voice.tts !== false, semitones: c.look.semitones },
     lightTheme: !nativeTheme.shouldUseDarkColors,
     view: { w: CLONE_WIN, h: CLONE_WIN },
     stage: { x: 0, y: 0, w: CLONE_WIN, h: CLONE_WIN },
     defaultHome: { x: CLONE_WIN / 2, y: CLONE_WIN / 2 },
     clone: { id: c.id, tint: c.look.tint },
+    speaker: { name: c.name, color: c.look.color, show: true }, // subtitles say who is talking
   };
 }
 
@@ -1520,9 +2121,56 @@ function playGame(name) {
 // as something the user said.
 // chain: a follow-up turn right after the previous one (skill results): the
 // previous reply keeps speaking and this one queues after it.
-async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0 } = {}) {
+async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false } = {}) {
   text = String(text || '').trim();
   if (!text) return;
+  // Meiosis routing: decide the recipient before touching Prime's turn, so
+  // talking to a specialist never interrupts what COre itself is saying.
+  if (!internal && !chain) {
+    if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
+    // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
+    const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
+    if (ctl) {
+      const who = CORES.parseMentions(cores, ctl[2]).targets.filter((t) => t !== 'prime');
+      const ids = who.length ? who : [...clones.keys()];
+      if (ctl[1].toLowerCase() === 'stop') {
+        if (!who.length) { abortCurrent(); toOverlay('speech:stop'); }
+        for (const id of ids) { const c = clones.get(id); if (c) { try { c.ac.abort(); } catch {} toClone(c, 'speech:stop'); } }
+        addTranscript('system', who.length ? `Stopped ${who.map((id) => coreById(id).name).join(', ')}.` : 'Stopped.', { kind: 'progress' });
+      } else {
+        for (const id of ids) mergeClone(id);
+      }
+      return;
+    }
+    const route = CORES.parseMentions(cores, text, { spoken: !typed });
+    if (route.unknown.length) {
+      addTranscript('user', text);
+      const known = cores.map((c) => `@${c.name}`).join(', ');
+      addTranscript('system', `I don't know ${route.unknown.map((u) => `@${u}`).join(', ')}. You can talk to ${known}.`, { kind: 'error' });
+      return;
+    }
+    const specialists = route.targets.filter((t) => t !== 'prime');
+    if (specialists.length) {
+      if (presence) presence.noteInteraction();
+      if (!route.text) {
+        // Just a name: bring them up and point the chat at them.
+        addTranscript('user', text, { to: route.targets });
+        for (const id of specialists) ensureHelper(id);
+        toDock('dock:recipient', specialists[0]);
+        return;
+      }
+      addTranscript('user', text, { to: route.targets });
+      if (route.targets.length === 1) askCore(specialists[0], route.text);
+      else runSharedTask(route.targets, route.text);
+      return;
+    }
+    if (route.targets.includes('prime')) text = route.text || text; // "@COre explain this"
+  }
+  if (!internal && !chain && !withScreen) {
+    // Instant answers for short requests (time, music keys, lyrics card).
+    const busyBefore = !!current;
+    if (quickReply(text, { typed })) { if (!busyBefore) toOverlay('state', 'idle'); return; }
+  }
   if (chain) {
     if (syncTurn && syncTurn.finished) toDock('dock:done', { text: syncTurn.reply });
     syncTurn = null;
@@ -1533,21 +2181,21 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   }
   const mySkills = [];
   turnSkills = mySkills;
+  turnVia = internal ? 'COre' : typed ? 'chat' : 'voice';
   if (typed || internal) followUpPending = false;
   if (!internal) {
-    if (/^\/clone\s+\S/i.test(text)) { spawnClone(text.replace(/^\/clone\s+/i, '')); return; }
-    if (/^\/merge\b/i.test(text)) { mergeAllClones(); return; }
     addTranscript('user', text);
     if (presence) presence.noteInteraction();
+    stopCloneSpeech(); // the user talking to COre interrupts a specialist; COre's own turns don't
   }
-  stopCloneSpeech();
   if (!brain) {
     addTranscript('system', 'No brain is configured. Open Settings and check brain.provider.');
     toOverlay('attention', { level: 'urgent', title: 'No brain configured' });
     return;
   }
 
-  const share = withScreen || (config.data.screen.autoShareOnDeixis && DEIXIS.test(text));
+  // Never from the phone: a screenshot needs someone at the PC.
+  const share = !remote && (withScreen || (config.data.screen.autoShareOnDeixis && DEIXIS.test(text)));
   toOverlay('state', 'thinking');
 
   let shot = null;
@@ -1580,6 +2228,9 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
 
   const ac = new AbortController();
   current = ac;
+  const turnStart = Date.now();
+  let firstTextAt = 0;
+  timingTurnStart = turnStart;
   const speak = !typed || config.data.voice.speakTyped !== false;
   const pipeline = makeVoicePipeline({ speak });
   currentPipeline = pipeline;
@@ -1589,13 +2240,16 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   toDock('dock:busy', true);
   toDock('dock:message', { role: 'core-start' });
   try {
-    const { reply } = await brain.ask({
+    const { reply, truncated, error: cutReason } = await brain.ask({
       text,
       shot,
       typed,
       context: contextBlocks.join('\n\n'),
       signal: ac.signal,
-      onText: (t) => { if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t); },
+      onText: (t) => {
+        if (!firstTextAt) { firstTextAt = Date.now(); if (process.env.CORE_DEBUG) console.log(`[core] timing first-text ${firstTextAt - turnStart}ms`); }
+        if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t);
+      },
       onItem: (item) => {
         if (ac.signal.aborted) return;
         if (process.env.CORE_DEBUG && item.type !== 'say') console.log('[core] item', JSON.stringify(item));
@@ -1616,6 +2270,14 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       },
     });
     if (reply) addTranscript('core', reply);
+    if (reply) offerProposals(reply, 'prime');
+    if (truncated) {
+      // The brain dropped mid-answer: keep what was said, say so, offer to continue.
+      const id = require('crypto').randomUUID();
+      actions.set(id, { kind: 'continue', value: '' });
+      addTranscript('system', `My answer was cut off (${cutReason}).`);
+      toDock('dock:action', { id, kind: 'continue', label: 'Continue the answer' });
+    }
     if (turnSync && syncTurn === turnSync) {
       // Show the full answer when the voice finishes (or soon, if it never starts).
       turnSync.finished = true;
@@ -1734,8 +2396,11 @@ function registerHotkeys() {
 // ---------------------------------------------------------------- IPC
 
 function wireIpc() {
-  const fromOverlay = (e) => overlay && e.sender === overlay.webContents;
-  const fromPanel = (e) => panel && e.sender === panel.webContents;
+  // Sender checks must survive messages that arrive while a window is being
+  // destroyed (restart, quit): touching a destroyed window's webContents throws.
+  const isFrom = (win, e) => !!win && !win.isDestroyed() && e.sender === win.webContents;
+  const fromOverlay = (e) => isFrom(overlay, e);
+  const fromPanel = (e) => isFrom(panel, e);
 
   ipcMain.on('orb:bounds', (e, b) => {
     if (!fromOverlay(e) || !b) return;
@@ -1763,20 +2428,15 @@ function wireIpc() {
   ipcMain.handle('clone:init', (e) => { const c = cloneFrom(e); return c ? cloneConfig(c) : null; });
   ipcMain.on('clone:idle', (e) => {
     const c = cloneFrom(e);
+    if (c && process.env.CORE_DEBUG) console.log(`[core] voice ${c.id} end ${Date.now()}`);
     if (c && floor && floor.holder === c.id) { clearTimeout(c.floorTimer); floor.release(c.id); }
   });
+  // Click a specialist to talk to it; poke it (double click) to merge it back.
   ipcMain.on('clone:click', (e) => {
     const c = cloneFrom(e);
     if (!c) return;
-    if (c.state === 'working') {
-      addTranscript('system', `${c.look.emoji} ${c.name} is still working on: ${c.task}. Poke it (double click) to call it back.`);
-      setDockVisible(true);
-      if (c.lastClick && Date.now() - c.lastClick < 400) mergeClone(c.id);
-      c.lastClick = Date.now();
-      return;
-    }
-    setDockVisible(true);
-    mergeClone(c.id); // its answer is already in the chat
+    setDockVisible(true, true);
+    toDock('dock:recipient', c.id);
   });
   ipcMain.on('clone:interaction', (e, kind) => { const c = cloneFrom(e); if (c && kind === 'poke') mergeClone(c.id); });
   ipcMain.on('orb:interaction', (e, kind) => { if (fromOverlay(e) && ['pet', 'tickle', 'poke', 'toss'].includes(kind)) onInteraction(kind); });
@@ -1786,7 +2446,7 @@ function wireIpc() {
     if (dockVisible) positionDock();
   });
 
-  const fromDock = (e) => dock && e.sender === dock.webContents;
+  const fromDock = (e) => isFrom(dock, e);
   ipcMain.handle('dock:init', (e) => (fromDock(e) ? {
     settings: dockSettings(),
     // Recent conversation, plus notices from this session (the dock may load
@@ -1794,10 +2454,11 @@ function wireIpc() {
     recent: transcript.slice(-12)
       .filter((m) => m.role !== 'system' || m.ts >= APP_STARTED)
       .slice(-8)
-      .map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text })),
+      .map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text, author: m.author, kind: m.kind, to: m.to })),
+    cores: coresForUi(),
   } : null));
   ipcMain.on('dock:ask', (e, text) => { if (fromDock(e)) handleUserText(text, { typed: true }); });
-  ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); } });
+  ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); cancelHelpers(); } });
   ipcMain.on('dock:listen', (e) => { if (fromDock(e)) startListening(false); });
   ipcMain.on('dock:openPanel', (e) => { if (fromDock(e)) togglePanel(true); });
   ipcMain.on('dock:hide', (e) => { if (fromDock(e)) setDockVisible(false); });
@@ -1811,13 +2472,41 @@ function wireIpc() {
   });
   ipcMain.on('dock:setting', (e, { key, value } = {}) => { if (fromDock(e)) applySetting(key, value); });
   ipcMain.on('dock:checkUpdates', (e) => { if (fromDock(e)) checkForUpdates(false); });
+  ipcMain.on('dock:proposal', (e, { id, action } = {}) => {
+    if (!fromDock(e)) return;
+    const cm = changeManager();
+    try {
+      if (action === 'apply') {
+        const ch = cm.apply(String(id));
+        const who = coreById(ch.core) ? coreById(ch.core).name : 'COre';
+        addTranscript('system', `${who}'s change applied: ${ch.rel} (${ch.isNew ? 'new file' : `+${ch.added} −${ch.removed}`}).`, { author: ch.core, kind: 'progress' });
+        toDock('dock:proposal-update', { id, state: 'applied' });
+      } else if (action === 'reject') {
+        cm.reject(String(id));
+        toDock('dock:proposal-update', { id, state: 'rejected' });
+      } else if (action === 'undo') {
+        const ch = cm.undo(String(id));
+        addTranscript('system', `Undid the change to ${ch.rel}.`, { author: ch.core, kind: 'progress' });
+        toDock('dock:proposal-update', { id, state: 'undone' });
+      }
+    } catch (err) {
+      addTranscript('system', err.message, { kind: 'error' });
+      toDock('dock:proposal-update', { id, state: 'error', message: err.message });
+    }
+  });
+  // Floating bubbles: clicks in the gaps go through to the app below.
+  ipcMain.on('dock:interactive', (e, v) => {
+    if (!fromDock(e) || !['win32', 'darwin'].includes(process.platform)) return;
+    dock.setIgnoreMouseEvents(!v, { forward: true });
+  });
   ipcMain.on('dock:openSettings', (e) => { if (fromDock(e)) openSettings(); });
-  const fromSettings = (e) => settingsWin && !settingsWin.isDestroyed() && e.sender === settingsWin.webContents;
-  ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), version: app.getVersion() } : null));
+  const fromSettings = (e) => isFrom(settingsWin, e);
+  ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), secrets: settingsSecrets(), version: app.getVersion() } : null));
   ipcMain.handle('settings:set', (e, { key, value } = {}) => (fromSettings(e) ? changeSetting(String(key), value) : { ok: false }));
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
+  ipcMain.on('dock:memoryEdit', (e, { id, text } = {}) => { if (fromDock(e) && memory) { memory.edit(String(id), String(text || '')); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { memory.forget(String(id)); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
   ipcMain.handle('dock:reminders', (e) => (fromDock(e) && reminders ? reminders.items : []));
@@ -1910,6 +2599,7 @@ function wireIpc() {
   });
   ipcMain.on('voice:idle', (e) => {
     if (fromOverlay(e)) mainSpeaking = false;
+    if (fromOverlay(e) && process.env.CORE_DEBUG) console.log(`[core] voice prime end ${Date.now()}`);
     if (fromOverlay(e) && followUpPending && !current && !listening) {
       followUpPending = false;
       setTimeout(() => { if (!current && !listening) startListening(false, { followUp: true }); }, 250);
@@ -1922,6 +2612,15 @@ function wireIpc() {
   // (loading it earlier could collide with a safe-graphics restart).
   ipcMain.once('overlay:ready', (e) => {
     if (!fromOverlay(e)) return;
+    pushRenderMode(true);
+    if (smoke) { smoke.mark('overlay-ready'); return; }
+    // COre started fine after an update: the update is good, stop watching it.
+    if (state.get('updateVerify')) { state.set('updateVerify', null); state.flush(); }
+    const rb = state.get('updateRolledBack');
+    if (rb) {
+      state.set('updateRolledBack', null);
+      addTranscript('system', `The update to v${rb.from} didn't start properly, so I went back to v${rb.to}. Your settings and memory are untouched. Diagnostics are in the crash log (Settings → Maintenance).`);
+    }
     // Spread start-up work out: loading the voice model uses every CPU core
     // for a moment, so do it a few seconds after COre has appeared.
     setTimeout(() => {
@@ -1932,8 +2631,9 @@ function wireIpc() {
     setTimeout(() => { if (!listening) stt.warm(); }, 14000);
   });
   ipcMain.on('overlay:rendererFailed', (e, msg) => {
-    crashLog.record('webgl', msg);
     if (!fromOverlay(e)) return;
+    crashLog.record('webgl', msg);
+    if (smoke) { smoke.mark('overlay-ready', false, String(msg)); return; }
     console.warn('[overlay] renderer failed:', msg);
     if (SAFE_GRAPHICS) addTranscript('system', `I can't draw my orb on this PC (${msg}). Try ⚙ → Display → Force GPU, or copy diagnostics and send them over.`);
     else switchToSafeGraphics(`WebGL unavailable: ${msg}`);
@@ -2010,6 +2710,7 @@ async function restartApp() {
 }
 
 function switchToSafeGraphics(reason) {
+  if (SMOKE) return; // a self-test reports problems instead of restarting
   if (SAFE_GRAPHICS || GRAPHICS !== 'auto' || state.get('safeGraphics')) return;
   console.warn(`[core] switching to safe graphics: ${reason}`);
   state.set('safeGraphics', true);
@@ -2050,6 +2751,7 @@ async function diagnostics() {
     stage,
     brain: brainStatusCache.map((b) => `${b.name}: ${b.state}`),
     recentProblems: crashLog.recent(5),
+    brainHealth: brain ? brain.health() : [],
   };
 }
 
@@ -2068,8 +2770,11 @@ function setGraphicsMode(mode) {
 
 // ---------------------------------------------------------------- updates
 
-function relaunchAfterUpdate(version, needsInstall, install) {
+function relaunchAfterUpdate(version, needsInstall, install, meta) {
   if (needsInstall) state.set('pendingInstall', true);
+  // Source updates: watch the next starts; if the new version can't start,
+  // the backup of the old one is restored automatically (see checkUpdateHealth).
+  if (meta && meta.backup) state.set('updateVerify', { version, from: meta.from, backup: meta.backup, boots: 0 });
   state.flush();
   // Don't cut COre off mid-answer: wait (up to 3 minutes) until it's idle.
   const started = Date.now();
@@ -2097,6 +2802,38 @@ async function checkForUpdates(quiet) {
   }
 }
 
+// After a source update, count starts that never reached the first frame.
+// Two failed starts in a row: restore the previous version and restart.
+// Returns true when it rolled back (the caller should stop starting up).
+function checkUpdateHealth() {
+  const uv = state.get('updateVerify');
+  if (!uv || app.isPackaged) return false;
+  if ((uv.boots || 0) < 2) {
+    state.set('updateVerify', { ...uv, boots: (uv.boots || 0) + 1 });
+    state.flush();
+    return false;
+  }
+  try {
+    const readPkg = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { return {}; } };
+    const depsDiffer = depsChanged(readPkg(ROOT), readPkg(uv.backup));
+    updater.restore(uv.backup);
+    crashLog.record('update-rollback', `v${uv.version} failed to start twice; restored v${uv.from}`);
+    state.set('updateVerify', null);
+    state.set('updateRolledBack', { from: uv.version, to: uv.from });
+    // Reinstall packages only if the failed update had changed them.
+    if (depsDiffer) state.set('pendingInstall', true);
+    state.flush();
+    app.relaunch();
+    app.exit(0);
+    return true;
+  } catch (err) {
+    crashLog.record('update-rollback-failed', err);
+    state.set('updateVerify', null);
+    state.flush();
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------- app
 
 app.on('second-instance', () => setDockVisible(true, true));
@@ -2107,7 +2844,7 @@ app.whenReady().then(async () => {
   state = loadState(userData);
   workDir = path.join(userData, 'claude-workspace');
   fs.mkdirSync(path.join(workDir, 'shots'), { recursive: true });
-  transcript.push(...(state.get('transcript') || []));
+  transcript.push(...(state.get('transcript') || []).map((e) => ({ ...e, seq: ++transcriptSeq })));
 
   try {
     brain = makeBrain();
@@ -2116,7 +2853,8 @@ app.whenReady().then(async () => {
   }
   updater = app.isPackaged
     ? new ReleaseUpdater({ getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg) })
-    : new Updater({ appRoot: ROOT, getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg) });
+    : new Updater({ appRoot: ROOT, getConfig: () => config.data.update, log: (msg) => addTranscript('system', msg), backupDir: path.join(userData, 'update-backup') });
+  if (!SMOKE && checkUpdateHealth()) return; // rolled back: restarting into the previous version
   if (!app.isPackaged && state.get('pendingInstall')) {
     // Finish an update that changed packages, before anything native loads.
     try {
@@ -2143,7 +2881,38 @@ app.whenReady().then(async () => {
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
   notes = new SK.Notes(path.join(userData, 'notes.json'));
+  refreshCores();
+  // Shared tasks that were running when COre stopped are marked interrupted,
+  // never re-run on their own (a retry is the user's call).
+  const tasks = state.get('tasks') || [];
+  const interrupted = tasks.filter((t) => t.status === 'running');
+  if (interrupted.length) {
+    for (const t of interrupted) {
+      t.status = 'interrupted';
+      for (const st of t.steps || []) if (st.status === 'running' || st.status === 'pending') st.status = 'interrupted';
+    }
+    state.set('tasks', tasks);
+    addTranscript('system', `${interrupted.length === 1 ? 'A shared task was' : `${interrupted.length} shared tasks were`} interrupted when COre closed: "${String(interrupted[0].text).slice(0, 80)}". Ask again to run it.`, { kind: 'error', author: 'prime' });
+  }
+  // Older versions kept the private calendar link in plain text: encrypt it.
+  if (config.data.skills && config.data.skills.calendarUrl) {
+    setSecret('calendar', config.data.skills.calendarUrl);
+    config.data.skills.calendarUrl = '';
+    config.save();
+  }
+  // Damaged data files were set aside, not overwritten: say where they are.
+  for (const [what, p] of [['settings', config.recovered], ['window state', state.recovered], ['memory', memory.recovered], ['notes', notes.recovered]]) {
+    if (p) {
+      crashLog.record('data-recovered', `${what}: ${p}`);
+      addTranscript('system', `Your ${what} file was damaged, so I started that part fresh. The old file is kept at ${p} if you want to recover anything.`);
+    }
+  }
   plugins = SK.loadPlugins(path.join(userData, 'skills'));
+  setTimeout(checkAutoBackup, 60_000);
+  syncPhone();
+  watchPower();
+  setTimeout(prewarmQuickVoice, 45_000);
+  setInterval(checkAutoBackup, 3600_000).unref();
   reminders = new Reminders({ store: state, onFire: onReminder });
 
   // Only COre's own overlay may use the microphone.
@@ -2182,6 +2951,26 @@ app.whenReady().then(async () => {
   createDock();
   createTray();
   registerHotkeys();
+  if (SMOKE) {
+    smoke = new SmokeTest({
+      target: SMOKE,
+      root: ROOT,
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      onDone: (code, report) => {
+        console.log(`[core] smoke test ${report.ok ? 'passed' : 'FAILED'}${report.error ? `: ${report.error}` : ''}`);
+        app.isQuitting = true;
+        app.exit(code);
+      },
+    });
+    const wc = dock.webContents;
+    if (!wc.isLoading()) smoke.mark('dock-loaded');
+    else {
+      wc.once('did-finish-load', () => smoke.mark('dock-loaded'));
+      wc.once('did-fail-load', (_e, code, desc) => smoke.mark('dock-loaded', false, `${code} ${desc}`));
+    }
+    return; // no updater, network services, greetings or presence in a self-test
+  }
   await startNotify();
   updater.start(relaunchAfterUpdate);
   reminders.start();
@@ -2216,6 +3005,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('will-quit', () => {
+  stopGlanceReader();
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
   if (!restarting) {

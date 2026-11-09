@@ -19,7 +19,10 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 
-const SKIP = new Set(['node_modules', '.git', 'dist', '.github']);
+// boot.js is the stable bootstrap that rescues failed updates: never replaced.
+const SKIP = new Set(['node_modules', '.git', 'dist', '.github', 'boot.js']);
+// What an update replaces, and therefore what a backup must hold to undo it.
+const BACKUP_ITEMS = ['src', 'assets', 'package.json', 'package-lock.json'];
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BRANCH_RE = /^[A-Za-z0-9_./-]+$/;
 
@@ -98,8 +101,11 @@ async function extractZip(zipFile, dest) {
 }
 
 class Updater {
-  constructor({ appRoot, getConfig, log, fetchImpl }) {
+  // backupDir: where the previous version is kept while an update is applied
+  // and verified (outside the app folder, e.g. userData/update-backup).
+  constructor({ appRoot, getConfig, log, fetchImpl, backupDir }) {
     this.appRoot = appRoot;
+    this.backupDir = backupDir || path.join(os.tmpdir(), 'core-update-backup');
     this.getConfig = getConfig; // () => config.update
     this.log = log || (() => {});
     this.fetch = fetchImpl || fetch;
@@ -115,9 +121,55 @@ class Updater {
     const c = this.getConfig() || {};
     const repo = String(c.source || '').trim();
     const branch = String(c.branch || 'main').trim();
+    // 'release' (default): only published GitHub releases. 'main': the latest
+    // development code on the branch (for developers; skips release gates).
+    const channel = c.channel === 'main' ? 'main' : 'release';
     if (!repo) return null;
     if (!REPO_RE.test(repo) || !BRANCH_RE.test(branch)) throw new Error(`update.source must look like "owner/repo" (got "${repo}")`);
-    return { repo, branch };
+    return { repo, branch, channel };
+  }
+
+  // The newest available version: { version, ref, label } or null.
+  async latest(src) {
+    if (src.channel === 'release') {
+      const res = await this.fetch(`https://api.github.com/repos/${src.repo}/releases/latest`, { headers: { accept: 'application/vnd.github+json' } });
+      if (res.status === 404) return null; // no published release yet
+      if (!res.ok) throw new Error(`could not read the latest release of ${src.repo} (HTTP ${res.status})`);
+      const r = await res.json();
+      if (!r || r.draft || r.prerelease || !parseVersion(r.tag_name) || !/^v?\d+\.\d+\.\d+$/.test(r.tag_name)) return null;
+      return { version: String(r.tag_name).replace(/^v/, ''), ref: `refs/tags/${r.tag_name}`, label: r.tag_name, tag: r.tag_name };
+    }
+    const raw = `https://raw.githubusercontent.com/${src.repo}/${src.branch}/package.json`;
+    const res = await this.fetch(raw, { headers: { 'cache-control': 'no-cache' } });
+    if (res.status === 404) throw new Error(`${src.repo} has no ${src.branch} branch with a package.json yet (is COre published there?)`);
+    if (!res.ok) throw new Error(`could not read ${src.repo}@${src.branch} (HTTP ${res.status})`);
+    const pkg = await res.json();
+    return { version: pkg.version, ref: `refs/heads/${src.branch}`, label: `${src.branch} (v${pkg.version})` };
+  }
+
+  // Copy what an update would replace into backupDir/v<version>.
+  backup(version) {
+    const dir = path.join(this.backupDir, `v${String(version).replace(/[^0-9A-Za-z.-]/g, '')}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    for (const item of BACKUP_ITEMS) {
+      const from = path.join(this.appRoot, item);
+      if (fs.existsSync(from)) fs.cpSync(from, path.join(dir, item), { recursive: true });
+    }
+    fs.writeFileSync(path.join(dir, '.complete'), String(Date.now())); // only complete backups may be restored
+    return dir;
+  }
+
+  // Put a backup back exactly (removes files the failed update added).
+  restore(dir) {
+    if (!dir || !fs.existsSync(path.join(dir, '.complete'))) throw new Error('no complete backup to restore');
+    for (const item of BACKUP_ITEMS) {
+      const from = path.join(dir, item);
+      if (!fs.existsSync(from)) continue;
+      const to = path.join(this.appRoot, item);
+      fs.rmSync(to, { recursive: true, force: true });
+      fs.cpSync(from, to, { recursive: true });
+    }
   }
 
   start(onUpdated) {
@@ -145,23 +197,32 @@ class Updater {
     }
     this.busy = true;
     try {
-      const raw = `https://raw.githubusercontent.com/${src.repo}/${src.branch}/package.json`;
-      const res = await this.fetch(raw, { headers: { 'cache-control': 'no-cache' } });
-      if (res.status === 404) throw new Error(`${src.repo} has no ${src.branch} branch with a package.json yet (is COre published there?)`);
-      if (!res.ok) throw new Error(`could not read ${src.repo}@${src.branch} (HTTP ${res.status})`);
-      const remotePkg = await res.json();
+      const target = await this.latest(src);
       const local = this.localVersion();
-      if (!isNewer(remotePkg.version, local)) {
-        if (!quiet) this.log(`COre is up to date (v${local}).`);
+      if (!target || !isNewer(target.version, local)) {
+        if (!quiet) this.log(target ? `COre is up to date (v${local}).` : `COre is up to date (v${local}); no published release is newer.`);
         return { status: 'current', version: local };
       }
-      this.log(`Updating COre v${local} → v${remotePkg.version}…`);
+      this.log(`Updating COre v${local} → v${target.version}…`);
       const oldPkg = JSON.parse(fs.readFileSync(path.join(this.appRoot, 'package.json'), 'utf8'));
+      let backup = null;
 
       if (fs.existsSync(path.join(this.appRoot, '.git'))) {
-        await run('git', ['pull', '--ff-only'], { cwd: this.appRoot });
+        // A git checkout: git is the safety net (fast-forward only, nothing overwritten).
+        if (target.tag) {
+          await run('git', ['fetch', '--quiet', 'origin', 'tag', target.tag, '--no-tags'], { cwd: this.appRoot });
+          await run('git', ['merge', '--ff-only', target.tag], { cwd: this.appRoot });
+        } else {
+          await run('git', ['pull', '--ff-only'], { cwd: this.appRoot });
+        }
       } else {
-        await this._applyZip(src);
+        backup = this.backup(local);
+        try {
+          await this._applyZip(src, target);
+        } catch (err) {
+          try { this.restore(backup); } catch (e) { throw new Error(`${err.message}; restoring v${local} also failed: ${e.message}`); }
+          throw new Error(`${err.message} (kept v${local})`);
+        }
       }
 
       const newPkg = JSON.parse(fs.readFileSync(path.join(this.appRoot, 'package.json'), 'utf8'));
@@ -169,8 +230,8 @@ class Updater {
       // on Windows the running app keeps native modules locked (EBUSY).
       const needsInstall = depsChanged(oldPkg, newPkg);
       this.log(`COre updated to v${newPkg.version}. Restarting…`);
-      if (onUpdated) onUpdated(newPkg.version, needsInstall);
-      return { status: 'updated', version: newPkg.version, needsInstall };
+      if (onUpdated) onUpdated(newPkg.version, needsInstall, null, { backup, from: local });
+      return { status: 'updated', version: newPkg.version, needsInstall, backup, from: local };
     } finally {
       this.busy = false;
     }
@@ -181,8 +242,8 @@ class Updater {
     await run(npm, ['install', '--no-audit', '--no-fund'], { cwd: this.appRoot, shell: process.platform === 'win32' });
   }
 
-  async _applyZip(src) {
-    const url = `https://codeload.github.com/${src.repo}/zip/refs/heads/${src.branch}`;
+  async _applyZip(src, target) {
+    const url = `https://codeload.github.com/${src.repo}/zip/${target.ref}`;
     const res = await this.fetch(url);
     if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'core-update-'));
@@ -195,6 +256,7 @@ class Updater {
       if (!top) throw new Error('the downloaded update has no package.json');
       const pkg = JSON.parse(fs.readFileSync(path.join(top, 'package.json'), 'utf8'));
       if (pkg.name !== 'core-companion') throw new Error(`refusing update: package is "${pkg.name}", not core-companion`);
+      if (target.tag && pkg.version !== target.version) throw new Error(`refusing update: ${target.tag} contains version ${pkg.version}`);
       pruneTree(top, this.appRoot, 'src');
       copyTree(top, this.appRoot);
     } finally {
@@ -203,4 +265,4 @@ class Updater {
   }
 }
 
-module.exports = { Updater, isNewer, parseVersion, depsChanged, copyTree, pruneTree };
+module.exports = { Updater, isNewer, parseVersion, depsChanged, copyTree, pruneTree, BACKUP_ITEMS };

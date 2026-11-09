@@ -1,13 +1,13 @@
 :root {
-  --bg: rgba(6, 10, 9, 0.94);
-  --line: rgba(120, 255, 170, 0.12);
-  --text: #e6f3ea;
-  --muted: #8ea597;
-  --accent: #4dff9a;
-  --accent-2: #4fd6ff;
-  --user: rgba(77, 255, 154, 0.1);
-  --core: rgba(255, 255, 255, 0.035);
-  --warn: #ffb547;
+  --bg: rgba(5, 7, 10, 0.96);
+  --line: rgba(232, 255, 241, 0.08);
+  --text: #e8fff1;
+  --muted: #86a595;
+  --accent: #3dff85;
+  --accent-2: #7dffb0;
+  --user: rgba(61, 255, 133, 0.1);
+  --core: rgba(232, 255, 241, 0.035);
+  --warn: #7dffb0;
   --bad: #ff5d6c;
 }
 
@@ -18,7 +18,7 @@ html, body {
   height: 100%;
   background: transparent;
   color: var(--text);
-  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  font: 14px/1.45 "COre Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 
 .shell {
@@ -43,8 +43,8 @@ html, body {
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: 0.04em; }
 .dot {
   width: 14px; height: 14px; border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #04140b 0%, #04140b 45%, #4dff9a 70%, rgba(77, 255, 154, 0) 75%);
-  box-shadow: 0 0 10px rgba(77, 255, 154, 0.45);
+  background: radial-gradient(circle at 50% 50%, #05070a 0%, #05070a 45%, #4dff9a 70%, rgba(61, 255, 133, 0) 75%);
+  box-shadow: 0 0 10px rgba(61, 255, 133, 0.45);
 }
 .actions { display: flex; gap: 4px; -webkit-app-region: no-drag; }
 
@@ -53,7 +53,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 30px; height: 30px; border-radius: 8px; border: 0; background: transparent;
   display: grid; place-items: center; fill: var(--muted); stroke: var(--muted);
 }
-.icon:hover { background: rgba(255, 255, 255, 0.06); fill: var(--text); stroke: var(--text); }
+.icon:hover { background: rgba(232, 255, 241, 0.06); fill: var(--text); stroke: var(--text); }
 .icon:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .menu {
@@ -65,7 +65,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .menu[hidden] { display: none; }
 .menu button { text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; }
-.menu button:hover { background: rgba(255, 255, 255, 0.06); }
+.menu button:hover { background: rgba(232, 255, 241, 0.06); }
 
 .status {
   padding: 6px 16px; font-size: 12px; color: var(--muted);
@@ -83,7 +83,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .msg.system { align-self: center; max-width: 96%; font-size: 12px; color: var(--muted); background: transparent; text-align: center; padding: 2px 8px; }
 .msg.notice {
   align-self: stretch; max-width: 100%; font-size: 13px;
-  background: rgba(255, 181, 71, 0.08); border: 1px solid rgba(255, 181, 71, 0.3);
+  background: rgba(125, 255, 176, 0.08); border: 1px solid rgba(125, 255, 176, 0.3);
 }
 .msg time { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
@@ -91,20 +91,40 @@ button { font: inherit; color: inherit; cursor: pointer; }
 textarea {
   width: 100%; resize: none; max-height: 140px; min-height: 40px;
   padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit;
+  background: rgba(232, 255, 241, 0.04); color: var(--text); font: inherit;
 }
-textarea::placeholder { color: #6e6c80; }
+textarea::placeholder { color: #86a595; }
 .row { display: flex; align-items: center; gap: 8px; }
 .spacer { flex: 1; }
 .toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
 .toggle input { accent-color: var(--accent-2); }
 .primary, .ghost { padding: 7px 14px; border-radius: 10px; border: 1px solid var(--line); }
-.primary { background: var(--accent); border-color: transparent; color: #04140b; font-weight: 600; }
+.primary { background: var(--accent); border-color: transparent; color: #05070a; font-weight: 600; }
 .primary:hover { filter: brightness(1.08); }
 .ghost { background: transparent; }
-.ghost:hover { background: rgba(255, 255, 255, 0.06); }
+.ghost:hover { background: rgba(232, 255, 241, 0.06); }
 
-.hints { padding: 0 16px 10px; font-size: 11px; color: #6e6c80; }
+.hints { padding: 0 16px 10px; font-size: 11px; color: #86a595; }
 
 .log::-webkit-scrollbar { width: 8px; }
-.log::-webkit-scrollbar-thumb { background: rgba(77, 255, 154, 0.15); border-radius: 8px; }
+.log::-webkit-scrollbar-thumb { background: rgba(61, 255, 133, 0.15); border-radius: 8px; }
+
+/* Brand: the real mark and the display face with tight tracking. */
+.brand { font: 600 15px/1 'COre Display', 'COre Sans', sans-serif; letter-spacing: -0.03em; }
+.mark { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; border: 1px solid #1d3327; background: #05070a; }
+
+/* Same language as the chat under the orb (dock.css): Smoke bubbles for COre,
+   Void with an Emerald edge for you, plain-text notes, a filled input. */
+.msg.core { background: #0b1f15; border: 1px solid #18382a; border-radius: 12px; }
+.msg.user { background: #05070a; border: 1px solid #1f6b42; border-radius: 12px; }
+.msg.system { color: #86a595; }
+.msg time { font: 10.5px 'COre Mono', monospace; }
+.status { font-size: 11.5px; }
+textarea { background: #0b1f15; border: 1px solid #18382a; border-radius: 14px; box-shadow: none; }
+textarea:focus, textarea:focus-visible { outline: none; border-color: #1f6b42; box-shadow: none; }
+.primary { border-radius: 999px; padding: 7px 18px; }
+.primary:hover { filter: none; background: #7dffb0; }
+.ghost { border-radius: 999px; background: #05070a; border-color: #1d3327; }
+.ghost:hover { background: #0b1f15; }
+.toggle input { accent-color: #3dff85; }
+.hints { font-family: 'COre Mono', monospace; font-size: 10.5px; }

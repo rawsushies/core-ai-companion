@@ -14,7 +14,9 @@ class ClaudeCliBrain extends RealBrain {
 test.afterEach(() => { for (const b of live) b.dispose(); live.clear(); });
 const { buildPrompt } = require('../src/main/brain');
 
-const FAKE = path.join(__dirname, 'fixtures', 'fake-claude.js');
+// On Windows the CLI is usually a .cmd shim launched through the shell, which
+// is exactly the path COre must get right there, so the tests use one too.
+const FAKE = path.join(__dirname, 'fixtures', process.platform === 'win32' ? 'fake-claude.cmd' : 'fake-claude.js');
 
 function memState() {
   const m = {};
@@ -53,7 +55,7 @@ test('screenshot prompt points Claude at a relative path inside its workspace', 
   assert.match(s, /\.\/shots\/a\.png, 1280x720 pixels/);
 });
 
-test('ClaudeCliBrain keeps one warm process across turns and only enables Read', { skip: process.platform === 'win32' }, async () => {
+test('ClaudeCliBrain keeps one warm process across turns and only enables Read', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   const argsLog = path.join(dir, 'args.log');
   process.env.FAKE_CLAUDE_ARGS = argsLog;
@@ -87,7 +89,7 @@ test('ClaudeCliBrain keeps one warm process across turns and only enables Read',
   brain.dispose();
 });
 
-test('ClaudeCliBrain falls back to one process per message on older CLIs', { skip: process.platform === 'win32' }, async () => {
+test('ClaudeCliBrain falls back to one process per message on older CLIs', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   const argsLog = path.join(dir, 'args.log');
   process.env.FAKE_CLAUDE_ARGS = argsLog;
@@ -104,7 +106,7 @@ test('ClaudeCliBrain falls back to one process per message on older CLIs', { ski
   brain.dispose();
 });
 
-test('Stop during a reply restarts the warm process and the next turn works', { skip: process.platform === 'win32' }, async () => {
+test('Stop during a reply restarts the warm process and the next turn works', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   process.env.FAKE_CLAUDE_DELAY = '30';
   const brain = new ClaudeCliBrain({ config: { command: FAKE }, workDir: dir, state: memState() });
@@ -117,7 +119,7 @@ test('Stop during a reply restarts the warm process and the next turn works', { 
   brain.dispose();
 });
 
-test('ClaudeCliBrain recovers from a stale session id', { skip: process.platform === 'win32' }, async () => {
+test('ClaudeCliBrain recovers from a stale session id', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   process.env.FAKE_CLAUDE_MODE = 'stale';
   const state = memState();
@@ -130,7 +132,7 @@ test('ClaudeCliBrain recovers from a stale session id', { skip: process.platform
   brain.dispose();
 });
 
-test('ClaudeCliBrain reports login problems clearly', { skip: process.platform === 'win32' }, async () => {
+test('ClaudeCliBrain reports login problems clearly', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   process.env.FAKE_CLAUDE_MODE = 'auth';
   const brain = new ClaudeCliBrain({ config: { command: FAKE }, workDir: dir, state: memState() });
@@ -139,7 +141,7 @@ test('ClaudeCliBrain reports login problems clearly', { skip: process.platform =
   brain.dispose();
 });
 
-test('ClaudeCliBrain can be aborted mid-turn', { skip: process.platform === 'win32' }, async () => {
+test('ClaudeCliBrain can be aborted mid-turn', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   const brain = new ClaudeCliBrain({ config: { command: FAKE }, workDir: dir, state: memState() });
   const ac = new AbortController();
@@ -148,7 +150,7 @@ test('ClaudeCliBrain can be aborted mid-turn', { skip: process.platform === 'win
   brain.dispose();
 });
 
-test('a logged-out Claude Code is detected before any request is sent', { skip: process.platform === 'win32' }, async () => {
+test('a logged-out Claude Code is detected before any request is sent', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   process.env.FAKE_CLAUDE_MODE = 'loggedout';
   const brain = new ClaudeCliBrain({ config: { command: FAKE }, workDir: dir, state: memState() });
@@ -159,7 +161,7 @@ test('a logged-out Claude Code is detected before any request is sent', { skip: 
   brain.dispose();
 });
 
-test('a persistent session sends screenshots inline as an image block', { skip: process.platform === 'win32' }, async () => {
+test('a persistent session sends screenshots inline as an image block', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-test-'));
   const brain = new ClaudeCliBrain({ config: { command: FAKE }, workDir: dir, state: memState() });
   const r = await brain.ask({ prompt: 'what is this', image: { base64: 'AAAA', mediaType: 'image/jpeg' }, onDelta: () => {} });

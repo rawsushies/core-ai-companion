@@ -30,7 +30,9 @@ let turns = 0;
 function reply(text) {
   turns++;
   out({ type: 'system', subtype: 'init', session_id: sid, model: 'fake' });
-  const r = `You said: ${text.trim()}. [[explain]] Done.`;
+  // FAKE_CLAUDE_REPLY: fixed reply for UI tests; {core} becomes the specialist's name.
+  const core = (/\[core ([^\]]+)\]/.exec(text) || [])[1] || 'COre';
+  const r = process.env.FAKE_CLAUDE_REPLY ? process.env.FAKE_CLAUDE_REPLY.replace(/\{core\}/g, core).replace(/\\n/g, '\n') : `You said: ${text.trim()}. [[explain]] Done.`;
   const pieces = r.match(/.{1,7}/g);
   const delay = Number(process.env.FAKE_CLAUDE_DELAY || 0);
   let i = 0;

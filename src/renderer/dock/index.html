@@ -4,30 +4,42 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
   <title>COre chat</title>
+  <link rel="stylesheet" href="../fonts/fonts.css">
   <link rel="stylesheet" href="dock.css">
 </head>
 <body>
   <div id="shell" class="shell">
+    <header class="dock-head">
+      <button type="button" id="settings-back" class="icon back" aria-label="Back to chat" title="Back to chat (Esc)">
+        <svg viewBox="0 0 24 24" width="17" height="17"><path d="M15 5l-7 7 7 7" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <img class="head-avatar" src="../../../assets/brand/icon-128.png" alt="" width="30" height="30">
+      <div class="head-id">
+        <div class="head-name"><span class="when-chat">COre</span><span class="when-settings">Quick settings</span></div>
+        <div id="head-status" class="head-status">Online</div>
+      </div>
+      <button type="button" id="history-toggle" class="icon history-toggle" title="Show history" aria-label="Show chat history">⌃</button>
+      <button type="button" id="gear" class="icon" title="Voice and tone" aria-label="Voice and tone settings">
+        <svg viewBox="0 0 24 24" width="17" height="17"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm8.1-2.3.1-1.2-.1-1.2 2-1.6-2-3.4-2.4 1a8 8 0 0 0-2-1.2L15.3 3h-4l-.4 2.6a8 8 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6-.1 1.2.1 1.2-2 1.6 2 3.4 2.4-1a8 8 0 0 0 2 1.2l.4 2.6h4l.4-2.6a8 8 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6Z" fill="none" stroke-width="1.6"/></svg>
+      </button>
+      <button type="button" id="hide" class="icon" title="Hide chat (Ctrl+Alt+C)" aria-label="Hide chat">
+        <svg viewBox="0 0 24 24" width="15" height="15"><path d="M6 6l12 12M18 6L6 18" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
     <div id="brain-banner" class="banner" hidden>
       <span id="banner-text">No brain is connected yet.</span>
       <button type="button" id="banner-login" class="primary-sm">Log in to Claude</button>
       <button type="button" id="banner-more" class="ghost">Other options</button>
     </div>
-    <button type="button" id="history-toggle" class="history-toggle" title="Show history" aria-label="Show chat history">⌃</button>
     <div id="log" class="log" aria-live="polite"></div>
     <div id="settings" class="settings" hidden>
-      <div class="settings-head">
-        <button type="button" id="settings-back" class="back" aria-label="Back to chat">← Back to chat</button>
-      </div>
-      <div class="section-title">Brain <span class="hint">tried in this order</span></div>
-      <div id="brain-list" class="brain-list"></div>
-      <div class="section-title">Reminders</div>
-      <div id="reminder-list" class="item-list"></div>
-      <div class="section-title">Memory <span class="hint" id="memory-count"></span></div>
-      <div id="memory-list" class="item-list"></div>
-      <div class="row"><button type="button" id="memory-clear" class="ghost">Forget everything</button></div>
-      <div class="section-title">Voice &amp; personality</div>
-      <label>Tone
+      <section class="card">
+        <div class="card-title">Brain <span class="hint">tried in this order</span></div>
+        <div id="brain-list" class="brain-list"></div>
+      </section>
+      <section class="card grid">
+        <div class="card-title">Voice</div>
+        <label>Tone
         <select id="tone">
           <option value="sarcastic">Sarcastic</option>
           <option value="dramatic">Dramatic</option>
@@ -36,7 +48,7 @@
           <option value="professional">Professional</option>
         </select>
       </label>
-      <label>Voice
+        <label>Voice
         <select id="kvoice">
           <option value="am_onyx">Onyx (deep)</option>
           <option value="am_fenrir">Fenrir (gravelly)</option>
@@ -48,42 +60,51 @@
           <option value="system">System voice</option>
         </select>
       </label>
-      <label>Pitch <span id="pitch-v"></span>
+        <label>Pitch <span id="pitch-v"></span>
         <input id="pitch" type="range" min="-7" max="3" step="0.5">
       </label>
-      <label>Robot <span id="robot-v"></span>
+        <label>Robot <span id="robot-v"></span>
         <input id="robot" type="range" min="0" max="1" step="0.05">
       </label>
-      <label class="check"><input id="speak-typed" type="checkbox"> Read typed replies aloud</label>
-      <div class="section-title">Display</div>
-      <label>Graphics <span class="hint">(restarts COre)</span>
+        <label class="check"><input id="speak-typed" type="checkbox"> Read typed replies aloud</label>
+      </section>
+      <section class="card">
+        <div class="card-title">Memory <span class="hint" id="memory-count"></span>
+          <button type="button" id="memory-clear" class="linkbtn danger">Forget all</button></div>
+        <div id="memory-list" class="item-list"></div>
+      </section>
+      <section class="card">
+        <div class="card-title">Reminders</div>
+        <div id="reminder-list" class="item-list"></div>
+      </section>
+      <section class="card">
+        <div class="card-title">Display <button type="button" id="diag" class="linkbtn">Copy diagnostics</button></div>
+        <label>Graphics <span class="hint">(restarts COre)</span>
         <select id="graphics">
           <option value="auto">Automatic</option>
           <option value="software">Safe mode (fixes black box)</option>
           <option value="gpu">Force GPU</option>
         </select>
       </label>
-      <div class="row bottom"><button type="button" id="diag" class="ghost">Copy diagnostics</button></div>
-      <div class="row">
+      </section>
+      <div class="links">
         <button type="button" id="new-chat" class="ghost">New chat</button>
         <button type="button" id="open-panel" class="ghost">History</button>
-        <button type="button" id="all-settings" class="ghost">All settings…</button>
-        <button type="button" id="updates" class="ghost">Check updates</button>
+        <button type="button" id="updates" class="ghost">Updates</button>
+        <button type="button" id="all-settings" class="primary-sm">All settings</button>
       </div>
     </div>
+    <div id="core-menu" class="core-menu" role="listbox" aria-label="Cores" hidden></div>
     <form id="composer" class="composer">
-      <button type="button" id="gear" class="icon" title="Voice and tone" aria-label="Voice and tone settings">
-        <svg viewBox="0 0 24 24" width="17" height="17"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm8.1-2.3.1-1.2-.1-1.2 2-1.6-2-3.4-2.4 1a8 8 0 0 0-2-1.2L15.3 3h-4l-.4 2.6a8 8 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6-.1 1.2.1 1.2-2 1.6 2 3.4 2.4-1a8 8 0 0 0 2 1.2l.4 2.6h4l.4-2.6a8 8 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6Z" fill="none" stroke-width="1.6"/></svg>
-      </button>
-      <textarea id="input" rows="1" placeholder="Ask COre anything…" aria-label="Message COre"></textarea>
+      <div class="field">
+        <button type="button" id="to" class="to" aria-haspopup="listbox" aria-expanded="false" title="Choose who gets your message (or type @name)"><span class="to-orb" aria-hidden="true"></span><span id="to-name" class="sr">COre</span></button>
+        <textarea id="input" rows="1" placeholder="Message…" title="Type @ to address another core" aria-label="Message"></textarea>
       <button type="button" id="mic" class="icon" title="Talk (Ctrl+Alt+Space)" aria-label="Talk">
         <svg viewBox="0 0 24 24" width="17" height="17"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke-width="1.7"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke-width="1.7" stroke-linecap="round"/></svg>
       </button>
+      </div>
       <button type="submit" id="send" class="icon send" title="Send" aria-label="Send">
         <svg viewBox="0 0 24 24" width="17" height="17"><path d="M4 12l16-8-6 16-2.5-6.5L4 12Z" fill="none" stroke-width="1.7" stroke-linejoin="round"/></svg>
-      </button>
-      <button type="button" id="hide" class="icon" title="Hide chat (Ctrl+Alt+C)" aria-label="Hide chat">
-        <svg viewBox="0 0 24 24" width="15" height="15"><path d="M6 6l12 12M18 6L6 18" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </form>
   </div>

@@ -8,6 +8,19 @@
 const { persona } = require('./persona');
 
 const MAX_HISTORY = 24;
+// Also bound history by size: pasted clipboard text and memory blocks can be
+// long, and small local models have small context windows (~4k tokens).
+const MAX_HISTORY_CHARS = 24_000;
+
+// Newest messages that fit both limits, starting on a user turn.
+function trimHistory(msgs, maxMsgs = MAX_HISTORY, maxChars = MAX_HISTORY_CHARS) {
+  let h = msgs.slice(-maxMsgs);
+  const size = (m) => (typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content || '').length);
+  let total = h.reduce((n, m) => n + size(m), 0);
+  while (h.length && total > maxChars) total -= size(h.shift());
+  while (h.length && h[0].role !== 'user') h.shift();
+  return h;
+}
 
 class HistoryMixin {
   constructor(state, key) {
@@ -18,8 +31,7 @@ class HistoryMixin {
     return this._state.get(this._key) || [];
   }
   push(...msgs) {
-    const h = [...this.history, ...msgs].slice(-MAX_HISTORY);
-    this._state.set(this._key, h);
+    this._state.set(this._key, trimHistory([...this.history, ...msgs]));
   }
   resetConversation() {
     this._state.set(this._key, []);
@@ -80,6 +92,7 @@ class OllamaBrain extends HistoryMixin {
       body: JSON.stringify({
         model,
         stream: true,
+        keep_alive: '30m', // keep the model loaded between turns instead of reloading it each time
         messages: [{ role: 'system', content: persona({ canReadFiles: false, tone }) }, ...this.history, user],
       }),
     }).catch((err) => {
@@ -200,4 +213,4 @@ class OpenAICompatBrain extends HistoryMixin {
   }
 }
 
-module.exports = { OllamaBrain, OpenAICompatBrain, readLines };
+module.exports = { OllamaBrain, OpenAICompatBrain, readLines, trimHistory };

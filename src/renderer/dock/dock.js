@@ -21,32 +21,87 @@
     if (near) log.scrollTop = log.scrollHeight;
   }
 
-  function add(role, text, extra) {
+  // ---------------------------------------------------------- Meiosis: cores
+  // One timeline for every core. Each core reply carries its name and role in
+  // text (colour is a second cue, never the only one).
+  let cores = [{ id: 'prime', name: 'COre', role: 'Prime', color: '#3dff85', active: true }];
+  const coreOf = (id) => cores.find((c) => c.id === (id || 'prime')) || cores[0];
+
+  function speakerHead(author) {
+    const c = coreOf(author);
+    const head = document.createElement('div');
+    head.className = 'who';
+    head.style.setProperty('--core', c.color);
+    const n = document.createElement('span');
+    n.className = 'who-name';
+    n.textContent = c.name;
+    const r = document.createElement('span');
+    r.className = 'who-role';
+    r.textContent = c.role;
+    head.append(n, r);
+    return head;
+  }
+
+  // A small smoke-orb avatar in the core's colour.
+  function avatar(id) {
+    const c = coreOf(id);
+    const a = document.createElement('span');
+    a.className = 'avatar';
+    a.style.setProperty('--core', c.color);
+    a.setAttribute('aria-hidden', 'true');
+    return a;
+  }
+
+  // Core replies are bubbles with an avatar; consecutive replies from the
+  // same core share one avatar and header.
+  function coreRow(author) {
+    const c = coreOf(author);
+    const last = log.lastElementChild;
+    const row = document.createElement('div');
+    row.className = `row core by-${c.id}`;
+    row.style.setProperty('--core', c.color);
+    const cont = last && last.classList.contains(`by-${c.id}`) && last.classList.contains('row');
+    if (cont) row.classList.add('cont');
+    const bubble = document.createElement('div');
+    bubble.className = 'msg core';
+    row.append(cont ? document.createElement('span') : avatar(c.id), bubble);
+    if (cont) row.firstChild.className = 'avatar-gap';
+    return { row, bubble, head: !cont };
+  }
+
+  // m: { role: 'user'|'core'|'system', text, author?, kind?, to? }
+  function add(role, text, m = {}) {
     stickToBottom(() => {
-      const el = document.createElement('div');
-      el.className = `msg ${role}`;
-      if (role === 'core') el.appendChild(window.renderMarkdown(text));
-      else el.textContent = text;
-      if (extra && extra.label) {
-        el.className = 'msg core helper';
-        el.textContent = '';
-        const head = document.createElement('div');
-        head.className = 'helper-head';
-        head.textContent = extra.label;
-        if (extra.color) el.style.setProperty('--helper', extra.color);
-        el.append(head, window.renderMarkdown(text));
+      if (role === 'core') {
+        const { row, bubble, head } = coreRow(m.author);
+        if (head) bubble.append(speakerHead(m.author));
+        bubble.append(window.renderMarkdown(text));
+        log.appendChild(row);
+      } else {
+        const el = document.createElement('div');
+        el.className = `msg ${role}`;
+        if (role === 'user' && m.to && m.to.length && !(m.to.length === 1 && m.to[0] === 'prime')) {
+          const to = document.createElement('div');
+          to.className = 'to-line';
+          for (const id of m.to) { const chip = document.createElement('span'); chip.className = 'to-chip'; chip.style.setProperty('--core', coreOf(id).color); chip.textContent = coreOf(id).name; to.append(chip); }
+          el.append(to, document.createTextNode(text.replace(/^(?:@[\p{L}\p{N}_-]+[\s,:]*)+/u, '')));
+        } else if (role === 'system') {
+          el.classList.add(m.kind || 'note');
+          if (m.author) { el.style.setProperty('--core', coreOf(m.author).color); el.classList.add('has-core'); }
+          el.textContent = text;
+        } else el.textContent = text;
+        log.appendChild(el);
       }
-      log.appendChild(el);
       trim();
     });
     reportSize();
   }
 
   function startStream() {
-    const el = document.createElement('div');
-    el.className = 'msg core streaming';
-    log.appendChild(el);
-    streaming = { el, text: '' };
+    const { row, bubble } = coreRow('prime');
+    bubble.classList.add('streaming');
+    log.appendChild(row);
+    streaming = { el: bubble, row, text: '', head: !row.classList.contains('cont') };
     trim();
   }
 
@@ -54,10 +109,233 @@
     if (!streaming) return;
     stickToBottom(() => {
       streaming.el.textContent = '';
-      streaming.el.appendChild(window.renderMarkdown(streaming.text));
+      if (streaming.head) streaming.el.append(speakerHead('prime'));
+      streaming.el.append(window.renderMarkdown(streaming.text));
     });
     reportSize();
   }
+
+  // ---------------------------------------------------------- core wheel + @ chips
+  // The recipient button is a mini orb of the current core. Clicking it opens
+  // a ring of the four cores that rotates the chosen one to the top.
+  const toBtn = document.getElementById('to');
+  const toName = document.getElementById('to-name');
+  const menu = document.getElementById('core-menu');
+  let recipient = 'prime';
+  let menuMode = null; // 'pick' (the wheel) | 'mention' (typing @)
+  let menuItems = [];
+  let menuIndex = 0;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function setRecipient(id) {
+    recipient = coreOf(id).id;
+    const c = coreOf(recipient);
+    toName.textContent = c.name;
+    toBtn.style.setProperty('--core', c.color);
+    toBtn.classList.toggle('specialist', recipient !== 'prime');
+    toBtn.setAttribute('aria-label', `Recipient: ${c.name} (${c.role}). Change`);
+    input.placeholder = 'Message…'; // the orb beside it names the recipient
+    input.setAttribute('aria-label', `Message ${c.name}`);
+  }
+
+  function closeMenu() {
+    menu.hidden = true;
+    menu.className = 'core-menu';
+    menuMode = null;
+    toBtn.setAttribute('aria-expanded', 'false');
+    shell.classList.remove('wheel-open');
+    reportSize();
+  }
+
+  function option(c, i) {
+    const o = document.createElement('div');
+    o.className = 'core-opt';
+    o.setAttribute('role', 'option');
+    o.setAttribute('aria-label', `${c.name}, ${c.role}${c.active ? '' : ', splits off when chosen'}`);
+    o.style.setProperty('--core', c.color);
+    o.addEventListener('mousedown', (e) => { e.preventDefault(); choose(i); });
+    // Hover highlights chips only: on the wheel, an orb sliding under a resting
+    // pointer while the ring turns would fire mouseenter and turn it back.
+    o.addEventListener('mouseenter', () => { if (menuMode === 'mention') highlight(i); });
+    return o;
+  }
+
+  function openMenu(mode, list) {
+    menuMode = mode;
+    menuItems = list;
+    menuIndex = mode === 'pick' ? Math.max(0, list.findIndex((c) => c.id === recipient)) : 0;
+    menu.textContent = '';
+    if (mode === 'pick') {
+      menu.className = 'core-menu wheel';
+      const ring = document.createElement('div');
+      ring.className = 'ring';
+      list.forEach((c, i) => {
+        const o = option(c, i);
+        o.classList.add('orb-opt');
+        o.style.setProperty('--a', `${(360 / list.length) * i}deg`);
+        o.append(avatar(c.id));
+        ring.append(o);
+      });
+      const info = document.createElement('div');
+      info.className = 'wheel-info';
+            const nm = document.createElement('div'); nm.className = 'wheel-name';
+      const rl = document.createElement('div'); rl.className = 'wheel-role';
+      const hint = document.createElement('div'); hint.className = 'wheel-hint'; hint.textContent = '← → to turn · Enter to choose';
+      info.append(nm, rl, hint);
+      menu.append(ring, info);
+      shell.classList.add('wheel-open');
+      if (!reduceMotion) { ring.classList.add('spin-in'); setTimeout(() => ring.classList.remove('spin-in'), 450); }
+    } else {
+      menu.className = 'core-menu chips';
+      list.forEach((c, i) => {
+        const o = option(c, i);
+        o.classList.add('chip-opt');
+        const n = document.createElement('span'); n.className = 'who-name'; n.textContent = c.name;
+        o.append(avatar(c.id), n);
+        menu.append(o);
+      });
+    }
+    menu.hidden = !list.length;
+    toBtn.setAttribute('aria-expanded', String(!menu.hidden && mode === 'pick'));
+    highlight(menuIndex);
+    reportSize();
+  }
+
+  function highlight(i) {
+    if (!menuItems.length) return;
+    menuIndex = (i + menuItems.length) % menuItems.length;
+    const opts = [...menu.querySelectorAll('.core-opt')];
+    opts.forEach((o, k) => o.setAttribute('aria-selected', String(k === menuIndex)));
+    if (menuMode === 'pick') {
+      // Turn the ring so the highlighted core sits at the top.
+      const ring = menu.querySelector('.ring');
+      ring.style.setProperty('--rot', `${-(360 / menuItems.length) * menuIndex}deg`);
+      const c = menuItems[menuIndex];
+      menu.querySelector('.wheel-name').textContent = c.name;
+      menu.querySelector('.wheel-name').style.color = c.color;
+      menu.querySelector('.wheel-role').textContent = `${c.role}${c.active ? '' : ' · splits off'}`;
+    }
+  }
+
+  function choose(i) {
+    const c = menuItems[i];
+    if (!c) return closeMenu();
+    if (menuMode === 'pick') setRecipient(c.id);
+    else {
+      // Replace the partial "@sc" with "@Scout ".
+      const caret = input.selectionStart;
+      const before = input.value.slice(0, caret).replace(/@([\p{L}\p{N}_-]*)$/u, `@${c.name} `);
+      input.value = before + input.value.slice(caret);
+      input.setSelectionRange(before.length, before.length);
+      autosize();
+    }
+    closeMenu();
+    input.focus();
+  }
+
+  toBtn.addEventListener('click', () => (menuMode === 'pick' ? closeMenu() : openMenu('pick', cores)));
+  toBtn.addEventListener('keydown', (e) => {
+    if (menuMode !== 'pick') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); highlight(menuIndex + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); highlight(menuIndex - 1); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(menuIndex); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
+  });
+  input.addEventListener('input', () => {
+    // Only mentions at the start address cores, so only suggest there.
+    const head = input.value.slice(0, input.selectionStart);
+    const m = /^(?:@[\p{L}\p{N}_-]+[\s,:]*)*@([\p{L}\p{N}_-]*)$/u.exec(head);
+    if (m) openMenu('mention', cores.filter((c) => c.name.toLowerCase().startsWith(m[1].toLowerCase()) || c.role.toLowerCase().startsWith(m[1].toLowerCase())));
+    else if (menuMode === 'mention') closeMenu();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (menu.hidden) return;
+    const next = menuMode === 'pick' ? ['ArrowRight', 'ArrowDown'] : ['ArrowRight', 'ArrowDown'];
+    if (next.includes(e.key)) { e.preventDefault(); highlight(menuIndex + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); highlight(menuIndex - 1); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); choose(menuIndex); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); }
+  }, true);
+  document.addEventListener('mousedown', (e) => { if (!menu.contains(e.target) && e.target !== toBtn && !toBtn.contains(e.target)) closeMenu(); });
+
+  // ---------------------------------------------------------- proposed file changes
+  // A core proposed a whole file: show the diff; nothing is written until the
+  // user clicks Apply. Applied changes can be undone.
+  const proposals = new Map(); // id -> card parts
+  api.onProposal((p) => {
+    stickToBottom(() => {
+      const c = coreOf(p.author);
+      const row = document.createElement('div');
+      row.className = `row core by-${c.id} proposal-row`;
+      row.style.setProperty('--core', c.color);
+      const card = document.createElement('div');
+      card.className = 'msg core proposal';
+      const head = document.createElement('div');
+      head.className = 'prop-head';
+      const title = document.createElement('div');
+      title.className = 'prop-title';
+      title.textContent = `${c.name} proposes ${p.isNew ? 'a new file' : 'a change'}`;
+      const file = document.createElement('div');
+      file.className = 'prop-file';
+      const name = document.createElement('code'); name.textContent = p.rel;
+      const stats = document.createElement('span'); stats.className = 'prop-stats';
+      const add = document.createElement('span'); add.className = 'plus'; add.textContent = `+${p.added}`;
+      const rem = document.createElement('span'); rem.className = 'minus'; rem.textContent = `−${p.removed}`;
+      stats.append(add, rem);
+      file.append(name, stats);
+      head.append(title, file);
+      const det = document.createElement('details');
+      const sum = document.createElement('summary'); sum.textContent = 'Show changes';
+      const pre = document.createElement('pre'); pre.className = 'diff';
+      for (const l of p.preview || []) {
+        const line = document.createElement('div');
+        line.className = l.t === '+' ? 'd-add' : l.t === '-' ? 'd-del' : l.t === '@' ? 'd-gap' : 'd-ctx';
+        line.textContent = `${l.t === '@' ? '' : l.t}${l.t === '@' ? '…' : ' '}${l.t === '@' ? '' : l.s}`;
+        pre.append(line);
+      }
+      det.append(sum, pre);
+      const bar = document.createElement('div');
+      bar.className = 'prop-bar';
+      const status = document.createElement('span'); status.className = 'prop-status'; status.textContent = 'Not applied';
+      const apply = button('Apply', 'primary-sm', () => { apply.disabled = true; reject.disabled = true; status.textContent = 'Applying…'; api.proposal(p.id, 'apply'); });
+      const reject = button('Reject', 'ghost', () => { apply.disabled = true; reject.disabled = true; api.proposal(p.id, 'reject'); });
+      apply.setAttribute('aria-label', `Apply change to ${p.rel}`);
+      reject.setAttribute('aria-label', `Reject change to ${p.rel}`);
+      bar.append(status, reject, apply);
+      card.append(head, det, bar);
+      row.append(avatar(c.id), card);
+      log.appendChild(row);
+      proposals.set(p.id, { status, apply, reject, bar, rel: p.rel });
+      trim();
+    });
+    reportSize();
+  });
+  api.onProposalUpdate(({ id, state, message }) => {
+    const c = proposals.get(id);
+    if (!c) return;
+    if (state === 'applied') {
+      c.status.textContent = 'Applied ✓';
+      c.apply.remove(); c.reject.remove();
+      const undo = button('Undo', 'ghost', () => { undo.disabled = true; api.proposal(id, 'undo'); });
+      undo.setAttribute('aria-label', `Undo change to ${c.rel}`);
+      c.bar.append(undo);
+    } else if (state === 'rejected') { c.status.textContent = 'Rejected'; c.apply.remove(); c.reject.remove(); }
+    else if (state === 'undone') { c.status.textContent = 'Undone'; c.bar.querySelectorAll('button').forEach((b) => b.remove()); }
+    else if (state === 'error') { c.status.textContent = message || 'Failed'; c.status.classList.add('err'); c.bar.querySelectorAll('button').forEach((b) => { b.disabled = true; }); }
+    reportSize();
+  });
+
+  // Floating bubbles: only bubbles catch the mouse; the gaps between them
+  // let clicks through to the app underneath (main applies this on Windows
+  // and macOS, where mouse moves are forwarded while clicks pass through).
+  const BUBBLE = '.dock-head, .msg, .row.core, .composer, .settings, .core-menu, .banner, .action, .proposal';
+  let overBubble = true;
+  function setOver(v) { if (v !== overBubble) { overBubble = v; api.setInteractive(v); } }
+  document.addEventListener('mousemove', (e) => setOver(!!(e.target && e.target.closest && e.target.closest(BUBBLE))));
+  document.addEventListener('mouseleave', () => setOver(false));
+
+  api.onCores((list) => { if (Array.isArray(list) && list.length) { cores = list; setRecipient(recipient); } });
+  api.onRecipient((id) => { setRecipient(id); input.focus(); });
 
   let sizeRaf = 0;
   function reportSize() {
@@ -72,8 +350,20 @@
     input.classList.toggle('scroll', input.scrollHeight > 110);
   }
 
+  // Header status: Online / Thinking… / Speaking / Offline.
+  const headStatus = document.getElementById('head-status');
+  let offline = false;
+  let speaking = false;
+  function syncStatus() {
+    const t = offline ? 'Offline' : busy && !speaking ? 'Thinking…' : speaking ? 'Speaking' : 'Online';
+    headStatus.textContent = t;
+    headStatus.classList.toggle('busy', !offline && (busy || speaking));
+    headStatus.classList.toggle('offline', offline);
+  }
+
   function setBusy(b) {
     busy = b;
+    syncStatus();
     send.classList.toggle('busy', b);
     send.title = b ? 'Stop' : 'Send';
     send.setAttribute('aria-label', send.title);
@@ -82,8 +372,10 @@
   document.getElementById('composer').addEventListener('submit', (e) => {
     e.preventDefault();
     if (busy && !input.value.trim()) { api.stop(); return; }
-    const text = input.value.trim();
+    let text = input.value.trim();
     if (!text) return;
+    // The picker addresses the message unless it already starts with @mentions.
+    if (recipient !== 'prime' && !text.startsWith('@')) text = `@${coreOf(recipient).name} ${text}`;
     api.ask(text);
     input.value = '';
     autosize();
@@ -209,6 +501,8 @@
     }
     const anyConnected = list.some((p) => p.state === 'connected');
     banner.hidden = anyConnected;
+    offline = !anyConnected;
+    syncStatus();
     reportSize();
   }
   document.getElementById('banner-login').addEventListener('click', () => api.loginClaude());
@@ -230,6 +524,47 @@
     x.title = label;
     x.setAttribute('aria-label', `${label}: ${text}`);
     row.append(t, x);
+    return row;
+  }
+
+  // A remembered fact: project tag, where it came from, what it replaced,
+  // and inline editing (Electron has no prompt()).
+  function memoryRow(m) {
+    const row = document.createElement('div');
+    row.className = 'item memory';
+    if (m.project) { const p = document.createElement('span'); p.className = 'when tag'; p.textContent = m.project; row.append(p); }
+    const t = document.createElement('span');
+    t.textContent = m.text;
+    const via = m.source && m.source.via ? `from ${m.source.via}` : '';
+    const when = new Date(m.updatedAt || m.ts).toLocaleDateString();
+    const was = m.history && m.history.length ? ` · was: ${m.history.map((h) => h.text).join(' → ')}` : '';
+    t.title = `${when}${via ? ` · ${via}` : ''}${was}`;
+    const edit = button('✎', 'x', () => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = m.text;
+      input.maxLength = 300;
+      input.className = 'mem-edit';
+      let finished = false; // Enter then blur must not save twice
+      const done = (save) => {
+        if (finished) return;
+        finished = true;
+        const v = input.value.trim();
+        if (save && v && v !== m.text) { t.textContent = v; api.memoryEdit(m.id, v); }
+        input.replaceWith(t);
+      };
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') done(true); if (ev.key === 'Escape') { ev.stopPropagation(); done(false); } });
+      input.addEventListener('blur', () => done(true));
+      t.replaceWith(input);
+      input.focus();
+      input.select();
+    });
+    edit.title = 'Edit';
+    edit.setAttribute('aria-label', `Edit: ${m.text}`);
+    const x = button('✕', 'x', () => api.memoryForget(m.id));
+    x.title = 'Forget';
+    x.setAttribute('aria-label', `Forget: ${m.text}`);
+    row.append(t, edit, x);
     return row;
   }
 
@@ -257,7 +592,7 @@
     memoryList.textContent = '';
     memoryCount.textContent = list && list.length ? `${list.length} saved` : '';
     if (!list || !list.length) { memoryList.append(empty('Nothing yet. Tell me about yourself and I will remember.')); return reportSize(); }
-    for (const m of list) memoryList.append(itemRow(m.text, '', () => api.memoryForget(m.id), 'Forget'));
+    for (const m of list) memoryList.append(memoryRow(m));
     reportSize();
   }
 
@@ -281,10 +616,9 @@
     reportSize();
   });
 
-  api.onMessage(({ role, text, label, color }) => {
+  api.onMessage(({ role, text, author, kind, to }) => {
     if (role === 'core-start') { startStream(); return; }
-    if (role === 'helper') { add('core', text, { label, color }); return; }
-    add(role, text);
+    add(role, text, { author, kind, to });
   });
   api.onDelta((d) => {
     if (!streaming) startStream();
@@ -302,6 +636,7 @@
     karaoke = null;
   }
   api.onSpeak(({ text, ms }) => {
+    speaking = true; syncStatus();
     finishKaraoke();
     if (!streaming) startStream();
     const words = text.match(/\s*\S+/g) || [];
@@ -324,12 +659,13 @@
     }, 60);
   });
   api.onDone(({ text }) => {
+    speaking = false; syncStatus();
     finishKaraoke();
     if (streaming) {
       if (text) streaming.text = text;
       renderStream();
       streaming.el.classList.remove('streaming');
-      if (!streaming.text.trim()) streaming.el.remove();
+      if (!streaming.text.trim()) (streaming.row || streaming.el).remove();
       streaming = null;
     }
     reportSize();
@@ -365,7 +701,8 @@
     if (!d) return;
     api.brainStatus().then(renderBrain);
     applySettings(d.settings);
-    for (const m of d.recent) add(m.role, m.text);
+    if (Array.isArray(d.cores) && d.cores.length) { cores = d.cores; setRecipient('prime'); }
+    for (const m of d.recent) add(m.role, m.text, m);
     log.scrollTop = log.scrollHeight;
     reportSize();
   });

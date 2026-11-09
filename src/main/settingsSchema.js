@@ -79,6 +79,15 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'projects',
+    title: 'Projects',
+    fields: [
+      { key: 'tools.projectRoot', label: 'Project folder COre may read (never change)', type: 'folder', optional: true },
+      { key: 'tools.enabled', label: 'Let COre and its cores read it', type: 'toggle' },
+      { key: 'tools.allowWrites', label: 'Let cores propose changes (you review a diff and approve each one)', type: 'toggle' },
+    ],
+  },
+  {
     id: 'skills',
     title: 'Skills',
     fields: [
@@ -87,7 +96,33 @@ const SECTIONS = [
       { key: 'skills.music', label: 'Control music (play, pause, next, volume)', type: 'toggle' },
       { key: 'skills.apps', label: 'Open apps from a safe list', type: 'toggle' },
       { key: 'skills.calendar', label: 'Read my calendar', type: 'toggle' },
-      { key: 'skills.calendarUrl', label: 'Calendar feed link (ICS, from Google / Outlook calendar settings)', type: 'text', maxLength: 500, optional: true, pattern: '^(https|webcal)://\\S+$' },
+      { key: 'skills.archicad', label: 'Read my open Archicad project (count elements; never changes it)', type: 'toggle' },
+      { key: 'skills.glance', label: 'Show cards beside COre (now playing, lyrics, short lists)', type: 'toggle' },
+      { key: 'skills.lyrics', label: 'Look up lyrics on lrclib.net when I ask (sends the song title and artist)', type: 'toggle' },
+      { key: 'skills.quick', label: 'Answer short requests instantly, without the brain (time, music keys)', type: 'toggle' },
+      // secret: stored encrypted (like API keys), never shown back or logged.
+      { key: 'skills.calendarUrl', label: 'Private calendar feed link (ICS, from Google / Outlook calendar settings)', type: 'text', maxLength: 500, optional: true, pattern: '^(https|webcal)://\\S+$', secret: 'calendar' },
+    ],
+  },
+  {
+    id: 'phone',
+    title: 'Phone',
+    fields: [
+      { key: 'phone.enabled', label: 'Let paired phones talk to COre over this Wi-Fi (end-to-end encrypted, never through the internet)', type: 'toggle' },
+      { key: 'phone.actions', label: 'Scan a QR code with your phone camera. Both screens show a code to compare.', type: 'actions', items: [['pairPhone', 'Pair a phone'], ['revokeAllPhones', 'Remove all phones']] },
+      { key: 'phone.devices', label: 'Paired phones', type: 'devices' },
+    ],
+  },
+  {
+    id: 'backup',
+    title: 'Backup',
+    fields: [
+      { key: 'backup.folder', label: 'Backup folder (pick one OneDrive, Google Drive or Dropbox syncs for cloud backups)', type: 'folder', optional: true, action: 'pickBackupFolder' },
+      { key: 'backup.actions', label: 'Settings, memories, notes, reminders and plugins. Never API keys.', type: 'actions', items: [['useCloudFolder', 'Use my cloud folder'], ['backupNow', 'Back up now'], ['restoreBackup', 'Restore…']] },
+      { key: 'backup.auto', label: 'Back up automatically', type: 'select', options: [['0', 'Never'], ['24', 'Every day'], ['168', 'Every week']] },
+      { key: 'backup.keep', label: 'Backups to keep', type: 'range', min: 3, max: 30, step: 1 },
+      // secret: stored encrypted with this PC's account, never written into a backup.
+      { key: 'backup.passphrase', label: 'Passphrase to encrypt backups (recommended for cloud folders; you need it to restore them)', type: 'text', maxLength: 200, optional: true, secret: 'backup' },
     ],
   },
   {
@@ -101,6 +136,7 @@ const SECTIONS = [
       { key: 'orb.hideFromCaptures', label: 'Hide COre from its own screenshots', type: 'toggle' },
       { key: 'notify.enabled', label: 'Accept notifications from other programs', type: 'toggle', restart: true },
       { key: 'update.enabled', label: 'Update automatically', type: 'toggle', restart: true },
+      { key: 'update.channel', label: 'Update from', type: 'select', options: [['release', 'Published releases (recommended)'], ['main', 'Latest development code (may be unstable)']] },
     ],
   },
 ];
@@ -126,6 +162,11 @@ function validate(key, value) {
     if (!t) return f.optional ? '' : undefined;
     if (f.pattern && !new RegExp(f.pattern, 'i').test(t)) return undefined;
     return t.length <= (f.maxLength || 200) && !/[\u0000-\u001f]/.test(t) ? t : undefined;
+  }
+  if (f.type === 'folder') {
+    const t = String(value == null ? '' : value).trim();
+    if (!t) return f.optional ? '' : undefined;
+    try { return require('fs').statSync(t).isDirectory() && require('path').isAbsolute(t) ? t : undefined; } catch { return undefined; }
   }
   if (f.type === 'hotkey') return HOTKEY_RE.test(String(value)) ? String(value) : undefined;
   return undefined;

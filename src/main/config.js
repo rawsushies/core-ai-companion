@@ -75,12 +75,17 @@ const DEFAULTS = {
     radius: 60, // px
     particles: 24000, // smoke style: more = denser filaments, heavier on the GPU
     renderScale: 1, // lower (0.6-0.8) on slow GPUs
-    idleFps: 30, // frame rate when nothing is happening (moving/talking always runs at full rate)
+    idleFps: 20, // frame rate when nothing is happening (moving/talking runs faster)
     graphics: 'auto', // 'auto' | 'software' (safe mode: fixes black boxes on some drivers) | 'gpu'
     backdrop: 'auto', // 'auto' follows your Windows/macOS light or dark theme; or 'light' / 'dark'
     followDisplay: true, // move to the monitor you're using when you summon COre
     hideFromCaptures: true, // hide the orb for a moment while COre takes a screenshot
     home: null, // {x, y} remembered after you drag it
+  },
+  tools: {
+    projectRoot: '', // a folder the user shared with COre's cores, read-only ('' = none)
+    enabled: true, // let the cores read it
+    allowWrites: false, // let cores PROPOSE file changes; each one is applied only when you click Apply
   },
   skills: {
     weather: true,
@@ -89,6 +94,21 @@ const DEFAULTS = {
     apps: true,
     calendar: true,
     calendarUrl: '', // secret-ish ICS link from your calendar's settings
+    archicad: false, // read-only access to a running Archicad on this PC (local JSON API)
+    glance: true, // the card beside the orb (now playing, lyrics, short lists)
+    lyrics: true, // look up lyrics on lrclib.net (sends the song title and artist) when you ask for them
+    quick: true, // answer short requests (time, music keys, lyrics) on the spot, without the brain
+  },
+  phone: {
+    enabled: false, // the phone companion: chat with COre from your phone's browser on the same Wi-Fi
+    port: 47330,
+    host: '', // this PC's address for the QR code; empty = detect (set it if you have several networks or a VPN)
+  },
+  backup: {
+    folder: '', // where backups go (a cloud-synced folder makes them cloud backups)
+    auto: '24', // hours between automatic backups ('0' = never); runs only when a folder is set
+    keep: 10,
+    passphrase: '', // stored as an encrypted secret instead (Settings, Backup)
   },
   watch: {
     enabled: true, // notice error pop-ups / frozen apps from window titles and offer help (no screenshots)
@@ -106,6 +126,7 @@ const DEFAULTS = {
   update: {
     enabled: true,
     source: 'rawsushies/core-ai-companion', // GitHub "owner/repo" that hosts COre; '' = updates off
+    channel: 'release', // 'release' = published releases only (gated); 'main' = latest development code
     branch: 'main',
     checkHours: 6,
   },
@@ -116,6 +137,20 @@ const DEFAULTS = {
     speak: false, // read notification titles aloud
   },
 };
+
+// A JSON file that won't parse is moved aside (never overwritten), so the
+// user's settings, keys or memories can be recovered from it. Returns the
+// quarantine path, or null.
+function quarantine(file) {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const to = `${file}.corrupt-${stamp}`;
+    fs.renameSync(file, to);
+    return to;
+  } catch {
+    return null;
+  }
+}
 
 function isObj(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
@@ -134,13 +169,25 @@ class JsonFile {
   constructor(file, defaults) {
     this.file = file;
     this.defaults = defaults;
+    this.recovered = null; // path of a damaged file that was set aside
     this.data = this._load();
   }
   _load() {
+    let text;
     try {
-      return deepMerge(this.defaults, JSON.parse(fs.readFileSync(this.file, 'utf8')));
+      text = fs.readFileSync(this.file, 'utf8');
     } catch (err) {
       if (err.code !== 'ENOENT') console.error(`[core] could not read ${this.file}: ${err.message}`);
+      return deepMerge(this.defaults, {});
+    }
+    try {
+      const parsed = JSON.parse(text);
+      if (!isObj(parsed)) throw new Error('not a JSON object');
+      return deepMerge(this.defaults, parsed);
+    } catch (err) {
+      // Damaged (hand edit, disk problem): keep it for recovery, start fresh.
+      this.recovered = quarantine(this.file);
+      console.error(`[core] ${this.file} is damaged (${err.message}); kept as ${this.recovered}`);
       return deepMerge(this.defaults, {});
     }
   }
@@ -169,6 +216,7 @@ function loadState(dir) {
   const st = new JsonFile(path.join(dir, 'state.json'), {});
   let timer = null;
   return {
+    recovered: st.recovered,
     get: (k) => st.data[k],
     set: (k, v) => {
       st.data[k] = v;
@@ -179,4 +227,4 @@ function loadState(dir) {
   };
 }
 
-module.exports = { loadConfig, loadState, deepMerge, DEFAULTS };
+module.exports = { loadConfig, loadState, deepMerge, DEFAULTS, quarantine };

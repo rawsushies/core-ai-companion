@@ -174,8 +174,120 @@
       caption.classList.remove('show');
       return;
     }
-    caption.textContent = text;
+    caption.textContent = '';
+    // Meiosis: say who is talking (helpers always; COre when helpers are out).
+    const sp = cfg.speaker;
+    if (sp && sp.show && sp.name) {
+      const n = document.createElement('span');
+      n.className = 'speaker';
+      n.textContent = sp.name;
+      if (/^#[0-9a-f]{6}$/i.test(sp.color || '')) n.style.color = sp.color;
+      caption.append(n, document.createTextNode(text));
+    } else caption.textContent = text;
     caption.classList.add('show');
+  }
+
+  // ------------------------------------------------------------ glance card
+  // Now playing, synced lyrics or a short list beside the orb. DOM only: it
+  // updates when the line or the second changes, never per frame.
+  const glanceEl = document.getElementById('glance');
+  const gq = (c) => glanceEl.querySelector(c);
+  const GE = { kicker: gq('.g-kicker'), title: gq('.g-title'), sub: gq('.g-sub'), lyrics: gq('.g-lyrics'), prev: gq('.g-prev'), cur: gq('.g-cur'), next: gq('.g-next'), list: gq('.g-list'), bar: gq('.g-bar'), fill: gq('.g-bar i') };
+  let glance = null;
+  let glanceLines = null;
+  let glancePlain = null;
+  let glanceIdx = -2;
+  let glanceTimer = 0;
+  window.__coreSetGlance = (g) => setGlance(g); // test hook
+  window.__coreGlance = () => (glance ? { kind: glance.kind, title: GE.title.textContent, cur: GE.cur.textContent, hidden: glanceEl.hidden } : null); // test hook
+
+  function glancePos() {
+    if (!glance || !glance.at) return 0;
+    return Math.min(glance.durMs || Infinity, glance.posMs + (glance.playing ? Date.now() - glance.at : 0));
+  }
+
+  // Same binary search as glance.js lineIndex (main process).
+  function lyricIndex(lines, ms) {
+    let lo = 0, hi = lines.length - 1, ans = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].t <= ms) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+    return ans;
+  }
+
+  function glanceLyricLine(i) { return i >= 0 && glanceLines && glanceLines[i] ? glanceLines[i].text || '♪' : ''; }
+
+  function tickGlance() {
+    if (!glance) return;
+    const pos = glancePos();
+    if (glance.durMs) GE.fill.style.transform = `scaleX(${Math.min(1, pos / glance.durMs).toFixed(4)})`;
+    if (glance.kind === 'lyrics' && glanceLines && glanceLines.length) {
+      const i = lyricIndex(glanceLines, pos + 250); // a beat early reads better
+      if (i !== glanceIdx) {
+        glanceIdx = i;
+        GE.prev.textContent = glanceLyricLine(i - 1);
+        GE.cur.textContent = i < 0 ? '♪' : glanceLyricLine(i);
+        GE.next.textContent = glanceLyricLine(i + 1);
+        GE.cur.classList.remove('in'); void GE.cur.offsetWidth; GE.cur.classList.add('in');
+      }
+    }
+  }
+
+  function setGlance(g) {
+    clearInterval(glanceTimer);
+    glanceTimer = 0;
+    if (!g || (cfg.a11y && cfg.a11y.captions === false && g.kind === 'lyrics')) {
+      glance = null; glanceLines = null; glancePlain = null;
+      glanceEl.classList.remove('show');
+      setTimeout(() => { if (!glance) glanceEl.hidden = true; }, 220);
+      return;
+    }
+    const sameTrack = glance && glance.kind === g.kind && glance.title === g.title && glance.artist === g.artist;
+    if (!sameTrack) { glanceLines = null; glancePlain = null; glanceIdx = -2; }
+    if (g.lines !== undefined) { glanceLines = g.lines; glanceIdx = -2; }
+    if (g.plain !== undefined) glancePlain = g.plain;
+    glance = g;
+    glanceEl.hidden = false;
+    glanceEl.dataset.kind = g.kind;
+    GE.list.textContent = '';
+    if (g.kind === 'card') {
+      GE.kicker.textContent = '';
+      GE.title.textContent = g.title || '';
+      GE.sub.textContent = '';
+      for (const l of g.lines || []) { const li = document.createElement('li'); li.textContent = l; GE.list.append(li); }
+    } else if (g.waiting) {
+      GE.kicker.textContent = g.kind === 'lyrics' ? 'Lyrics' : 'Now playing';
+      GE.title.textContent = 'Listening for music…';
+      GE.sub.textContent = '';
+    } else {
+      GE.kicker.textContent = g.kind === 'lyrics' ? 'Lyrics' : g.playing ? 'Now playing' : 'Paused';
+      GE.title.textContent = g.title || '';
+      GE.sub.textContent = g.artist || '';
+      if (g.kind === 'lyrics') {
+        const synced = glanceLines && glanceLines.length;
+        GE.lyrics.hidden = !synced;
+        if (!synced) {
+          GE.prev.textContent = GE.cur.textContent = GE.next.textContent = '';
+          if (g.note) { const li = document.createElement('li'); li.className = 'note'; li.textContent = g.note; GE.list.append(li); }
+          for (const l of glancePlain || []) { const li = document.createElement('li'); li.textContent = l; GE.list.append(li); }
+        }
+      }
+      tickGlance();
+      if (g.playing) glanceTimer = setInterval(tickGlance, g.kind === 'lyrics' ? 200 : 1000);
+    }
+    GE.lyrics.hidden = !(g.kind === 'lyrics' && glanceLines && glanceLines.length && !g.waiting);
+    GE.bar.hidden = g.kind === 'card' || g.waiting || !g.durMs;
+    requestAnimationFrame(() => glanceEl.classList.add('show'));
+  }
+
+  // Beside the orb, on the side with room; in display coordinates.
+  function glanceRect(pos) {
+    if (!glance || glanceEl.hidden) return null;
+    const w = glanceEl.offsetWidth;
+    const h = glanceEl.offsetHeight;
+    const gap = body.r * 1.7;
+    const right = pos.x + gap + w + 12 < view.w;
+    const x = right ? pos.x + gap : pos.x - gap - w;
+    const y = Math.min(Math.max(pos.y - h / 2, 12), view.h - h - 12);
+    return { x, y, w, h };
   }
 
   // ------------------------------------------------------------ gestures
@@ -424,14 +536,65 @@
       || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
   }
 
+  // Frame counters for diagnostics and performance tests.
+  const stats = { draws: 0, active: 0 };
+  let idleTimer = null;
+  window.__coreStats = () => ({ ...stats, why: activeReasons(), drawn: renderer && renderer.drawn });
+  function activeReasons() {
+    if (!body) return [];
+    const r = [];
+    if (mode !== 'idle') r.push(`mode:${mode}`);
+    if (voice.speaking) r.push('speaking');
+    if (pointing) r.push('pointing');
+    if (explainUntil) r.push('explain');
+    if (act) r.push('gesture');
+    if (shapeAct || shapeW > 0.01) r.push('shape');
+    if (body.dragging) r.push('drag');
+    if (attention) r.push('attention');
+    if (mood) r.push('mood');
+    if (noticeKick > 0.05) r.push('notice');
+    if (anim.form < 0.995) r.push('form');
+    if (anim.pulse) r.push('pulse');
+    if (anim.spin > 0.05) r.push('spin');
+    if (anim.inhale > 0.02) r.push('inhale');
+    if (Math.hypot(body.vel.x, body.vel.y) > 30) r.push('moving');
+    if (body.arms.some((a) => a.extend > 0.02)) r.push('arms');
+    return r;
+  }
+  // Render mode from main: paused while hidden / locked / asleep, ambient
+  // (very slow idle) while nobody is at the PC, capped on battery.
+  let renderMode = { paused: false, ambient: false, battery: false };
+  let sleeping = false;
+  let detail = 1;
+  window.__coreRender = () => ({ ...renderMode, sleeping }); // test hooks
+  window.__coreSetRender = (m) => setRenderMode(m);
+  function setRenderMode(m) {
+    renderMode = { paused: !!(m && m.paused), ambient: !!(m && m.ambient), battery: !!(m && m.battery) };
+    if (!renderMode.paused && sleeping) { sleeping = false; lastDraw = 0; requestAnimationFrame(frame); }
+  }
+
   function frame(now) {
+    if (renderMode.paused) { sleeping = true; clearTimeout(idleTimer); return; } // no frames at all
     // Idle: draw at idleFps to keep GPU and desktop compositing light.
-    const idleFps = (cfg.orb && cfg.orb.idleFps) || 30;
+    let idleFps = (cfg.orb && cfg.orb.idleFps) || 30;
+    if (renderMode.ambient) idleFps = Math.min(idleFps, 4);
+    else if (renderMode.battery) idleFps = Math.min(idleFps, 10);
     if (!isActive() && now - lastDraw < 1000 / idleFps - 2) {
+      // Sleep until the next idle frame instead of spinning on rAF: a pending
+      // rAF keeps the compositor producing frames at the display rate.
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => requestAnimationFrame(frame), Math.max(4, 1000 / idleFps - (now - lastDraw)));
+      return;
+    }
+    // Active frames are capped too on light profiles (safe graphics, battery).
+    const maxFps = Math.min((cfg.orb && cfg.orb.maxFps) || 999, renderMode.battery ? 30 : 999) % 999;
+    if (maxFps && isActive() && now - lastDraw < 1000 / maxFps - 2) {
       requestAnimationFrame(frame);
       return;
     }
     lastDraw = now;
+    stats.draws++;
+    if (isActive()) stats.active++;
     const dt = Math.min(0.1, (now - last) / 1000); // motion substeps keep long frames stable
     last = now;
     const t = (now - t0) / 1000;
@@ -471,7 +634,12 @@
     const local = (p) => ({ x: p.x - ox, y: p.y - oy });
     const localArms = arms.map((g) => (g ? { ...g, pts: g.pts.map(local) } : null));
 
+    // Idle detail: fewer particles while nothing happens, eased so it never pops.
+    const idleDetail = cfg.orb && cfg.orb.idleDetail !== undefined ? cfg.orb.idleDetail : 0.5;
+    const wantDetail = isActive() ? 1 : renderMode.ambient ? Math.min(idleDetail, 0.35) : idleDetail;
+    detail += (wantDetail - detail) * (wantDetail > detail ? 0.35 : 0.04);
     renderer.render({
+      detail,
       t,
       pos: local(pos),
       vel: body.vel,
@@ -496,6 +664,8 @@
     });
 
     placeCaption(local(pos));
+    const gr = glanceRect(pos);
+    if (gr) glanceEl.style.transform = `translate(${Math.round(gr.x - ox)}px, ${Math.round(gr.y - oy)}px)`;
 
     if (bridge && now - lastBoundsSent > 100) {
       bridge.orbBounds({ x: body.pos.x, y: body.pos.y, r: body.r });
@@ -521,6 +691,7 @@
       arms,
       point: pointing ? { x: pointing.x, y: pointing.y } : null,
       caption: capShown ? { w: caption.offsetWidth, h: caption.offsetHeight, above: dockVisible } : null,
+      extra: [glanceRect(pos)],
     });
     const settled = !pointing && !explainUntil && !body.dragging && Math.hypot(body.vel.x, body.vel.y) < 20
       && body.arms.every((a) => a.extend < 0.02);
@@ -708,7 +879,7 @@
     try {
       renderer = style === 'liquid'
         ? new window.LiquidOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1 })
-        : new window.SmokeOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1, particles: cfg.orb.particles || 24000 });
+        : new window.SmokeOrbRenderer(canvas, { renderScale: cfg.orb.renderScale || 1, particles: cfg.orb.particles || 24000, lite: !!cfg.orb.lite });
     } catch (err) {
       // No WebGL2 (blocklisted or missing GPU): main restarts in safe graphics
       // mode, which renders WebGL in software.
@@ -751,6 +922,9 @@
       bridge.onSpeechStop(stopAll);
       bridge.onHover((over) => { hoverSince = over ? performance.now() : 0; });
       bridge.onConfig(applyConfig);
+      bridge.onSpeaker((sp) => { cfg.speaker = sp; });
+      if (bridge.onGlance) bridge.onGlance(setGlance);
+      if (bridge.onRender) bridge.onRender(setRenderMode);
       bridge.onDockVisible((v) => { dockVisible = !!v; });
       bridge.onStage((st) => { if (st) stage = { ...st }; });
       bridge.onCursor((c) => {
