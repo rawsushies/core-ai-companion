@@ -2131,6 +2131,11 @@ function wireIpc() {
       toDock('dock:proposal-update', { id, state: 'error', message: err.message });
     }
   });
+  // Floating bubbles: clicks in the gaps go through to the app below.
+  ipcMain.on('dock:interactive', (e, v) => {
+    if (!fromDock(e) || !['win32', 'darwin'].includes(process.platform)) return;
+    dock.setIgnoreMouseEvents(!v, { forward: true });
+  });
   ipcMain.on('dock:openSettings', (e) => { if (fromDock(e)) openSettings(); });
   const fromSettings = (e) => isFrom(settingsWin, e);
   ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), secrets: settingsSecrets(), version: app.getVersion() } : null));

@@ -22,3 +22,5 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-010** (`937aff2`): approved file changes: file= fenced proposals, diff card, Apply with stale-file refusal, backup, atomic write, Undo, audit. Validated with real Claude (Forge read, proposed, applied, undone).
 - **M-011** (`61b8af6`): research doc (Archicad JSON API, pyRevit Routes, Windows UIA, Android pairing design) + read-only Archicad skill (localhost, allowlisted read commands, off by default), tested with a mock API only.
 - **M-012:** at the user's request: minimal flat chat (no glass), brand fonts bundled (OFL) and applied to chat/settings/history/subtitles, brand palette; fixed uppercase "CORE" (the brand rule says always COre).
+- **M-013** (`4873823`): measured CPU/GPU reductions (safe graphics idle 173% → 37%), light render path, profile retune, latency instrumentation.
+- **M-014:** at the user's request: floating-bubble chat. Every element is a separate bubble on a transparent window; clicks pass through the gaps (Windows/macOS, `setIgnoreMouseEvents` with forward); settings overflow fixed.

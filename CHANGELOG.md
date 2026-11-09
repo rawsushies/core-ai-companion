@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Floating bubbles
+- The chat is no longer a panel. Every part floats as its own bubble over a fully transparent window: each message,
+  the input pill, settings, the core wheel, banners and the history button. Gaps between bubbles show the screen.
+- On Windows and macOS clicks pass through the gaps to the app underneath; only the bubbles take the mouse.
+- When idle, old messages fade into the screen and the input dims; hovering brings them back.
+
 ### Lighter on CPU and GPU (measured)
 - While idle, COre now sleeps between frames instead of keeping the compositor awake at the display rate.
 - New light rendering path: 8-bit buffers, lower resolution and an active-frame cap. It's used by safe

@@ -325,6 +325,15 @@
     reportSize();
   });
 
+  // Floating bubbles: only bubbles catch the mouse; the gaps between them
+  // let clicks through to the app underneath (main applies this on Windows
+  // and macOS, where mouse moves are forwarded while clicks pass through).
+  const BUBBLE = '.msg, .row.core, .composer, .settings, .core-menu, .banner, .history-toggle, .action, .proposal';
+  let overBubble = true;
+  function setOver(v) { if (v !== overBubble) { overBubble = v; api.setInteractive(v); } }
+  document.addEventListener('mousemove', (e) => setOver(!!(e.target && e.target.closest && e.target.closest(BUBBLE))));
+  document.addEventListener('mouseleave', () => setOver(false));
+
   api.onCores((list) => { if (Array.isArray(list) && list.length) { cores = list; setRecipient(recipient); } });
   api.onRecipient((id) => { setRecipient(id); input.focus(); });
 

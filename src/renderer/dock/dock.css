@@ -221,3 +221,54 @@ textarea:focus { border-color: transparent; background: rgba(232, 255, 241, 0.04
 textarea:focus-visible { outline: none; }
 .to:focus-visible, .icon:focus-visible, .chip-opt:focus-visible, .ghost:focus-visible { outline: 1px solid rgba(232, 255, 241, 0.35); outline-offset: 1px; }
 .log::-webkit-scrollbar-thumb, textarea::-webkit-scrollbar-thumb { background: rgba(232, 255, 241, 0.12); }
+
+/* ===================================================== Floating bubbles */
+/* No panel: the chat window itself is invisible. Every part is its own
+   small floating bubble, and the gaps between them are just your screen
+   (clicks there go through to the app below, on Windows and macOS). */
+:root { --bubble: rgba(5, 7, 10, 0.9); --bubble-line: rgba(232, 255, 241, 0.09); }
+.shell, .shell.expanded { background: transparent; border: 0; border-radius: 0; gap: 6px; }
+.shell.faded { opacity: 1; }
+.shell.faded .log { opacity: 0.22; }               /* idle: old bubbles fade into the screen */
+.shell.faded .composer { opacity: 0.55; }
+.shell.faded:hover .log, .shell.faded:hover .composer { opacity: 1; }
+.log, .composer { transition: opacity 0.4s ease; }
+.log { padding: 0; gap: 6px; background: transparent; }
+.log:not(:empty) + .settings[hidden] + .composer, .log:not(:empty) ~ .composer { border-top: 0; }
+.history-toggle { position: static; transform: none; align-self: center; width: auto; height: 18px; padding: 0 10px; margin-bottom: 2px;
+  background: var(--bubble); border: 1px solid var(--bubble-line); border-radius: 999px; opacity: 0; font-size: 10px; }
+.shell:hover .history-toggle { opacity: 0.9; }
+
+/* Message bubbles */
+.row.core { align-self: flex-start; max-width: 94%; }
+.row.core .msg.core, .msg.user, .msg.system, .msg.proposal {
+  background: var(--bubble); border: 1px solid var(--bubble-line); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.row.core .msg.core { border-radius: 14px 14px 14px 4px; padding: 7px 11px 8px; }
+.row.core.cont { margin-top: -2px; }
+.row.core.cont .msg.core { border-radius: 4px 14px 14px 4px; }
+.msg.user { border-radius: 14px 14px 4px 14px; padding: 7px 11px; background: rgba(12, 22, 17, 0.92); border-color: rgba(61, 255, 133, 0.18); }
+.msg.system { border-radius: 999px; padding: 3px 11px; font-size: 11px; }
+.msg.system.error { background: rgba(28, 8, 11, 0.92); border-color: rgba(255, 93, 108, 0.25); }
+.action button { background: var(--bubble); border: 1px solid var(--bubble-line); border-radius: 999px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
+
+/* The input is its own pill. */
+.composer { background: var(--bubble); border: 1px solid var(--bubble-line); border-radius: 18px; padding: 4px 4px 4px 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+
+/* Settings, the core wheel and the @ chips each float as their own bubble. */
+.settings { background: var(--bubble); border: 1px solid var(--bubble-line); border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+.settings-open .log { display: flex; }               /* the chat stays; settings float above the input */
+.settings-open .log > * { opacity: 0.35; }
+.settings-head { background: var(--bubble); border-radius: 14px 14px 0 0; }
+.core-menu.wheel, .core-menu.chips { background: var(--bubble); border: 1px solid var(--bubble-line); border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+.banner { background: rgba(26, 18, 6, 0.92); border: 1px solid rgba(255, 181, 71, 0.25); border-radius: 14px; }
+.settings { overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(232, 255, 241, 0.18) transparent; box-sizing: border-box; max-width: 100%; }
+.settings > * { min-width: 0; }
+.settings select, .settings input[type="range"] { width: 100%; min-width: 0; box-sizing: border-box; }
+.settings button { white-space: nowrap; }
+.settings::-webkit-scrollbar { width: 6px; }
+.settings::-webkit-scrollbar-thumb { background: rgba(232, 255, 241, 0.16); border-radius: 3px; }
+.settings-head { margin: -10px -12px 2px; }
+.composer textarea { background: transparent; border-color: transparent; }
+.composer textarea:focus { border-color: transparent; }
+.composer:focus-within { border-color: rgba(61, 255, 133, 0.28); }

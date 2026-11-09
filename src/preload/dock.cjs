@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('dock', {
   setSetting: (key, value) => ipcRenderer.send('dock:setting', { key, value }),
   checkUpdates: () => ipcRenderer.send('dock:checkUpdates'),
   openSettings: () => ipcRenderer.send('dock:openSettings'),
+  setInteractive: (v) => ipcRenderer.send('dock:interactive', !!v),
   newChat: () => ipcRenderer.send('dock:reset'),
   brainStatus: () => ipcRenderer.invoke('dock:brainStatus'),
   loginClaude: () => ipcRenderer.send('dock:loginClaude'),
