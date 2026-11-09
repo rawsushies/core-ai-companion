@@ -12,11 +12,15 @@ Groq, OpenRouter, a local Ollama model, or any OpenAI-compatible endpoint) take 
 
 ## Install
 
-### Windows installer (recommended)
+### Windows installer
 
-Download **COre-Setup-x.y.z.exe** from [Releases](https://github.com/rawsushies/core-ai-companion/releases)
-and run it. You get Start-menu and desktop shortcuts and a normal uninstaller (Windows Settings → Apps, or
-COre's Settings → Maintenance → Uninstall). Installed copies update themselves from Releases.
+> **Status:** installers published before the new release process (v2.0.0 – v10.2.0) are incomplete: some
+> contain only a `.blockmap`, and none can update itself. Until a release built by the new gated process
+> is published, **install from source** (below). See [docs/dev/RELEASING.md](docs/dev/RELEASING.md).
+
+A verified release contains **COre-Setup-x.y.z.exe**, `latest.yml` and `SHA256SUMS.txt`. Run the installer to
+get Start-menu and desktop shortcuts and a normal uninstaller (Windows Settings → Apps, or COre's Settings →
+Maintenance → Uninstall). Installed copies then update themselves from published releases.
 
 For the Claude brain, install [Claude Code](https://docs.claude.com/en/docs/claude-code) and log in once.
 COre's chat shows a **Log in to Claude** button if you aren't logged in.

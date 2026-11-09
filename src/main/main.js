@@ -26,6 +26,9 @@ const { refinePoint } = require('./pointing');
 const SK = require('./skills');
 const { toneKey } = require('./brain/persona');
 const { CrashLog } = require('./crashlog');
+const { smokeTarget, SmokeTest } = require('./smoke');
+const SMOKE = smokeTarget(); // CI / release self-test (see smoke.js)
+let smoke = null;
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -1922,6 +1925,7 @@ function wireIpc() {
   // (loading it earlier could collide with a safe-graphics restart).
   ipcMain.once('overlay:ready', (e) => {
     if (!fromOverlay(e)) return;
+    if (smoke) { smoke.mark('overlay-ready'); return; }
     // Spread start-up work out: loading the voice model uses every CPU core
     // for a moment, so do it a few seconds after COre has appeared.
     setTimeout(() => {
@@ -1932,8 +1936,9 @@ function wireIpc() {
     setTimeout(() => { if (!listening) stt.warm(); }, 14000);
   });
   ipcMain.on('overlay:rendererFailed', (e, msg) => {
-    crashLog.record('webgl', msg);
     if (!fromOverlay(e)) return;
+    crashLog.record('webgl', msg);
+    if (smoke) { smoke.mark('overlay-ready', false, String(msg)); return; }
     console.warn('[overlay] renderer failed:', msg);
     if (SAFE_GRAPHICS) addTranscript('system', `I can't draw my orb on this PC (${msg}). Try ⚙ → Display → Force GPU, or copy diagnostics and send them over.`);
     else switchToSafeGraphics(`WebGL unavailable: ${msg}`);
@@ -2010,6 +2015,7 @@ async function restartApp() {
 }
 
 function switchToSafeGraphics(reason) {
+  if (SMOKE) return; // a self-test reports problems instead of restarting
   if (SAFE_GRAPHICS || GRAPHICS !== 'auto' || state.get('safeGraphics')) return;
   console.warn(`[core] switching to safe graphics: ${reason}`);
   state.set('safeGraphics', true);
@@ -2182,6 +2188,26 @@ app.whenReady().then(async () => {
   createDock();
   createTray();
   registerHotkeys();
+  if (SMOKE) {
+    smoke = new SmokeTest({
+      target: SMOKE,
+      root: ROOT,
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      onDone: (code, report) => {
+        console.log(`[core] smoke test ${report.ok ? 'passed' : 'FAILED'}${report.error ? `: ${report.error}` : ''}`);
+        app.isQuitting = true;
+        app.exit(code);
+      },
+    });
+    const wc = dock.webContents;
+    if (!wc.isLoading()) smoke.mark('dock-loaded');
+    else {
+      wc.once('did-finish-load', () => smoke.mark('dock-loaded'));
+      wc.once('did-fail-load', (_e, code, desc) => smoke.mark('dock-loaded', false, `${code} ${desc}`));
+    }
+    return; // no updater, network services, greetings or presence in a self-test
+  }
   await startNotify();
   updater.start(relaunchAfterUpdate);
   reminders.start();

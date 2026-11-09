@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Release engineering
+- Releases now come only from an explicit version tag, never from a `package.json` change. They go through
+  blocking gates (syntax check, tests, packaged-app self-test, Windows installer install/uninstall test) and
+  land as a **draft** for a human to publish. See docs/dev/RELEASING.md.
+- New CI on every branch and pull request (Linux + Windows), with blocking tests.
+- Fixed the release build: it ran two GitHub publishers that raced, so releases lost files and never
+  included `latest.yml`. Builds now upload the installer, blockmap, `latest.yml` and SHA256SUMS together.
+- Removed the code-signing publisher check from unsigned builds (it would have made installed copies reject
+  every update).
+- `--smoke-test=<file>`: COre can self-test (windows load, orb draws, native modules and worker files
+  present) and exit with a pass/fail code. Used by CI and the release gates.
+- The Claude CLI tests now also run on Windows, through a `.cmd` shim like the real CLI.
+
 ## 10.3.0 — New look, fewer loose ends
 - New brand: a logo made of smoke filaments, new app and tray icons, a wordmark where the orb is the "O",
   README banner, social preview, promo images for every major format, and a brand guide (docs/BRAND.md).

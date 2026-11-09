@@ -61,10 +61,7 @@
         }
       ],
       "icon": "assets/icon.png",
-      "artifactName": "COre-Setup-${version}.${ext}",
-      "signtoolOptions": {
-        "publisherName": "rawsushies"
-      }
+      "artifactName": "COre-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
