@@ -11,8 +11,9 @@ function load() {
       const { env } = await import('@huggingface/transformers');
       env.cacheDir = workerData.cacheDir;
       const { KokoroTTS } = await import('kokoro-js');
+      // q4 renders ~3x faster than q8 on typical CPUs ("best" = q8).
       return KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-        dtype: 'q8',
+        dtype: workerData.quality === 'best' ? 'q8' : 'q4',
         device: 'cpu',
         progress_callback: (p) => {
           if (p.status === 'progress' && p.total) {

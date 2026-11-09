@@ -60,6 +60,13 @@
   let moodW = 0; // eased mood weight 0..1
   let cursor = null; // display coordinates of a nearby cursor
   let noticeKick = 0;
+  // Animations. form: 0 scattered .. 1 formed (assemble on start, dissolve on
+  // hide). pulse: one shockwave at a time { x, y (display), t0, strength }.
+  const anim = { form: 0, formTarget: 1, formVel: 0, pulse: null, spin: 0, spinUntil: 0, inhale: 0, listenStart: 0, nextIdle: performance.now() + 30000 };
+
+  function pulseAt(x, y, strength = 1) {
+    anim.pulse = { x, y, t0: performance.now(), strength };
+  }
 
   const canvas = document.getElementById('orb');
   const caption = document.getElementById('caption');
@@ -81,6 +88,7 @@
     onLevel: (v) => { listenLevel = v; },
     onAudio: (audio, meta) => {
       setMode('thinking');
+      if (body) pulseAt(body.pos.x, body.pos.y, 0.5); // "got it" the moment you stop talking
       if (bridge) bridge.sendAudio(audio, !!meta.withScreen);
     },
     onCancel: (reason) => {
@@ -101,6 +109,7 @@
 
   function setAttention(a) {
     attention = a && ATTENTION[a.level] ? { level: a.level, since: performance.now() } : null;
+    if (attention && body) pulseAt(body.pos.x, body.pos.y, a.level === 'urgent' ? 1.4 : 1); // shockwave on arrival
   }
 
   function acknowledge() {
@@ -212,6 +221,17 @@
       });
     }
 
+    // Idle life: every 25-45 s with nothing going on, do something small.
+    const quiet = mode === 'idle' && !voice.speaking && !pointing && !explainUntil && !body.dragging && !mood && !attention;
+    if (!quiet) anim.nextIdle = Math.max(anim.nextIdle, now + 8000);
+    else if (now > anim.nextIdle) {
+      const pick = Math.random();
+      if (pick < 0.4) anim.spinUntil = now + 2200; // a slow spin
+      else if (pick < 0.7) body.vel.y -= r * 9; // a little hop
+      else pulseAt(body.pos.x, body.pos.y, 0.6); // a ripple
+      anim.nextIdle = now + 25000 + Math.random() * 20000;
+    }
+
     // Hovering the orb for a moment acknowledges a notification.
     if (attention && hoverSince && now - hoverSince > 700) acknowledge();
     // Informational colours fade on their own; warnings wait for you.
@@ -238,6 +258,16 @@
       glow += md.energy * moodW;
     }
     noticeKick *= Math.exp(-dt * 3);
+    // Form springs toward its target (slight overshoot = a soft "pop" into shape).
+    const [f, fv] = M.spring1(anim.form, anim.formVel, anim.formTarget, 16, 0.65, dt);
+    anim.form = Math.max(0, Math.min(1.08, f));
+    anim.formVel = fv;
+    const spinTarget = (now < anim.spinUntil ? 2.4 : 0) + (mode === 'thinking' ? 0.8 : 0);
+    anim.spin += (spinTarget - anim.spin) * Math.min(1, dt * 2.5);
+    // Listening: a quick inhale, then a gentle hold.
+    const inhaleTarget = mode === 'listening' ? (now - anim.listenStart < 450 ? 1 : 0.35) : 0;
+    anim.inhale += (inhaleTarget - anim.inhale) * Math.min(1, dt * 8);
+    if (anim.pulse && now - anim.pulse.t0 > 2500) anim.pulse = null;
     glow += noticeKick * 0.35;
     const k = Math.min(1, dt * 4);
     for (let i = 0; i < 3; i++) vis.tint[i] += (tint[i] - vis.tint[i]) * k;
@@ -256,6 +286,7 @@
   // Is anything happening that needs full frame rate?
   function isActive() {
     return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || body.dragging || !!attention || !!mood || noticeKick > 0.05
+      || anim.form < 0.995 || !!anim.pulse || anim.spin > 0.05 || anim.inhale > 0.02
       || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
   }
 
@@ -319,7 +350,11 @@
       light,
       arms: localArms,
       auraCenter: local(auraC),
-      aura: vis.aura,
+      aura: vis.aura * Math.min(1, anim.form),
+      form: Math.min(1, anim.form),
+      pulse: anim.pulse ? { ...local(anim.pulse), age: (now - anim.pulse.t0) / 1000, strength: anim.pulse.strength } : null,
+      spin: anim.spin,
+      inhale: anim.inhale,
     });
 
     placeCaption(local(pos));
@@ -346,7 +381,8 @@
       pos,
       target: body.target,
       tail: body.tail,
-      r: body.r,
+      // While assembling or dissolving, the scattered smoke reaches further out.
+      r: body.r * (1 + 1.3 * (1 - Math.min(1, anim.form))),
       arms,
       point: pointing ? { x: pointing.x, y: pointing.y } : null,
       caption: capShown ? { w: caption.offsetWidth, h: caption.offsetHeight, above: dockVisible } : null,
@@ -403,8 +439,10 @@
         home = { x: body.target.x, y: body.target.y };
         lastGestureAt = performance.now();
         if (bridge) { bridge.orbDrag(false); bridge.orbHome(home); bridge.orbAnchor({ ...home, r: body.r }); }
+        pulseAt(body.target.x, body.target.y, 0.8); // a splash when dropped
       } else {
         acknowledge();
+        pulseAt(down.x, down.y, 1); // a ripple from where you clicked
         if (bridge) bridge.orbClick();
       }
       down = null;
@@ -468,7 +506,10 @@
       bridge.onSpeakItem(onSpeakItem);
       bridge.onState((s) => setMode(s));
       bridge.onAttention(setAttention);
-      bridge.onListenStart((meta) => { stopAll(); setMode('listening'); listener.start(meta); });
+      bridge.onListenStart((meta) => { stopAll(); setMode('listening'); anim.listenStart = performance.now(); listener.start(meta); });
+      // Hide/show: dissolve into drifting smoke, then reassemble.
+      bridge.onDissolve(() => { anim.formTarget = 0; });
+      bridge.onAssemble(() => { anim.form = 0; anim.formVel = 0; anim.formTarget = 1; });
       bridge.onListenStop(() => listener.stop());
       bridge.onSpeechStop(stopAll);
       bridge.onHover((over) => { hoverSince = over ? performance.now() : 0; });
@@ -514,6 +555,9 @@
       if (k === 'm') { home = { ...mouse }; lastGestureAt = 0; }
       const moodKeys = { 1: 'happy', 2: 'amused', 3: 'curious', 4: 'annoyed', 5: 'excited', 6: 'sad', 7: 'calm' };
       if (moodKeys[k]) gesture({ name: 'mood', mood: moodKeys[k] });
+      if (k === 'w') pulseAt(body.pos.x, body.pos.y, 1);
+      if (k === 's') anim.spinUntil = performance.now() + 2200;
+      if (k === 'h') anim.formTarget = anim.formTarget ? 0 : 1;
     });
 
     // Deterministic poses for screenshots: ?pose=idle|speaking|point|explain|attention|move
@@ -531,6 +575,8 @@
       if (pose === 'explain') { explain(); explainUntil = performance.now() + 60000; voice.say('Explaining a long long idea for the screenshot capture right now.'); }
       if (pose === 'point') { point(c.x - 330, c.y - 170); pointing.until = performance.now() + 60000; }
       if (pose === 'attention') setAttention({ level: params.get('level') || 'warn' });
+      if (pose === 'assemble') { anim.form = 0; anim.formTarget = 0; setTimeout(() => { anim.formTarget = 1; }, Number(params.get('at') || 0)); }
+      if (pose === 'pulse') setTimeout(() => pulseAt(c.x, c.y, 1.2), Number(params.get('at') || 0));
       if (pose === 'mood') { gesture({ name: 'mood', mood: params.get('mood') || 'happy' }); mood.since = performance.now() + 60000; }
       if (pose === 'move') { body.pos = { x: c.x - 260, y: c.y + 40 }; body.tail = { ...body.pos }; body.target = { x: c.x + 220, y: c.y - 20 }; lastGestureAt = performance.now() + 60000; }
     }

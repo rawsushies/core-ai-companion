@@ -57,7 +57,19 @@ test('FenceFilter keeps inline backticks outside fences', () => {
 
 test('a long opening clause is spoken before the sentence ends', () => {
   const c = new SentenceChunker(24);
-  assert.deepEqual(c.feed('Honestly, if you want my opinion, that really depends on what you mean'), ['Honestly, if you want my opinion,']);
-  assert.deepEqual(c.feed(' by fast. And more. '), ['that really depends on what you mean by fast.']);
+  assert.deepEqual(c.feed('Honestly, if you want my opinion, that really depends on what you mean'), ['Honestly,']);
+  assert.deepEqual(c.feed(' by fast. And more. '), ['if you want my opinion, that really depends on what you mean by fast.']);
   assert.deepEqual(c.flush(), ['And more.']);
+});
+
+test('a short opener like "Here\'s one:" is spoken on its own, right away', () => {
+  const c = new SentenceChunker(24);
+  assert.deepEqual(c.feed("Here's one: work in a single block"), ["Here's one:"]);
+});
+
+test('a long opening with no punctuation is split after a few words', () => {
+  const c = new SentenceChunker(24);
+  const out = c.feed('so the thing you really want to do first is open the settings and look at the voice panel ');
+  assert.equal(out.length, 1);
+  assert.ok(out[0].length <= 49 && out[0].split(' ').length >= 5, out[0]);
 });

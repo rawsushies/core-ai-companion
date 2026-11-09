@@ -5,6 +5,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 
 let loading = null;
+let primed = false;
 
 // Whisper's classic hallucinations on near-silence.
 const HALLUCINATIONS = /^(thank you\.?|thanks for watching\.?|you|\.|terima kasih\.?|\[.*\]|\(.*\))$/i;
@@ -22,7 +23,7 @@ function load() {
       };
       try {
         return await pipeline('automatic-speech-recognition', workerData.model, {
-          dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' },
+          dtype: { encoder_model: 'q8', decoder_model_merged: 'q4' },
           progress_callback,
         });
       } catch {
@@ -38,7 +39,9 @@ function load() {
 parentPort.on('message', async (msg) => {
   if (msg.type === 'warm') {
     try {
-      await load();
+      const asr = await load();
+      // The first inference is slow; do it now on half a second of silence.
+      if (!primed) { primed = true; await asr(new Float32Array(8000), { task: 'transcribe' }).catch(() => {}); }
       parentPort.postMessage({ type: 'ready' });
     } catch (err) {
       parentPort.postMessage({ type: 'error', id: null, message: explain(err) });

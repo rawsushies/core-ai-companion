@@ -11,8 +11,9 @@ function pitchRate(semitones) {
 }
 
 class TextToSpeech {
-  constructor({ cacheDir, onProgress }) {
+  constructor({ cacheDir, onProgress, quality = 'fast' }) {
     this.cacheDir = cacheDir;
+    this.quality = quality;
     this.onProgress = onProgress || (() => {});
     this.worker = null;
     this.nextId = 1;
@@ -24,7 +25,7 @@ class TextToSpeech {
 
   _ensure() {
     if (this.worker) return this.worker;
-    const w = new Worker(path.join(__dirname, 'worker.mjs'), { workerData: { cacheDir: this.cacheDir } });
+    const w = new Worker(path.join(__dirname, 'worker.mjs'), { workerData: { cacheDir: this.cacheDir, quality: this.quality } });
     w.on('message', (m) => {
       if (m.type === 'progress') return this.onProgress(m);
       if (m.type === 'ready') { this.failed = null; this.ready = true; return; }

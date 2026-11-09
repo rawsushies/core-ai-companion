@@ -125,6 +125,7 @@ Open ⚙ in the chat block to change, instantly:
 - **Voice:** Onyx (deep, default), Fenrir (gravelly), Michael, Adam, Eric, George, Lewis, or your system voice.
 - **Pitch:** semitones (default -3 = deeper).
 - **Robot:** 0% clean to 100% full machine (default 45%).
+- `voice.quality` in config.json: `"fast"` (default, 4-bit voice model, about 3x quicker) or `"best"` (8-bit).
 
 If the voice model can't load (e.g. offline on first run), COre falls back to your system voice.
 

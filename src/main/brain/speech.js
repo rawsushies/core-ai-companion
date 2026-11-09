@@ -28,11 +28,15 @@ class SentenceChunker {
     this.buffer += text;
     // Before anything has been spoken, a long opening clause can go out on its
     // own ("Well, that depends, ...") so the voice starts sooner.
-    if (!this.released && !this.pending && !SENTENCE_END.test(this.buffer) && this.buffer.length >= 40) {
-      const m = /^(.{18,}?[,;:\u2014\u2013])\s/.exec(this.buffer);
-      if (m) {
-        ready.push(m[1].trim());
-        this.buffer = this.buffer.slice(m[0].length);
+    if (!this.released && !this.pending && !SENTENCE_END.test(this.buffer)) {
+      // An opening clause ("Here's one:", "Honestly,") goes out on its own...
+      const m = this.buffer.length >= 12 && /^(.{8,}?[,;:\u2014\u2013])\s/.exec(this.buffer);
+      // ...and a long opening with no pause at all is split after a few words.
+      const words = !m && this.buffer.length >= 70 && /^(.{24,48}\S)\s/.exec(this.buffer);
+      const cut = m || words;
+      if (cut) {
+        ready.push(cut[1].trim());
+        this.buffer = this.buffer.slice(cut[0].length);
         this.released++;
       }
     }

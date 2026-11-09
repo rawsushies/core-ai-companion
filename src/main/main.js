@@ -653,7 +653,9 @@ function toggleOrb() {
   if (!overlay) return;
   orbHidden = !orbHidden;
   if (orbHidden) {
-    overlay.hide();
+    // Dissolve into smoke first, then hide.
+    toOverlay('dissolve');
+    setTimeout(() => { if (orbHidden && overlay && !overlay.isDestroyed()) overlay.hide(); }, 650);
     if (dock && dock.isVisible()) dock.hide();
     const key = prettyKey(config.data.hotkeys.hide);
     // Make it obvious COre was hidden on purpose, and how to get it back.
@@ -663,6 +665,7 @@ function toggleOrb() {
     if (tray) tray.setToolTip(`COre (hidden — ${key} to show)`);
   } else {
     overlay.showInactive();
+    toOverlay('assemble');
     if (dockVisible && dock) { positionDock(); dock.showInactive(); }
     if (tray) tray.setToolTip('COre');
   }
@@ -813,6 +816,8 @@ function handleActionTag(item) {
   if (item.name === 'open' || item.name === 'copy') {
     const id = require('crypto').randomUUID();
     actions.set(id, { kind: item.name, value: item.name === 'open' ? item.url : item.text });
+    // Keep only the most recent offers; old buttons simply stop working.
+    while (actions.size > 30) actions.delete(actions.keys().next().value);
     let label;
     if (item.name === 'open') {
       let host = item.url;
@@ -1212,6 +1217,9 @@ function wireIpc() {
     setTimeout(() => {
       if (config.data.voice.engine !== 'system' && config.data.voice.tts !== false) tts.warm();
     }, 6000);
+    // Speech recognition loads lazily otherwise, which made the first spoken
+    // question seconds slower. Warm it once the voice has loaded.
+    setTimeout(() => { if (!listening) stt.warm(); }, 14000);
   });
   ipcMain.on('overlay:rendererFailed', (e, msg) => {
     if (!fromOverlay(e)) return;
@@ -1408,6 +1416,7 @@ app.whenReady().then(async () => {
   let voiceNoticeShown = false;
   tts = new TextToSpeech({
     cacheDir: path.join(userData, 'models'),
+    quality: config.data.voice.quality,
     onProgress: (p) => {
       toPanel('status', { kind: 'download', file: `voice ${p.file}`, pct: p.pct });
       if (!voiceNoticeShown && !fs.existsSync(path.join(userData, 'models', 'onnx-community', 'Kokoro-82M-v1.0-ONNX'))) {

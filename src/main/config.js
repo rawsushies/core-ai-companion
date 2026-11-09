@@ -38,6 +38,7 @@ const DEFAULTS = {
     semitones: -3, // voice pitch shift (negative = deeper)
     robot: 0.45, // 0 = clean voice, 1 = full machine
     speed: 1.0,
+    quality: 'fast', // 'fast' (4-bit voice model, ~3x quicker) or 'best' (8-bit)
     speakTyped: true, // read the opening of typed-chat replies aloud
     voiceName: '', // part of a voice name, e.g. "David" or "Indonesia"; empty = auto by language
     lang: '', // e.g. "en-US", "id-ID"; empty = system default

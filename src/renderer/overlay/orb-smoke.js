@@ -104,6 +104,13 @@
   uniform vec4  uArmR[2];
   uniform float uArmOn[2];
   uniform float uArmMode[2]; // 0 = pointing (index finger out), 1 = open explaining hand
+  // Animations: uForm 0 = scattered cloud .. 1 = formed sphere (assemble /
+  // dissolve); uPulse = shockwave (origin x, y, age s, strength); uSpin = extra
+  // swirl around the vertical axis; uInhale = shell drawn inward (listening).
+  uniform float uForm;
+  uniform vec4  uPulse;
+  uniform float uSpin;
+  uniform float uInhale;
   ${NOISE}
 
   vec2 rot2(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(v.x * c - v.y * s, v.x * s + v.y * c); }
@@ -239,8 +246,9 @@
       vec3 gt2 = gw2 - n * dot(n, gw2);
       float strand = step(0.35, h.y);          // ~65% strands, the rest haze
       flow += strand * (-n1 * gt1 * 2.2 - n2 * gt2 * 0.12);
-      flow += cross(vec3(0.0, 1.0, 0.0), n) * uThink * 1.4;
-      float speed = uFlow * uR * (1.0 + 1.8 * uAmp + 0.9 * uThink + 0.6 * uListen);
+      flow += cross(vec3(0.0, 1.0, 0.0), n) * (uThink * 1.4 + uSpin);
+      float scatter = 1.0 - uForm;
+      float speed = uFlow * uR * (1.0 + 1.8 * uAmp + 0.9 * uThink + 0.6 * uListen + 1.5 * scatter);
 
       // Shell: breathing, smoke puffs where the noise peaks, and resonance modes.
       float puff = pow(max(n1, 0.0), 3.0);
@@ -251,9 +259,19 @@
                     + puff * strand * (0.16 + 0.3 * uAmp)
                     + uAmp * 0.12 * modes
                     + uListen * 0.07 * ripple);
+      // Assemble / dissolve: scattered particles drift far out, then condense.
+      targetR *= mix(1.0, 2.4 + (h.z - 0.5) * 2.0, scatter) * (1.0 - 0.2 * uInhale);
       vec3 desired = flow * speed * (layer > 0.5 ? 0.35 : 1.0)
                    + n * (targetR - r) * 5.0
                    + vec3(uCenterVel, 0.0);
+      // Shockwave: an expanding ring pushes the smoke outward as it passes.
+      if (uPulse.w > 0.0) {
+        vec3 o = vec3(uPulse.xy, 0.0);
+        float d = length(pos - o);
+        float front = uPulse.z * uR * 6.0;
+        float band = exp(-pow((d - front) / (uR * 0.6), 2.0)) * uPulse.w * exp(-uPulse.z * 1.4);
+        desired += normalize(pos - o + vec3(0.0, 0.0, 1e-3)) * band * uR * 16.0;
+      }
       // Each particle catches up at its own pace, so a moving orb trails a
       // diffuse smoke tail instead of a stack of coherent shell outlines.
       float respond = mix(2.2, 7.5, fract(seed * 517.3));
@@ -286,6 +304,8 @@
   uniform float uAmp;
   uniform float uGlow;
   uniform float uBright;
+  uniform float uForm;
+  uniform vec4  uPulse;
   void main() {
     gl_Position = vec4(aPos.x / uView.x * 2.0 - 1.0, 1.0 - aPos.y / uView.y * 2.0, 0.0, 1.0);
     float life = aMeta.x, seed = aMeta.y, maxL = aMeta.z;
@@ -297,7 +317,13 @@
     float twinkle = 0.55 + 0.45 * sin(uTime * (2.0 + 6.0 * fract(seed * 53.1)) + seed * 91.0);
     gl_PointSize = max(1.0, uSize * uPx * (0.5 + 0.8 * fract(seed * 311.7)) * (1.0 + 0.6 * spark));
     vec3 col = mix(uTint, vec3(1.0), 0.3 * spark + 0.1 * uAmp);
-    float a = fade * front * (0.022 * (1.0 - 0.5 * dust) * (1.0 + 4.0 * tipGlow) + 0.22 * spark * twinkle) * (1.0 + 1.1 * uAmp + 0.6 * uGlow) * uBright;
+    // The shockwave front lights the smoke up as it passes.
+    float flash = 0.0;
+    if (uPulse.w > 0.0) {
+      float d = length(aPos.xy - uPulse.xy);
+      flash = 2.6 * exp(-pow((d - uPulse.z * uR * 6.0) / (uR * 0.5), 2.0)) * uPulse.w * exp(-uPulse.z * 1.4);
+    }
+    float a = (1.0 + flash) * mix(0.35, 1.0, uForm) * fade * front * (0.022 * (1.0 - 0.5 * dust) * (1.0 + 4.0 * tipGlow) + 0.22 * spark * twinkle) * (1.0 + 1.1 * uAmp + 0.6 * uGlow) * uBright;
     vCol = vec4(col * a, a);
   }`;
 
@@ -543,6 +569,11 @@
       gl.uniform4fv(su.uArmR, this.armR);
       gl.uniform1fv(su.uArmOn, this.armOn);
       gl.uniform1fv(su.uArmMode, this.armMode);
+      gl.uniform1f(su.uForm, s.form === undefined ? 1 : s.form);
+      const pl = s.pulse;
+      gl.uniform4f(su.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
+      gl.uniform1f(su.uSpin, s.spin || 0);
+      gl.uniform1f(su.uInhale, s.inhale || 0);
       const write = 1 - this.read;
       gl.bindVertexArray(this.simVao[this.read]);
       gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.tf);
@@ -594,6 +625,8 @@
       gl.uniform1f(pu.uAmp, s.amp);
       gl.uniform1f(pu.uGlow, s.glow);
       gl.uniform1f(pu.uBright, 24000 / this.count);
+      gl.uniform1f(pu.uForm, s.form === undefined ? 1 : s.form);
+      gl.uniform4f(pu.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
       gl.bindVertexArray(this.drawVao[this.read]);
       gl.drawArrays(gl.POINTS, 0, this.count);
       gl.disable(gl.BLEND);

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1 — Alive and quick
+- New orb animations: assembles from scattered smoke on start and when shown, dissolves when hidden,
+  shockwaves on click / drop / notifications / reminders, an inhale when it starts listening, a faster spin
+  while thinking, and small idle behaviours (a spin, a hop, a ripple) every 25-45 s.
+- Much faster voice: 4-bit voice model (~3x quicker to render), tiny first spoken phrase, speech recognition
+  warmed up in the background (the first spoken question no longer waits for it to load).
+  Measured on a slow 4-core cloud machine: typed question to first spoken word 4.1 s -> 1.7 s; spoken question
+  (from end of speech) 7.3 s -> 3.6 s.
+- Instant feedback: typing dots in the chat and a "got it" pulse the moment you stop talking.
+- Fixes: offered action buttons no longer accumulate forever; the window makes room for the scattered smoke
+  while COre assembles or dissolves.
+
 ## 0.4.0 — COre gets a memory and a life
 - Long-term memory across conversations (works with every brain), managed in ⚙ → Memory.
 - Reminders and timers that survive restarts, with voice, glow and a Windows notification.
