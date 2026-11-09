@@ -247,3 +247,12 @@ body.large-text .msg.system { font-size: 13.5px; }
 .settings label:has(input[type="range"]) span { font: 11px var(--mono); color: var(--mint); }
 .settings label:has(select) { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 6px; }
 .settings label:has(select) select { grid-column: 1 / -1; }
+
+/* Desktop agent: the step waiting for your OK. */
+.agent-card { margin: 0 10px 8px; padding: 9px 11px; background: var(--void); border: 1px solid var(--mine-line); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
+.agent-step { font-size: 12.5px; color: var(--ink); }
+#agent-step-no { font: 600 11px var(--mono); color: var(--emerald); margin-right: 4px; }
+.agent-why { font-size: 11.5px; color: var(--muted); }
+.agent-why:empty { display: none; }
+.agent-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ghost.danger:hover { color: var(--danger); }

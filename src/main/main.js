@@ -1264,6 +1264,9 @@ async function captureScreen() {
     mediaType: 'image/jpeg',
     displayWidth: width,
     displayHeight: height,
+    displayX: d.bounds.x,
+    displayY: d.bounds.y,
+    scaleFactor: d.scaleFactor || 1,
     canPoint,
     windows,
   };
@@ -1394,7 +1397,6 @@ function hideGlance() {
   clearTimeout(glanceTimer);
   glanceIdleSince = 0;
   stopGlanceReader();
-  if (companion) companion.stop();
   toOverlay('glance', null);
 }
 
@@ -1519,6 +1521,99 @@ function showGlance(req) {
   glanceTimer = setTimeout(() => {
     if (glance && glance.what !== 'card' && !glance.track) glanceCard('Now playing', ['Nothing is playing right now.'], 6000);
   }, 6000);
+}
+
+// ---------------------------------------------------------------- desktop agent
+// Off by default (Settings, Agent). Started only by you: "/do TASK" in the chat.
+// Every step is shown; actions that change something need your OK (or "Allow
+// all steps" for this task). Esc or the Stop button ends it at once.
+const AG = require('./agent');
+let agentRunner = null;
+let agentBrainInst = null;
+const agentApprovals = new Map();
+
+function agentBrain() {
+  if (!agentBrainInst) {
+    const mem = {};
+    agentBrainInst = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+  }
+  return agentBrainInst;
+}
+
+function stopAgent(reason) {
+  if (agentRunner && agentRunner.running) agentRunner.stop(reason);
+  for (const [id, a] of agentApprovals) { a.resolve('no'); agentApprovals.delete(id); }
+}
+
+async function startAgent(goal, { remote = false } = {}) {
+  const ag = config.data.agent || {};
+  if (!ag.enabled) { addTranscript('system', 'The desktop agent is off. Turn it on in Settings, Agent.', { kind: 'error' }); return; }
+  if (remote) { addTranscript('system', 'The desktop agent can only be started at the PC.', { kind: 'error' }); return; }
+  const driver = AG.driverFor(process.platform);
+  if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
+  if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
+  addTranscript('user', `/do ${goal}`);
+  addTranscript('system', `Agent: working on "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
+  toOverlay('state', 'thinking');
+  try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
+  // The agent's own Esc presses must not trip the Esc-to-stop shortcut.
+  const guarded = {
+    perform: async (a, p) => {
+      const esc = a.type === 'key' && /(^|\+)(esc|escape)$/.test(a.combo);
+      if (esc) try { globalShortcut.unregister('Escape'); } catch {}
+      try { return await driver.perform(a, p); } finally {
+        if (esc) try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
+      }
+    },
+  };
+  agentRunner = new AG.AgentRunner({
+    driver: guarded,
+    maxSteps: Math.max(3, Math.min(50, Number(ag.maxSteps) || 25)),
+    autoApprove: ag.approve === 'task-auto', // only if the user chose it in Settings
+    screenshot: async () => {
+      const shot = await captureScreen();
+      return shot;
+    },
+    think: async ({ text, shot, signal }) => {
+      const acts = [];
+      const { reply } = await agentBrain().ask({ text, shot, typed: true, signal, onItem: (it) => { if (it.type === 'gesture' && it.name === 'act') acts.push(it.json); } });
+      return `${reply || ''}${acts.length ? ` [[act ${acts[0]}]]` : ''}`;
+    },
+    approve: (action, info) => new Promise((resolve) => {
+      const id = require('crypto').randomUUID();
+      agentApprovals.set(id, { resolve });
+      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: action.why || '' });
+      if (action.type === 'click' || action.type === 'move') {
+        // COre points at where it wants to click.
+        const d = primaryDisplay();
+        const p = AG.toScreen(action, info.shot);
+        const sf = info.shot.scaleFactor || 1;
+        toOverlay('speak:item', { type: 'gesture', name: 'point', x: p.x / sf - d.bounds.x, y: p.y / sf - d.bounds.y });
+      }
+    }),
+    openApp: async (name) => {
+      const r = await SK.runSkill('open', name, skillCtx());
+      if (r.error) throw new Error(r.error);
+    },
+    onStep: (o) => {
+      if (o.error) addTranscript('system', `Agent step ${o.step}: ${o.error}`, { kind: 'error' });
+      else if (o.running) addTranscript('system', `Agent step ${o.step}: ${o.label}${o.action.why ? ` (${o.action.why})` : ''}`, { kind: 'progress' });
+      else if (o.ok === false) addTranscript('system', `Agent step ${o.step} failed: ${o.error}`, { kind: 'error' });
+    },
+    log: toolAudit,
+  });
+  let r;
+  try { r = await agentRunner.run(goal); } catch (err) { r = { status: 'failed', reason: err.message }; }
+  try { globalShortcut.unregister('Escape'); } catch {}
+  toDock('dock:agent-approve', null);
+  toOverlay('state', 'idle');
+  const msg = r.status === 'done' ? `Agent finished: ${r.summary || 'done'}`
+    : r.status === 'ask' ? `Agent needs you: ${r.question}`
+      : `Agent stopped: ${r.reason || r.status}.`;
+  addTranscript('core', msg);
+  toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
+  if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
+  return r;
 }
 
 // ---------------------------------------------------------------- quick replies (no brain)
@@ -2181,6 +2276,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // Meiosis routing: decide the recipient before touching Prime's turn, so
   // talking to a specialist never interrupts what COre itself is saying.
   if (!internal && !chain) {
+    if (/^\/do\s+\S/i.test(text)) { startAgent(text.replace(/^\/do\s+/i, '').slice(0, 500), { remote }); return; }
+    if (agentRunner && agentRunner.running && typed) stopAgent('you sent a message');
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
@@ -2557,6 +2654,14 @@ function wireIpc() {
   const fromSettings = (e) => isFrom(settingsWin, e);
   ipcMain.handle('settings:load', (e) => (fromSettings(e) ? { sections: SCHEMA.SECTIONS, values: settingsValues(), secrets: settingsSecrets(), version: app.getVersion() } : null));
   ipcMain.handle('settings:set', (e, { key, value } = {}) => (fromSettings(e) ? changeSetting(String(key), value) : { ok: false }));
+  ipcMain.on('dock:agent-answer', (e, { id, answer } = {}) => {
+    if (!fromDock(e)) return;
+    if (id === 'stop') { stopAgent('you pressed Stop'); return; }
+    const a = agentApprovals.get(String(id));
+    if (!a) return;
+    agentApprovals.delete(String(id));
+    a.resolve(['yes', 'all', 'no'].includes(answer) ? answer : 'no');
+  });
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
@@ -3060,6 +3165,8 @@ app.whenReady().then(async () => {
 
 app.on('will-quit', () => {
   stopGlanceReader();
+  if (companion) companion.stop();
+  stopAgent('quitting');
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
   if (!restarting) {

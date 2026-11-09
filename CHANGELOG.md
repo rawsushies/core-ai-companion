@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed (found by the new agent test)
+- **Closing any card beside the orb stopped the phone companion server** (a misplaced line from the phone
+  milestone). Phones lost their connection after "hide that" or any card timing out. Fixed, with a regression test.
+
+### Desktop agent (off by default)
+- `/do TASK` lets COre operate the PC: it looks at the screen, then clicks, types, presses keys, scrolls or opens
+  apps one step at a time.
+- Every step that changes something waits for **Allow** (or **Allow all steps**), and COre points where it will click.
+- **Esc**, **Stop** or any message ends it.
+- Fixed action set with validation and blocked key combos; drivers take parameters as data (xdotool on Linux, a
+  fixed SendInput helper on Windows).
+- Details: `docs/dev/AGENT.md`.
+
 ### Live task card
 - When several cores work on one request (for example `@Scout @Sentinel compare…`), a card beside the orb shows
   each specialist with a live status: working…, done, failed. It never covers a song or lyrics card, and it goes

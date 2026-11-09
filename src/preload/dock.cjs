@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('dock', {
   setSetting: (key, value) => ipcRenderer.send('dock:setting', { key, value }),
   checkUpdates: () => ipcRenderer.send('dock:checkUpdates'),
   openSettings: () => ipcRenderer.send('dock:openSettings'),
+  onAgentApprove: (fn) => ipcRenderer.on('dock:agent-approve', (_e, v) => fn(v)),
+  agentAnswer: (id, answer) => ipcRenderer.send('dock:agent-answer', { id: String(id), answer: String(answer || '') }),
   setInteractive: (v) => ipcRenderer.send('dock:interactive', !!v),
   newChat: () => ipcRenderer.send('dock:reset'),
   brainStatus: () => ipcRenderer.invoke('dock:brainStatus'),

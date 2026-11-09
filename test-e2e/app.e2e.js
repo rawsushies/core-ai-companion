@@ -23,6 +23,7 @@ let overlay;
 let home;
 let userData;
 let project;
+let script;
 const errors = [];
 
 test.before(async () => {
@@ -34,7 +35,7 @@ test.before(async () => {
   const cover = path.join(userData, 'cover.png');
   fs.writeFileSync(cover, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
   const player = JSON.stringify({ status: 'Playing', posUs: 64000000, lenUs: 201000000, artUrl: require('url').pathToFileURL(cover).href, artist: 'The Smoke Choir', album: 'Signals', title: 'Midnight Signal' });
-  const script = path.join(userData, 'fake-script.json');
+  script = path.join(userData, 'fake-script.json');
   fs.writeFileSync(script, JSON.stringify([
     { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
     { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
@@ -207,6 +208,12 @@ test('a phone pairs, chats and is locked out after removal', async () => {
   assert.ok(reply, 'the phone sees the reply');
   const list = await settings.evaluate(() => window.settingsApi.action('phoneDevices'));
   assert.strictEqual(list.devices[0].name, 'E2E phone');
+  // Regression: closing a card beside the orb used to stop the phone server.
+  await send('show me the lyrics');
+  await overlay.waitForFunction(() => window.__coreGlance() !== null, null, { timeout: 5000 });
+  await send('hide that');
+  await overlay.waitForFunction(() => window.__coreGlance() === null, null, { timeout: 5000 });
+  assert.strictEqual((await api('sync', { since: 0 })).status, 200, 'the phone still works after a card closes');
   await settings.evaluate((id) => window.settingsApi.action(`revokePhone:${id}`), deviceId);
   assert.strictEqual((await api('sync', { since: 0 })).status, 401);
 });
@@ -272,6 +279,43 @@ test('the History panel shows the conversation', async () => {
   assert.ok(panel, 'history panel opened');
   await panel.waitForFunction(() => document.getElementById('log').innerText.includes('which local database'), null, { timeout: 5000 });
   await quickSettings(false);
+});
+
+test('desktop agent: /do clicks and types into another window, with step approval (real input)', { skip: process.platform !== 'linux' || !require('fs').existsSync('/usr/bin/xdotool') }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  // A separate window to operate (COre hides its own windows from screenshots).
+  const geo = await app.evaluate(({ BrowserWindow, screen }) => {
+    const w = new BrowserWindow({ x: 120, y: 120, width: 420, height: 160, frame: false, show: true, webPreferences: { sandbox: true } });
+    w.loadURL('data:text/html,<body style=margin:0;background:%23fff><input id=t style="position:absolute;left:40px;top:50px;width:300px;height:40px;font-size:20px">');
+    global.__agentTarget = w;
+    const d = screen.getPrimaryDisplay();
+    return { w: d.size.width, h: d.size.height };
+  });
+  await wait(1200);
+  const scale = Math.min(1, 1568 / Math.max(geo.w, geo.h));
+  const cx = Math.round((120 + 40 + 150) * scale);
+  const cy = Math.round((120 + 50 + 20) * scale);
+  fs.writeFileSync(process.env.CORE_E2E_SCRIPT_PATH || script, JSON.stringify([
+    { match: 'Step 1 of', reply: `Clicking the box. [[act {"type":"click","x":${cx},"y":${cy},"why":"focus the text box"}]]` },
+    { match: 'Step 2 of', reply: 'Typing. [[act {"type":"type","text":"hello from the agent"}]]' },
+    { match: 'Step 3 of', reply: 'Done. [[act {"type":"done","summary":"typed the greeting"}]]' },
+  ]));
+  await send('/do type a greeting into the box');
+  await dock.waitForSelector('#agent-card:not([hidden])', { timeout: 20000 });
+  assert.match(await dock.textContent('#agent-label'), /^Click at/);
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Type/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  await dock.click('#agent-all');
+  await dock.waitForFunction(() => /Agent finished: typed the greeting/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  const value = await app.evaluate(() => global.__agentTarget.webContents.executeJavaScript("document.getElementById('t').value"));
+  assert.strictEqual(value, 'hello from the agent');
+  await app.evaluate(() => { global.__agentTarget.destroy(); });
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+});
+
+test('desktop agent: off by default and refused from the phone', async () => {
+  await send('/do anything at all');
+  await dock.waitForFunction(() => /desktop agent is off/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
 });
 
 test('no renderer errors were thrown', () => {

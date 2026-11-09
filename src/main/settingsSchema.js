@@ -105,6 +105,15 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'agent',
+    title: 'Agent',
+    fields: [
+      { key: 'agent.enabled', label: 'Let COre operate this PC for tasks I start with /do (it clicks and types; Esc stops it)', type: 'toggle' },
+      { key: 'agent.approve', label: 'Approval', type: 'select', options: [['every', 'Ask me before every click, key or typing (recommended)'], ['task-auto', 'Never ask (only for tasks you watch)']] },
+      { key: 'agent.maxSteps', label: 'Most steps per task', type: 'range', min: 5, max: 50, step: 5 },
+    ],
+  },
+  {
     id: 'phone',
     title: 'Phone',
     fields: [

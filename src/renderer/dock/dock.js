@@ -673,6 +673,25 @@
     }
     reportSize();
   });
+  // Desktop agent: approve each step (or all of them), or stop.
+  const agentCard = document.getElementById('agent-card');
+  let agentId = null;
+  if (api.onAgentApprove) api.onAgentApprove((a) => {
+    agentId = a ? a.id : null;
+    agentCard.hidden = !a;
+    if (a) {
+      document.getElementById('agent-step-no').textContent = `Step ${a.step}`;
+      document.getElementById('agent-label').textContent = a.label;
+      document.getElementById('agent-why').textContent = a.why || '';
+      document.getElementById('agent-yes').focus();
+    }
+    reportSize();
+  });
+  const answer = (v) => { if (agentId || v === 'stop') api.agentAnswer(v === 'stop' ? 'stop' : agentId, v); agentCard.hidden = true; agentId = null; reportSize(); };
+  document.getElementById('agent-yes').addEventListener('click', () => answer('yes'));
+  document.getElementById('agent-all').addEventListener('click', () => answer('all'));
+  document.getElementById('agent-stop').addEventListener('click', () => answer('stop'));
+
   api.onReset(() => { log.textContent = ''; streaming = null; reportSize(); });
   api.onFocus(() => input.focus());
   api.onSettings(applySettings);

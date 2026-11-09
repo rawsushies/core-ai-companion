@@ -74,6 +74,7 @@ function parseTag(body) {
     return /^https?:\/\/[^\s]+$/i.test(url) ? { name, url } : null;
   }
   if (name === 'copy' && rest) return { name, text: rest.slice(0, 2000) };
+  if (name === 'act' && rest) return { name, json: rest.slice(0, 2000) }; // desktop agent step (agent.js validates it)
   return null;
 }
 
