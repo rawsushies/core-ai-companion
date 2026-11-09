@@ -12,6 +12,7 @@ const SECTIONS = [
     fields: [
       { key: 'app.startWithWindows', label: 'Start COre when I sign in', type: 'toggle' },
       { key: 'personality.greeting', label: 'Greet me on the first launch of the day', type: 'toggle' },
+      { key: 'personality.language', label: 'Reply language', type: 'select', options: [['', 'Same as I speak'], ['English', 'English'], ['Bahasa Indonesia', 'Bahasa Indonesia'], ['Malay', 'Malay'], ['Spanish', 'Spanish'], ['French', 'French'], ['German', 'German'], ['Japanese', 'Japanese'], ['Chinese', 'Chinese'], ['Portuguese', 'Portuguese'], ['Arabic', 'Arabic']] },
       { key: 'personality.tone', label: 'Personality', type: 'select', options: [['sarcastic', 'Sarcastic'], ['dramatic', 'Dramatic'], ['calm', 'Calm'], ['cheerful', 'Cheerful'], ['professional', 'Professional']] },
       { key: 'presence.chitchat', label: 'Chat with me when things are quiet', type: 'toggle' },
       { key: 'presence.minutes', label: 'Quiet time before COre speaks up', type: 'range', min: 5, max: 120, step: 5, unit: 'min' },
@@ -29,6 +30,8 @@ const SECTIONS = [
     title: 'Look',
     fields: [
       { key: 'orb.style', label: 'Style', type: 'select', options: [['smoke', 'Smoke sphere'], ['liquid', 'Liquid blob']], restart: true },
+      { key: 'orb.theme', label: 'Colour', type: 'select', options: [['emerald', 'Emerald (classic)'], ['ice', 'Ice'], ['ember', 'Ember'], ['violet', 'Violet'], ['gold', 'Gold'], ['rose', 'Rose'], ['mono', 'Moonlight']] },
+      { key: 'orb.profile', label: 'Performance', type: 'select', options: [['battery', 'Battery saver (lightest)'], ['balanced', 'Balanced'], ['quality', 'Best quality']], restart: true },
       { key: 'orb.radius', label: 'Size', type: 'range', min: 36, max: 120, step: 2, unit: 'px' },
       { key: 'orb.particles', label: 'Smoke density', type: 'range', min: 6000, max: 60000, step: 2000, restart: true },
       { key: 'orb.renderScale', label: 'Render quality', type: 'range', min: 0.5, max: 1, step: 0.05, restart: true },
@@ -64,6 +67,15 @@ const SECTIONS = [
       { key: 'brain.claude.model', label: 'Claude model', type: 'select', options: [['haiku', 'Haiku (fastest)'], ['sonnet', 'Sonnet (smarter)'], ['opus', 'Opus (smartest, slowest)']] },
       { key: 'brain.provider', label: 'Main brain', type: 'select', options: [['claude-cli', 'Claude (Claude Code login)'], ['gemini', 'Google Gemini'], ['groq', 'Groq'], ['openrouter', 'OpenRouter'], ['ollama', 'Local model (Ollama)']] },
       { key: 'brain.ollama.model', label: 'Local model name', type: 'text', maxLength: 80 },
+    ],
+  },
+  {
+    id: 'access',
+    title: 'Accessibility',
+    fields: [
+      { key: 'a11y.reduceMotion', label: 'Reduce motion', type: 'select', options: [['auto', 'Follow Windows'], ['on', 'On (calmer, no fidgets)'], ['off', 'Off']] },
+      { key: 'a11y.largeText', label: 'Larger chat text', type: 'toggle' },
+      { key: 'a11y.captions', label: 'Show captions under COre', type: 'toggle' },
     ],
   },
   {

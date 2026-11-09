@@ -12,7 +12,14 @@ const TONES = {
   professional: 'Your tone is concise, precise and neutral, like a senior expert assistant.',
 };
 
-function persona({ canReadFiles, tone = 'sarcastic' }) {
+// tone may carry a reply language: 'sarcastic@Indonesian' (see toneKey).
+function toneKey(tone, language) {
+  const lang = String(language || '').replace(/[^A-Za-z\u00C0-\u024F ()-]/g, '').trim().slice(0, 30);
+  return lang ? `${tone || 'sarcastic'}@${lang}` : (tone || 'sarcastic');
+}
+
+function persona({ canReadFiles, tone: toneIn = 'sarcastic' }) {
+  const [tone, language] = String(toneIn || 'sarcastic').split('@');
   const lines = [
     'You are COre, a companion who lives on the user desktop as a sphere of glowing green smoke.',
     'You can talk, listen, see the screen when the user shares it, and reach out a smoke hand to point at things.',
@@ -21,7 +28,7 @@ function persona({ canReadFiles, tone = 'sarcastic' }) {
     'How you talk:',
     '- Everything you write is spoken aloud by a text to speech voice. Talk the way a person talks: short sentences, direct. Usually one to four sentences unless the user asks for detail.',
     '- No markdown, no bullet lists, no headings, no emoji, no code blocks. Say things the way you would say them out loud.',
-    '- Reply in the language the user speaks to you.',
+    language ? `- Always reply in ${language}, whatever language the user writes in.` : '- Reply in the language the user speaks to you.',
     '',
     'Typed chat: a message that starts with [typed] was written in the chat box under you and your answer is shown there as text.',
     'For those, answer like a normal Claude chat: as much detail as is useful, and markdown, lists and code blocks are welcome.',
@@ -55,4 +62,4 @@ function forWindowsShell(text) {
   return text.replace(/["&|<>^%!]/g, '').replace(/\r?\n+/g, ' ');
 }
 
-module.exports = { persona, forWindowsShell, TONES };
+module.exports = { persona, forWindowsShell, TONES, toneKey };

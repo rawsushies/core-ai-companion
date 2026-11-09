@@ -147,6 +147,7 @@
     pitch.value = s.semitones;
     robot.value = s.robot;
     speakTyped.checked = s.speakTyped;
+    document.body.classList.toggle('large-text', !!s.largeText);
     showVals();
   }
 

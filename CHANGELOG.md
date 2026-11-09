@@ -1,5 +1,18 @@
 # Changelog
 
+## 9.0.0 — Polish
+- Themes: pick COre's smoke colour: Emerald (classic), Ice, Ember, Violet, Gold, Rose or Moonlight. It
+  applies instantly.
+- Performance profiles: Battery saver, Balanced or Best quality, all with one choice.
+- Reply language: COre can always answer in the language you pick (Bahasa Indonesia, English, Japanese…),
+  whatever language you type or speak in.
+- Accessibility: reduce motion (follows Windows' setting by default: no fidgets, calmer drift, no
+  speaking shiver), larger chat text, and captions on or off.
+- Local crash reports: problems are written to COre's own logs folder (never uploaded), included in "Copy
+  diagnostics", and one click away in Settings → Maintenance.
+- First-run tour: on the first launch COre waves, points at the chat, makes a smoke heart and shows you
+  around in five short lines (replay it from the tray or Settings).
+
 ## 8.0.0 — Skills
 - COre can now do things, not just talk: take and look up **notes**, set **timers**, tell you the
   **weather** (free Open-Meteo, no key; set your city in Settings → Skills), **control music**

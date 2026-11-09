@@ -27,7 +27,13 @@ const DEFAULTS = {
     openaiCompat: { baseUrl: '', model: '', apiKey: '', vision: false },
     secrets: {}, // API keys, encrypted with your OS account (set them in the chat's ⚙ → Brain)
   },
+  a11y: {
+    reduceMotion: 'auto', // 'auto' follows Windows' animation setting; 'on' / 'off'
+    largeText: false, // bigger chat text
+    captions: true, // show what COre says under the orb
+  },
   personality: {
+    language: '', // reply language ('' = whatever language you speak)
     tone: 'sarcastic', // 'sarcastic' | 'dramatic' | 'calm' | 'cheerful' | 'professional'
     greeting: true, // a short built-in greeting on the first launch of the day
   },
@@ -64,6 +70,8 @@ const DEFAULTS = {
   },
   orb: {
     style: 'smoke', // 'smoke' (glowing particle sphere) or 'liquid' (black glossy blob)
+    theme: 'emerald', // smoke colour: emerald, ice, ember, violet, gold, rose, mono
+    profile: 'balanced', // performance: battery, balanced, quality (sets particles / quality / idle fps)
     radius: 60, // px
     particles: 24000, // smoke style: more = denser filaments, heavier on the GPU
     renderScale: 1, // lower (0.6-0.8) on slow GPUs

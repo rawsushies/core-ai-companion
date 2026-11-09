@@ -129,6 +129,8 @@
       ['update', 'Check for updates', 'Download the newest COre now.', 'ghost'],
       ['diagnostics', 'Copy diagnostics', 'GPU, display and brain details for troubleshooting.', 'ghost'],
       ['openData', 'Open data folder', 'Where your settings, memory and models live.', 'ghost'],
+      ['logs', 'Open crash logs', 'Problems are logged on this PC only, never uploaded.', 'ghost'],
+      ['tour', 'Replay the tour', 'COre shows you around again.', 'ghost'],
       ['restart', 'Restart COre', 'Close and reopen COre.', 'ghost'],
       ['reset', 'Reset COre', 'Forget settings, memory, reminders and chat history. Downloaded models are kept.', 'ghost danger'],
       ['uninstall', 'Uninstall COre', 'Remove COre from this PC.', 'ghost danger'],

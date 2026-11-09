@@ -1,5 +1,7 @@
 'use strict';
 
+const { toneKey } = require('./persona');
+
 const path = require('path');
 const { ClaudeCliBrain } = require('./claudeCli');
 const { OllamaBrain, OpenAICompatBrain } = require('./httpModels');
@@ -104,7 +106,8 @@ class Brain {
     // Providers without a key are skipped quietly instead of failing loudly.
     const providers = this.chain.filter((p) => !p.available || p.available());
     const failures = [];
-    const tone = (this.ctx.config.personality && this.ctx.config.personality.tone) || 'sarcastic';
+    const pc = this.ctx.config.personality || {};
+    const tone = toneKey(pc.tone || 'sarcastic', pc.language);
     let lastErr;
     for (let i = 0; i < providers.length; i++) {
       const p = providers[i];

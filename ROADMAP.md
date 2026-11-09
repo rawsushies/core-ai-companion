@@ -62,9 +62,9 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
 - Plugin/skill system (safe, permissioned): timers, notes, weather, music control, app launcher, web
   search via the brain, calendar integrations.
 
-## 🔨 v9.0.0 — Polish
+## ✅ v9.0.0 — Polish
 - Themes/skins (colours, styles), languages, accessibility, performance profiles, crash reporting (local),
   onboarding tour.
 
-## ⏳ v10.0.0 — Release
+## 🔨 v10.0.0 — Release
 - Full audit, performance pass, docs, signed installer, release notes.

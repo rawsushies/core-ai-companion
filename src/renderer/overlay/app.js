@@ -28,6 +28,22 @@
     sad:     { tint: [0.35, 0.50, 1.00], energy: -0.1, bob: -1.0, weight: 0.75 },
     calm:    { tint: [0.30, 0.90, 0.70], energy: -0.05, bob: 0.0 },
   };
+  // Smoke colour themes: [idle, speaking].
+  const THEMES = {
+    emerald: [[0.24, 1.00, 0.52], [0.40, 1.00, 0.66]],
+    ice:     [[0.25, 0.80, 1.00], [0.45, 0.88, 1.00]],
+    ember:   [[1.00, 0.48, 0.14], [1.00, 0.64, 0.30]],
+    violet:  [[0.70, 0.40, 1.00], [0.80, 0.56, 1.00]],
+    gold:    [[1.00, 0.80, 0.22], [1.00, 0.90, 0.45]],
+    rose:    [[1.00, 0.38, 0.62], [1.00, 0.55, 0.74]],
+    mono:    [[0.80, 0.86, 0.95], [0.95, 0.97, 1.00]],
+  };
+  const reducedMotionOS = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function reduceMotion() {
+    const r = cfg.a11y && cfg.a11y.reduceMotion;
+    return r === 'on' || (r !== 'off' && reducedMotionOS);
+  }
+
   const ATTENTION = {
     info:    [0.28, 0.58, 1.00],
     success: [0.80, 1.00, 0.30],
@@ -151,7 +167,7 @@
   }
 
   function showCaption(text) {
-    if (!text) {
+    if (!text || (cfg.a11y && cfg.a11y.captions === false)) {
       caption.classList.remove('show');
       return;
     }
@@ -203,7 +219,7 @@
   // purpose: at most one every 7 s.
   function maybeAutoGesture(text) {
     const now = performance.now();
-    if (act || pointing || body.dragging || now - lastModelGesture < 5000 || now - lastAutoGesture < 7000) return;
+    if (reduceMotion() || act || pointing || body.dragging || now - lastModelGesture < 5000 || now - lastAutoGesture < 7000) return;
     if (/\b(ha\s*){2,}|\b(lol|hehe+)\b/i.test(text) && !shapeAct) {
       lastAutoGesture = now;
       if (formShape('laugh')) voice.expr('giggle');
@@ -301,6 +317,7 @@
       }
     } else if (now - lastGestureAt > 2500) {
       const w = M.wander(home, t);
+      if (reduceMotion()) { w.x = home.x + (w.x - home.x) * 0.3; w.y = home.y + (w.y - home.y) * 0.3; } // calmer drift
       // Presence: lean gently toward a nearby cursor, as if noticing you.
       if (cursor) {
         const dx = cursor.x - home.x;
@@ -329,7 +346,7 @@
 
     // Idle life: every 25-45 s with nothing going on, do something small.
     const quiet = mode === 'idle' && !voice.speaking && !pointing && !explainUntil && !body.dragging && !mood && !attention;
-    if (!quiet) anim.nextIdle = Math.max(anim.nextIdle, now + 8000);
+    if (!quiet || reduceMotion()) anim.nextIdle = Math.max(anim.nextIdle, now + 8000);
     else if (now > anim.nextIdle) {
       const pick = Math.random();
       if (pick < 0.25) anim.spinUntil = now + 2200; // a slow spin
@@ -348,7 +365,10 @@
   function updateVisuals(dt, now) {
     const m = MODES[mode];
     // Helpers wear their own colour while idle or talking.
-    let tint = cfg.clone && (mode === 'idle' || mode === 'speaking') ? cfg.clone.tint : m.tint;
+    const theme = THEMES[cfg.orb && cfg.orb.theme] || THEMES.emerald;
+    let tint = (mode === 'idle' || mode === 'speaking')
+      ? (cfg.clone ? cfg.clone.tint : theme[mode === 'idle' ? 0 : 1])
+      : m.tint;
     let glow = m.glow;
     let halo = 0;
     if (attention) {
@@ -421,7 +441,7 @@
     updateVisuals(dt, now);
 
     // A tiny shiver while speaking sells the "vibrating" voice.
-    const jitter = amp * body.r * 0.025;
+    const jitter = reduceMotion() ? 0 : amp * body.r * 0.025;
     const pos = {
       x: body.pos.x + (Math.sin(t * 61) + Math.sin(t * 37)) * 0.5 * jitter + actBody.dx * body.r,
       y: body.pos.y + (Math.sin(t * 53 + 1) + Math.sin(t * 29)) * 0.5 * jitter + actBody.dy * body.r,

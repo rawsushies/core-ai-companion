@@ -24,6 +24,8 @@ const { matchWake } = require('./handsfree');
 const { ScreenWatch } = require('./watch');
 const { refinePoint } = require('./pointing');
 const SK = require('./skills');
+const { toneKey } = require('./brain/persona');
+const { CrashLog } = require('./crashlog');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -59,6 +61,14 @@ if (SAFE_GRAPHICS) {
 if (IS_LINUX) {
   app.commandLine.appendSwitch('enable-transparent-visuals');
 }
+
+// Local crash log (never uploaded). Uncaught errors are recorded instead of
+// taking COre down with a dialog.
+const crashLog = new CrashLog(path.join(EARLY_DIR, 'logs'));
+process.on('uncaughtException', (err) => { console.error('[core] uncaught:', err); crashLog.record('main-exception', err); });
+process.on('unhandledRejection', (err) => { console.error('[core] unhandled rejection:', err); crashLog.record('main-rejection', err); });
+app.on('render-process-gone', (_e, wc, d) => crashLog.record('renderer-gone', `${wc.getURL().split('/').slice(-2).join('/')} ${d.reason} (${d.exitCode})`));
+app.on('child-process-gone', (_e, d) => { if (d.reason !== 'clean-exit') crashLog.record('process-gone', `${d.type} ${d.reason} (${d.exitCode})`); });
 
 // Only one COre at a time; a second launch just brings the first one forward.
 if (!app.requestSingleInstanceLock()) {
@@ -268,7 +278,8 @@ async function refreshBrainStatus() {
 // Keep a Claude Code process ready so the next message skips start-up time.
 function warmClaude() {
   const c = brain && brain.provider('claude-cli');
-  if (c && c.warm) c.warm((config.data.personality && config.data.personality.tone) || 'sarcastic');
+  const pc = config.data.personality || {};
+  if (c && c.warm) c.warm(toneKey(pc.tone || 'sarcastic', pc.language));
 }
 
 function claudeCommand() {
@@ -574,6 +585,7 @@ function dockSettings() {
     semitones: v.semitones,
     robot: v.robot,
     speakTyped: v.speakTyped !== false,
+    largeText: !!(config.data.a11y && config.data.a11y.largeText),
   };
 }
 
@@ -662,9 +674,18 @@ function setStartWithWindows(on) {
   try { app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args }); } catch (err) { console.warn('[core] login item:', err.message); }
 }
 
+// Performance profiles: one choice sets the smoke's cost.
+const PROFILES = {
+  battery: { particles: 9000, renderScale: 0.7, idleFps: 15 },
+  balanced: { particles: 24000, renderScale: 1, idleFps: 30 },
+  quality: { particles: 40000, renderScale: 1, idleFps: 60 },
+};
+
 // Apply one validated change right away where that's possible.
 function applyLive(key, value) {
   if (key === 'app.startWithWindows') setStartWithWindows(value);
+  if (key === 'orb.profile' && PROFILES[value]) { Object.assign(config.data.orb, PROFILES[value]); config.save(); }
+  if (key.startsWith('a11y.')) { toOverlay('config', overlayConfig()); toDock('dock:settings', dockSettings()); }
   if (key.startsWith('hotkeys.')) registerHotkeys();
   if (key.startsWith('voice.') || key.startsWith('orb.')) toOverlay('config', overlayConfig());
   if (key === 'voice.wakeWord') { if (value) stt.warm(); if (tray) createTrayMenu(); }
@@ -708,6 +729,13 @@ async function settingsAction(name) {
     case 'diagnostics':
       await copyDiagnostics();
       return { message: 'Diagnostics copied to the clipboard.' };
+    case 'logs':
+      fs.mkdirSync(crashLog.dir, { recursive: true });
+      shell.openPath(crashLog.dir);
+      return { message: crashLog.recent(1).length ? 'Opened the crash log folder.' : 'No crashes recorded. Opened the log folder anyway.' };
+    case 'tour':
+      setTimeout(runTour, 400);
+      return { message: 'Starting the tour…' };
     case 'openData':
       shell.openPath(app.getPath('userData'));
       return { message: 'Opened COre\'s data folder.' };
@@ -818,6 +846,7 @@ function createTrayMenu() {
     { label: 'Hide / show COre', click: toggleOrb },
     { label: 'New conversation', click: resetConversation },
     { label: 'Call helpers back', click: mergeAllClones },
+    { label: 'Show me around (tour)', click: runTour },
     {
       label: 'Play a game',
       submenu: [
@@ -901,6 +930,7 @@ function overlayConfig() {
     voice: { ...voice, tts: voice.tts !== false },
     lightTheme: !nativeTheme.shouldUseDarkColors,
     view: viewSize(),
+    a11y: config.data.a11y || {},
     stage,
     defaultHome: defaultHome(),
   };
@@ -1094,6 +1124,29 @@ function onReminder(r, missed) {
 
 // A short greeting on the first launch of the day. Built in, so it costs no
 // Claude usage and works offline.
+// First-run tour: a short guided introduction with gestures and shapes.
+function runTour() {
+  state.set('onboarded', true);
+  state.set('lastGreet', new Date().toDateString()); // the tour is today's greeting
+  setDockVisible(true);
+  const hk = config.data.hotkeys;
+  const say = (k) => prettyKey(k).replace(/\+/g, ' ');
+  const steps = [
+    [{ name: 'gesture', gesture: 'wave' }, "Hi, I'm COre. I live here on your screen, made of smoke and mild sarcasm."],
+    [{ name: 'gesture', gesture: 'pointdown' }, `Press ${say(hk.listen)} and just talk to me, or type in the chat under me.`],
+    [{ name: 'form', shape: 'heart' }, 'You can pet me, tickle me, poke me, or toss me across the screen. I will pretend to mind.'],
+    [{ name: 'gesture', gesture: 'magic' }, 'I can take notes, check the weather, play your music, and split into helpers when there is a lot to do.'],
+    [{ name: 'gesture', gesture: 'salute' }, 'Everything else is in the tray menu, under Settings. Right. Let us get to work.'],
+  ];
+  const p = makeVoicePipeline({ speak: true });
+  for (const [g, text] of steps) {
+    p.push({ type: 'gesture', ...g });
+    p.push({ type: 'say', text });
+  }
+  p.push({ type: 'end' });
+  addTranscript('system', `Quick tour: talk with ${prettyKey(hk.listen)} (or hold the orb), type below, ${prettyKey(hk.listenWithScreen)} to talk about your screen. Pet, tickle, poke or toss me. Settings live in the tray menu.`);
+}
+
 const GREETINGS = {
   sarcastic: {
     morning: ['Morning. I have been awake for exactly as long as you have.', 'Good morning. Coffee first, existential questions later.'],
@@ -1854,6 +1907,7 @@ function wireIpc() {
     setTimeout(() => { if (!listening) stt.warm(); }, 14000);
   });
   ipcMain.on('overlay:rendererFailed', (e, msg) => {
+    crashLog.record('webgl', msg);
     if (!fromOverlay(e)) return;
     console.warn('[overlay] renderer failed:', msg);
     if (SAFE_GRAPHICS) addTranscript('system', `I can't draw my orb on this PC (${msg}). Try ⚙ → Display → Force GPU, or copy diagnostics and send them over.`);
@@ -1969,6 +2023,7 @@ async function diagnostics() {
     displays: screen.getAllDisplays().map((d) => ({ size: d.size, scale: d.scaleFactor, primary: d.id === primaryDisplay().id })),
     stage,
     brain: brainStatusCache.map((b) => `${b.name}: ${b.state}`),
+    recentProblems: crashLog.recent(5),
   };
 }
 
@@ -2100,7 +2155,8 @@ app.whenReady().then(async () => {
   floor = new CL.SpeechFloor({ mainBusy: () => !!current || !!listening || (mainSpeaking && Date.now() - mainSpeakingSince < 60_000) });
   setInterval(() => floor.pump(), 500);
   if (process.env.CORE_DEBUG_CHITCHAT) setTimeout(() => startChitchat({ quietMinutes: 30 }), 9000); // end-to-end tests
-  setTimeout(greetIfFirstToday, 3500);
+  if (!state.get('onboarded')) setTimeout(runTour, 4500); // first run: show COre around
+  else setTimeout(greetIfFirstToday, 3500);
 
   const hk = config.data.hotkeys;
   if (SAFE_GRAPHICS && GRAPHICS === 'auto' && !state.get('safeGraphicsAnnounced')) {
