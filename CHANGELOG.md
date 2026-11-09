@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Meiosis Mode: four cores, one chat
+- COre is now four cores total: **COre** (Prime, the coordinator and default recipient) and three
+  specialists that split off as smoke helpers. **Scout** researches and compares, **Forge** builds and drafts,
+  **Sentinel** reviews and finds problems. They are role profiles over the same brain you already use, not
+  extra AI services.
+- One chat for all of them. Every reply is labelled with the core's name and role in its colour. Progress,
+  errors and actions are marked, and messages you send to a specialist say who they went to.
+- Talk to a core by starting with `@Scout`, `@Forge`, `@Sentinel` or `@COre` (autocomplete pops up when you
+  type `@`), with the recipient chip next to the input, by clicking a specialist's smoke, or by voice:
+  "Scout, …". With no name, the message goes to COre. Unknown names aren't guessed: COre lists the names it knows.
+- Address several at once (`@Scout @Sentinel review this`) to start a shared task. They work in parallel,
+  then COre sums up the results in one answer.
+- Each specialist keeps its own conversation (separate context) while it's on screen, handles messages to
+  it one at a time, and merges back after 10 idle minutes (or when poked). Stop also stops specialists.
+- COre can hand work to a specialist itself (`[[delegate Scout …]]`). The older `[[clone …]]` and `/clone`
+  pick a fitting specialist.
+- Floating subtitles show who is speaking, and only one core speaks at a time (COre first).
+- Specialists can't open files, run commands or browse yet (that's the coming permissioned task engine); their
+  instructions say so, so they won't pretend.
+- Names, aliases, colours and voices are configurable in `config.json` → `meiosis.cores`.
+
 ### Release engineering
 - Releases now come only from an explicit version tag, never from a `package.json` change. They go through
   blocking gates (syntax check, tests, packaged-app self-test, Windows installer install/uninstall test) and

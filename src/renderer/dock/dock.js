@@ -21,21 +21,46 @@
     if (near) log.scrollTop = log.scrollHeight;
   }
 
-  function add(role, text, extra) {
+  // ---------------------------------------------------------- Meiosis: cores
+  // One timeline for every core. Each core reply carries its name and role in
+  // text (colour is a second cue, never the only one).
+  let cores = [{ id: 'prime', name: 'COre', role: 'Prime', color: '#3dff85', active: true }];
+  const coreOf = (id) => cores.find((c) => c.id === (id || 'prime')) || cores[0];
+
+  function speakerHead(author) {
+    const c = coreOf(author);
+    const head = document.createElement('div');
+    head.className = 'who';
+    head.style.setProperty('--core', c.color);
+    const n = document.createElement('span');
+    n.className = 'who-name';
+    n.textContent = c.name;
+    const r = document.createElement('span');
+    r.className = 'who-role';
+    r.textContent = c.role;
+    head.append(n, r);
+    return head;
+  }
+
+  // m: { role: 'user'|'core'|'system', text, author?, kind?, to? }
+  function add(role, text, m = {}) {
     stickToBottom(() => {
       const el = document.createElement('div');
       el.className = `msg ${role}`;
-      if (role === 'core') el.appendChild(window.renderMarkdown(text));
-      else el.textContent = text;
-      if (extra && extra.label) {
-        el.className = 'msg core helper';
-        el.textContent = '';
-        const head = document.createElement('div');
-        head.className = 'helper-head';
-        head.textContent = extra.label;
-        if (extra.color) el.style.setProperty('--helper', extra.color);
-        el.append(head, window.renderMarkdown(text));
-      }
+      if (role === 'core') {
+        el.classList.add(`by-${coreOf(m.author).id}`);
+        el.style.setProperty('--core', coreOf(m.author).color);
+        el.append(speakerHead(m.author), window.renderMarkdown(text));
+      } else if (role === 'user' && m.to && m.to.length && !(m.to.length === 1 && m.to[0] === 'prime')) {
+        const to = document.createElement('div');
+        to.className = 'to-line';
+        to.textContent = `to ${m.to.map((id) => coreOf(id).name).join(', ')}`;
+        el.append(to, document.createTextNode(text));
+      } else if (role === 'system' && (m.kind === 'progress' || m.kind === 'error')) {
+        el.classList.add(m.kind);
+        if (m.author) el.style.setProperty('--core', coreOf(m.author).color);
+        el.textContent = text;
+      } else el.textContent = text;
       log.appendChild(el);
       trim();
     });
@@ -44,7 +69,8 @@
 
   function startStream() {
     const el = document.createElement('div');
-    el.className = 'msg core streaming';
+    el.className = 'msg core streaming by-prime';
+    el.style.setProperty('--core', coreOf('prime').color);
     log.appendChild(el);
     streaming = { el, text: '' };
     trim();
@@ -54,10 +80,100 @@
     if (!streaming) return;
     stickToBottom(() => {
       streaming.el.textContent = '';
-      streaming.el.appendChild(window.renderMarkdown(streaming.text));
+      streaming.el.append(speakerHead('prime'), window.renderMarkdown(streaming.text));
     });
     reportSize();
   }
+
+  // ---------------------------------------------------------- recipient picker + @ autocomplete
+  const toBtn = document.getElementById('to');
+  const toName = document.getElementById('to-name');
+  const menu = document.getElementById('core-menu');
+  let recipient = 'prime';
+  let menuMode = null; // 'pick' (the To: button) | 'mention' (typing @)
+  let menuItems = [];
+  let menuIndex = 0;
+
+  function setRecipient(id) {
+    recipient = coreOf(id).id;
+    const c = coreOf(recipient);
+    toName.textContent = c.name;
+    toBtn.style.setProperty('--core', c.color);
+    toBtn.classList.toggle('specialist', recipient !== 'prime');
+    input.placeholder = 'Message…'; // the chip beside it names the recipient
+    input.title = 'Type @ to address another core';
+    input.setAttribute('aria-label', `Message ${c.name}`);
+  }
+
+  function closeMenu() {
+    menu.hidden = true;
+    menuMode = null;
+    toBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function openMenu(mode, list) {
+    menuMode = mode;
+    menuItems = list;
+    menuIndex = Math.max(0, list.findIndex((c) => c.id === recipient));
+    if (mode === 'mention') menuIndex = 0;
+    menu.textContent = '';
+    list.forEach((c, i) => {
+      const o = document.createElement('div');
+      o.className = 'core-opt';
+      o.setAttribute('role', 'option');
+      o.setAttribute('aria-selected', String(i === menuIndex));
+      o.style.setProperty('--core', c.color);
+      const n = document.createElement('span'); n.className = 'who-name'; n.textContent = c.name;
+      const r = document.createElement('span'); r.className = 'who-role'; r.textContent = `${c.role}${c.active ? '' : ' · splits off'}`;
+      o.append(n, r);
+      o.addEventListener('mousedown', (e) => { e.preventDefault(); choose(i); });
+      menu.append(o);
+    });
+    menu.hidden = !list.length;
+    toBtn.setAttribute('aria-expanded', String(!menu.hidden && mode === 'pick'));
+    reportSize();
+  }
+
+  function highlight(i) {
+    menuIndex = (i + menuItems.length) % menuItems.length;
+    [...menu.children].forEach((o, k) => o.setAttribute('aria-selected', String(k === menuIndex)));
+  }
+
+  function choose(i) {
+    const c = menuItems[i];
+    if (!c) return closeMenu();
+    if (menuMode === 'pick') setRecipient(c.id);
+    else {
+      // Replace the partial "@sc" with "@Scout ".
+      const caret = input.selectionStart;
+      const before = input.value.slice(0, caret).replace(/@([\p{L}\p{N}_-]*)$/u, `@${c.name} `);
+      input.value = before + input.value.slice(caret);
+      input.setSelectionRange(before.length, before.length);
+      autosize();
+    }
+    closeMenu();
+    input.focus();
+  }
+
+  toBtn.addEventListener('click', () => (menuMode === 'pick' ? closeMenu() : openMenu('pick', cores)));
+  input.addEventListener('input', () => {
+    // Only mentions at the start address cores, so only suggest there.
+    const head = input.value.slice(0, input.selectionStart);
+    const m = /^(?:@[\p{L}\p{N}_-]+[\s,:]*)*@([\p{L}\p{N}_-]*)$/u.exec(head);
+    if (m) openMenu('mention', cores.filter((c) => c.name.toLowerCase().startsWith(m[1].toLowerCase()) || c.role.toLowerCase().startsWith(m[1].toLowerCase())));
+    else if (menuMode === 'mention') closeMenu();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (menu.hidden) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); highlight(menuIndex + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(menuIndex - 1); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); choose(menuIndex); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); }
+  }, true);
+  document.addEventListener('mousedown', (e) => { if (!menu.contains(e.target) && e.target !== toBtn && !toBtn.contains(e.target)) closeMenu(); });
+
+  api.onCores((list) => { if (Array.isArray(list) && list.length) { cores = list; setRecipient(recipient); } });
+  api.onRecipient((id) => { setRecipient(id); input.focus(); });
 
   let sizeRaf = 0;
   function reportSize() {
@@ -82,8 +198,10 @@
   document.getElementById('composer').addEventListener('submit', (e) => {
     e.preventDefault();
     if (busy && !input.value.trim()) { api.stop(); return; }
-    const text = input.value.trim();
+    let text = input.value.trim();
     if (!text) return;
+    // The picker addresses the message unless it already starts with @mentions.
+    if (recipient !== 'prime' && !text.startsWith('@')) text = `@${coreOf(recipient).name} ${text}`;
     api.ask(text);
     input.value = '';
     autosize();
@@ -322,10 +440,9 @@
     reportSize();
   });
 
-  api.onMessage(({ role, text, label, color }) => {
+  api.onMessage(({ role, text, author, kind, to }) => {
     if (role === 'core-start') { startStream(); return; }
-    if (role === 'helper') { add('core', text, { label, color }); return; }
-    add(role, text);
+    add(role, text, { author, kind, to });
   });
   api.onDelta((d) => {
     if (!streaming) startStream();
@@ -406,7 +523,8 @@
     if (!d) return;
     api.brainStatus().then(renderBrain);
     applySettings(d.settings);
-    for (const m of d.recent) add(m.role, m.text);
+    if (Array.isArray(d.cores) && d.cores.length) { cores = d.cores; setRecipient('prime'); }
+    for (const m of d.recent) add(m.role, m.text, m);
     log.scrollTop = log.scrollHeight;
     reportSize();
   });

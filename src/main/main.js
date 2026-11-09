@@ -20,6 +20,7 @@ const { Reminders } = require('./reminders');
 const SCHEMA = require('./settingsSchema');
 const { Presence, chitchatPrompt } = require('./presence');
 const CL = require('./clones');
+const CORES = require('./cores');
 const { matchWake } = require('./handsfree');
 const { ScreenWatch } = require('./watch');
 const { refinePoint } = require('./pointing');
@@ -160,14 +161,20 @@ const toOverlay = (c, p) => send(overlay, c, p);
 const toPanel = (c, p) => send(panel, c, p);
 const toDock = (c, p) => send(dock, c, p);
 
-function addTranscript(role, text) {
-  const entry = { role, text, ts: Date.now() };
+// One timeline for everything (Meiosis): meta.author is who wrote it
+// ('prime' | 'scout' | 'forge' | 'sentinel'; entries from older versions have
+// none and read as Prime), meta.kind is message/progress/tool/error/permission,
+// meta.to lists the cores a user message was addressed to.
+function addTranscript(role, text, meta = {}) {
+  const entry = { role, text, ts: Date.now(), ...meta };
   transcript.push(entry);
   if (transcript.length > 200) transcript.shift();
   state.set('transcript', transcript.slice(-100));
   toPanel('transcript:add', entry);
-  // COre's own replies reach the dock as a live stream instead.
-  if (role !== 'core') toDock('dock:message', { role: role === 'notice' ? 'system' : role, text });
+  // Prime's own replies reach the dock as a live stream instead.
+  if (role !== 'core' || (meta.author && meta.author !== 'prime')) {
+    toDock('dock:message', { role: role === 'notice' ? 'system' : role, text, author: meta.author, kind: meta.kind, to: meta.to });
+  }
 }
 
 // The display COre lives on (follows you to the monitor you use when
@@ -970,6 +977,7 @@ function overlayConfig() {
     lightTheme: !nativeTheme.shouldUseDarkColors,
     view: viewSize(),
     a11y: config.data.a11y || {},
+    speaker: primarySpeaker(),
     stage,
     defaultHome: defaultHome(),
   };
@@ -1062,7 +1070,8 @@ function fmtTime(ts) {
 // Tags that act instead of animating. Returns true when handled here.
 function handleActionTag(item) {
   if (item.name === 'do') { runSkillTag(item); return true; }
-  if (item.name === 'clone') { spawnClone(item.task); return true; }
+  if (item.name === 'clone') { delegate(null, item.task); return true; }
+  if (item.name === 'delegate') { delegate(item.core, item.task); return true; }
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
     const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
@@ -1322,24 +1331,42 @@ function stopCloneSpeech() {
   floor.release(floor.holder);
 }
 
-function spawnClone(task) {
-  task = String(task || '').trim();
-  if (!task) return null;
-  if (clones.size >= CL.MAX_CLONES) {
-    addTranscript('system', `All ${CL.MAX_CLONES} helpers are busy. Merge one first (click it when it glows).`);
-    return null;
-  }
-  const used = new Set([...clones.values()].map((c) => c.look.name));
-  const look = CL.LOOKS.find((l) => !used.has(l.name)) || CL.LOOKS[0];
-  const id = `h${++cloneSeq}`;
+// ---------------------------------------------------------------- Meiosis Mode
+// Four cores total: Prime is COre itself (this session, orb and chat);
+// Scout, Forge and Sentinel are specialist role profiles that run as helper
+// clones over the same Brain chain, each with its own session (isolated
+// context) while it's on screen. See docs/dev/MEIOSIS.md.
+
+let cores = CORES.buildCores();
+const HELPER_IDLE_MS = 10 * 60_000; // an unused specialist merges back after this
+const hexTint = (hex) => [1, 3, 5].map((i) => parseInt(String(hex).slice(i, i + 2), 16) / 255);
+
+function refreshCores() {
+  cores = CORES.buildCores(config.data.meiosis && config.data.meiosis.cores);
+  toDock('dock:cores', coresForUi());
+}
+
+function coreById(id) { return cores.find((c) => c.id === id) || null; }
+
+function coresForUi() {
+  return cores.map((c) => ({ id: c.id, name: c.name, role: c.role, color: c.color, active: c.id === 'prime' || clones.has(c.id) }));
+}
+
+// Bring a specialist on screen with the meiosis split. Returns the helper,
+// or null when it can't (unknown core, no room on screen, merging back).
+function ensureHelper(coreId) {
+  const existing = clones.get(coreId);
+  if (existing) return existing.merging ? null : existing;
+  const core = coreById(coreId);
+  if (!core || core.id === 'prime') return null;
   const r = cloneRadius();
   const d = primaryDisplay();
   const from = { x: d.bounds.x + orbBounds.x, y: d.bounds.y + orbBounds.y };
   const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: Math.max(r * 5.2, CLONE_WIN * 0.8), near: from });
-  if (!slot) { addTranscript('system', 'No free spot on the screen for a helper.'); return null; }
-  const name = `Helper ${look.name}`;
-  const c = { id, look, name, task, r, slot, state: 'working', reply: '', brain: null, win: null, ac: new AbortController() };
-  clones.set(id, c);
+  if (!slot) { addTranscript('system', `No free spot on the screen for ${core.name}.`, { kind: 'error' }); return null; }
+  const look = { name: core.name, tint: hexTint(core.color), color: core.color, voice: core.voice, semitones: core.semitones };
+  const c = { id: core.id, core, look, name: core.name, r, slot, state: 'idle', brain: null, win: null, ac: new AbortController(), queue: Promise.resolve(), busy: 0 };
+  clones.set(core.id, c);
 
   c.win = new BrowserWindow({
     x: Math.round(from.x - CLONE_WIN / 2),
@@ -1356,52 +1383,145 @@ function spawnClone(task) {
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: false,
-    title: name,
+    title: core.name,
     webPreferences: { preload: path.join(PRELOAD, 'clone.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   c.win.setAlwaysOnTop(true, 'screen-saver');
   c.win.setIgnoreMouseEvents(true, { forward: true });
-  c.win.loadFile(path.join(RENDERER, 'overlay', 'index.html'), { query: { clone: id } });
+  c.win.loadFile(path.join(RENDERER, 'overlay', 'index.html'), { query: { clone: core.id } });
   c.win.once('ready-to-show', () => {
     if (!orbHidden) c.win.showInactive(); // shown with COre later if it's hidden now
-    // Meiosis: COre stretches and pushes apart while the helper condenses
+    // Meiosis: COre stretches and pushes apart while the specialist condenses
     // out of its smoke and drifts to its own spot.
     toOverlay('speak:item', { type: 'gesture', name: 'gesture', gesture: 'split' });
-    setTimeout(() => animateWindow(c.win, from, slot, 900, () => toClone(c, 'state', 'thinking')), 350);
+    setTimeout(() => animateWindow(c.win, from, slot, 900, () => toClone(c, 'state', c.busy ? 'thinking' : 'idle')), 350);
   });
-  c.win.on('closed', () => { clones.delete(id); if (floor) floor.release(id); });
-  addTranscript('system', `${look.emoji} ${name} split off to work on: ${task}`);
-  runClone(c);
+  c.win.on('closed', () => {
+    if (clones.get(core.id) === c) clones.delete(core.id);
+    if (floor) floor.release(core.id);
+    disposeHelperBrain(c);
+    toDock('dock:cores', coresForUi());
+    toOverlay('speaker', primarySpeaker());
+  });
+  addTranscript('system', `${core.name} (${core.role}) split off from COre.`, { author: core.id, kind: 'progress' });
+  toDock('dock:cores', coresForUi());
+  toOverlay('speaker', primarySpeaker());
   return c;
 }
 
-async function runClone(c) {
-  const mem = {};
-  try {
+function helperBrain(c) {
+  if (!c.brain) {
+    const mem = {}; // its own session id lives here: isolated from Prime's
     c.brain = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
-    let context = '';
-    if (memory && config.data.memory.enabled !== false) context = memory.contextFor(c.task) || '';
-    const { reply } = await c.brain.ask({ text: CL.cloneTaskPrompt(c.task, c.name), typed: true, context, signal: c.ac.signal, onItem: () => {} });
-    c.reply = String(reply || '').trim();
-    if (!clones.has(c.id)) return;
-    c.state = 'done';
-    // The first paragraph is the spoken summary; the chat shows the details (or the whole answer if that's all there is).
-    const paras = c.reply.split(/\n\s*\n/);
-    const details = paras.slice(1).join('\n\n').trim();
-    toDock('dock:message', { role: 'helper', label: `${c.look.emoji} ${c.name} · ${c.task.slice(0, 60)}`, color: `rgb(${c.look.tint.map((v) => Math.round(v * 255)).join(',')})`, text: details || c.reply || '(no answer)' });
-    toClone(c, 'state', 'idle');
-    toClone(c, 'attention', { level: 'success' });
-    floor.request(c.id, () => speakForClone(c, CL.spokenSummary(c.reply) || 'Done.'));
-    c.mergeTimer = setTimeout(() => mergeClone(c.id), 4 * 60_000);
-  } catch (err) {
-    if (err.aborted || !clones.has(c.id)) return;
-    c.state = 'failed';
-    addTranscript('system', `${c.name} could not finish: ${err.message}`);
-    toClone(c, 'attention', { level: 'warn' });
-    c.mergeTimer = setTimeout(() => mergeClone(c.id), 60_000);
-  } finally {
-    if (c.brain) for (const p of c.brain.chain) if (p.dispose) p.dispose();
   }
+  return c.brain;
+}
+
+function disposeHelperBrain(c) {
+  if (c.brain) for (const p of c.brain.chain) if (p.dispose) p.dispose();
+  c.brain = null;
+}
+
+// Send one message to a specialist. Messages to the same core run one at a
+// time (its context is sequential). Resolves { ok, reply?, error? }.
+function askCore(coreId, text, { task } = {}) {
+  const c = ensureHelper(coreId);
+  if (!c) return Promise.resolve({ ok: false, error: 'not available' });
+  clearTimeout(c.mergeTimer);
+  const run = async () => {
+    if (c.merging || !clones.has(c.id)) return { ok: false, error: 'merged back' };
+    c.busy++;
+    c.state = 'working';
+    toClone(c, 'state', 'thinking');
+    const ac = new AbortController();
+    c.ac = ac;
+    try {
+      const context = memory && config.data.memory.enabled !== false ? memory.contextFor(text) || '' : '';
+      const { reply, truncated, error } = await helperBrain(c).ask({ text: CL.corePrompt(c.core, text, task), typed: true, context, signal: ac.signal, onItem: () => {} });
+      const full = String(reply || '').trim();
+      if (!clones.has(c.id) || ac.signal.aborted) return { ok: false, error: 'cancelled' };
+      // The first paragraph is the spoken summary; the chat shows the details
+      // (or the whole answer if that's all there is).
+      const details = full.split(/\n\s*\n/).slice(1).join('\n\n').trim();
+      addTranscript('core', details || full || '(no answer)', { author: c.id, ...(task ? { task: task.id } : {}) });
+      if (truncated) addTranscript('system', `${c.name}'s answer was cut off (${error}).`, { author: c.id, kind: 'error' });
+      toClone(c, 'state', 'idle');
+      floor.request(c.id, () => speakForClone(c, CL.spokenSummary(full) || 'Done.'));
+      return { ok: true, reply: full };
+    } catch (err) {
+      if (err.aborted || ac.signal.aborted) return { ok: false, error: 'cancelled' };
+      addTranscript('system', `${c.name} could not answer: ${err.message}`, { author: c.id, kind: 'error' });
+      toClone(c, 'attention', { level: 'warn' });
+      return { ok: false, error: err.message };
+    } finally {
+      c.busy--;
+      if (!c.busy) {
+        c.state = 'idle';
+        toClone(c, 'state', 'idle');
+        c.mergeTimer = setTimeout(() => mergeClone(c.id), HELPER_IDLE_MS);
+      }
+    }
+  };
+  const p = c.queue.then(run, run);
+  c.queue = p.catch(() => {});
+  return p;
+}
+
+// Stop what specialists are doing right now (the chat's Stop button).
+function cancelHelpers() {
+  for (const c of clones.values()) { try { c.ac.abort(); } catch {} toClone(c, 'speech:stop'); }
+}
+
+// ---- shared tasks: several cores addressed at once ------------------------
+
+function saveTask(task) {
+  const list = (state.get('tasks') || []).filter((t) => t.id !== task.id);
+  list.push(JSON.parse(JSON.stringify(task)));
+  state.set('tasks', list.slice(-20));
+}
+
+async function waitPrimeIdle(maxMs = 120_000) {
+  const t0 = Date.now();
+  while ((current || listening) && Date.now() - t0 < maxMs) await new Promise((r) => setTimeout(r, 400));
+}
+
+// Specialists work in parallel on the same request; Prime then gives the
+// user one short, unified answer. Returns the task record.
+async function runSharedTask(targets, text) {
+  const task = { id: `task-${Date.now().toString(36)}`, text: String(text).slice(0, 2000), createdAt: Date.now(), status: 'running', steps: targets.filter((t) => t !== 'prime').map((core) => ({ core, status: 'pending' })) };
+  saveTask(task);
+  const names = task.steps.map((s) => coreById(s.core).name).join(', ');
+  addTranscript('system', `Shared task: ${names} working in parallel. COre will sum up.`, { author: 'prime', kind: 'progress', task: task.id });
+  await Promise.all(task.steps.map(async (step) => {
+    step.status = 'running';
+    saveTask(task);
+    const r = await askCore(step.core, text, { task });
+    step.status = r.ok ? 'completed' : r.error === 'cancelled' ? 'cancelled' : 'failed';
+    if (r.ok) step.result = r.reply.slice(0, 4000); else step.error = r.error;
+    saveTask(task);
+  }));
+  const done = task.steps.filter((s) => s.status === 'completed');
+  task.status = done.length === task.steps.length ? 'completed' : done.length ? 'partial' : task.steps.every((s) => s.status === 'cancelled') ? 'cancelled' : 'failed';
+  saveTask(task);
+  if (task.status === 'cancelled') return task;
+  // Prime coordinates: wait for any conversation in progress, then sum up.
+  await waitPrimeIdle();
+  const lines = task.steps.map((s) => `- ${coreById(s.core).name} (${s.status}): ${s.status === 'completed' ? s.result.slice(0, 1500) : s.error}`).join('\n');
+  handleUserText(`[task ${task.id}] The user asked: ${text}\nYour specialists reported:\n${lines}\nGive the user a short unified answer: the key findings, what was produced, and anything that needs attention or failed. Do not repeat their full text.`, { internal: true, typed: true });
+  return task;
+}
+
+// Prime handing work to a specialist ([[delegate ROLE TASK]] / [[clone TASK]]).
+function delegate(coreName, task) {
+  const core = CORES.findCore(cores, coreName) || coreById(CORES.roleForTask(task));
+  if (!core || core.id === 'prime' || !String(task || '').trim()) return null;
+  addTranscript('system', `COre asked ${core.name}: ${String(task).slice(0, 140)}`, { author: 'prime', kind: 'progress' });
+  return askCore(core.id, task);
+}
+
+function primarySpeaker() {
+  const p = coreById('prime');
+  return { name: p.name, color: p.color, show: clones.size > 0 };
 }
 
 function speakForClone(c, text) {
@@ -1464,6 +1584,7 @@ function cloneConfig(c) {
     stage: { x: 0, y: 0, w: CLONE_WIN, h: CLONE_WIN },
     defaultHome: { x: CLONE_WIN / 2, y: CLONE_WIN / 2 },
     clone: { id: c.id, tint: c.look.tint },
+    speaker: { name: c.name, color: c.look.color, show: true }, // subtitles say who is talking
   };
 }
 
@@ -1561,6 +1682,35 @@ function playGame(name) {
 async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0 } = {}) {
   text = String(text || '').trim();
   if (!text) return;
+  // Meiosis routing: decide the recipient before touching Prime's turn, so
+  // talking to a specialist never interrupts what COre itself is saying.
+  if (!internal && !chain) {
+    if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
+    if (/^\/merge\b/i.test(text)) { mergeAllClones(); return; }
+    const route = CORES.parseMentions(cores, text, { spoken: !typed });
+    if (route.unknown.length) {
+      addTranscript('user', text);
+      const known = cores.map((c) => `@${c.name}`).join(', ');
+      addTranscript('system', `I don't know ${route.unknown.map((u) => `@${u}`).join(', ')}. You can talk to ${known}.`, { kind: 'error' });
+      return;
+    }
+    const specialists = route.targets.filter((t) => t !== 'prime');
+    if (specialists.length) {
+      if (presence) presence.noteInteraction();
+      if (!route.text) {
+        // Just a name: bring them up and point the chat at them.
+        addTranscript('user', text, { to: route.targets });
+        for (const id of specialists) ensureHelper(id);
+        toDock('dock:recipient', specialists[0]);
+        return;
+      }
+      addTranscript('user', text, { to: route.targets });
+      if (route.targets.length === 1) askCore(specialists[0], route.text);
+      else runSharedTask(route.targets, route.text);
+      return;
+    }
+    if (route.targets.includes('prime')) text = route.text || text; // "@COre explain this"
+  }
   if (chain) {
     if (syncTurn && syncTurn.finished) toDock('dock:done', { text: syncTurn.reply });
     syncTurn = null;
@@ -1574,8 +1724,6 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   turnVia = internal ? 'COre' : typed ? 'chat' : 'voice';
   if (typed || internal) followUpPending = false;
   if (!internal) {
-    if (/^\/clone\s+\S/i.test(text)) { spawnClone(text.replace(/^\/clone\s+/i, '')); return; }
-    if (/^\/merge\b/i.test(text)) { mergeAllClones(); return; }
     addTranscript('user', text);
     if (presence) presence.noteInteraction();
   }
@@ -1814,18 +1962,12 @@ function wireIpc() {
     const c = cloneFrom(e);
     if (c && floor && floor.holder === c.id) { clearTimeout(c.floorTimer); floor.release(c.id); }
   });
+  // Click a specialist to talk to it; poke it (double click) to merge it back.
   ipcMain.on('clone:click', (e) => {
     const c = cloneFrom(e);
     if (!c) return;
-    if (c.state === 'working') {
-      addTranscript('system', `${c.look.emoji} ${c.name} is still working on: ${c.task}. Poke it (double click) to call it back.`);
-      setDockVisible(true);
-      if (c.lastClick && Date.now() - c.lastClick < 400) mergeClone(c.id);
-      c.lastClick = Date.now();
-      return;
-    }
-    setDockVisible(true);
-    mergeClone(c.id); // its answer is already in the chat
+    setDockVisible(true, true);
+    toDock('dock:recipient', c.id);
   });
   ipcMain.on('clone:interaction', (e, kind) => { const c = cloneFrom(e); if (c && kind === 'poke') mergeClone(c.id); });
   ipcMain.on('orb:interaction', (e, kind) => { if (fromOverlay(e) && ['pet', 'tickle', 'poke', 'toss'].includes(kind)) onInteraction(kind); });
@@ -1843,10 +1985,11 @@ function wireIpc() {
     recent: transcript.slice(-12)
       .filter((m) => m.role !== 'system' || m.ts >= APP_STARTED)
       .slice(-8)
-      .map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text })),
+      .map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text, author: m.author, kind: m.kind, to: m.to })),
+    cores: coresForUi(),
   } : null));
   ipcMain.on('dock:ask', (e, text) => { if (fromDock(e)) handleUserText(text, { typed: true }); });
-  ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); } });
+  ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); cancelHelpers(); } });
   ipcMain.on('dock:listen', (e) => { if (fromDock(e)) startListening(false); });
   ipcMain.on('dock:openPanel', (e) => { if (fromDock(e)) togglePanel(true); });
   ipcMain.on('dock:hide', (e) => { if (fromDock(e)) setDockVisible(false); });
@@ -2240,6 +2383,7 @@ app.whenReady().then(async () => {
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
   notes = new SK.Notes(path.join(userData, 'notes.json'));
+  refreshCores();
   // Older versions kept the private calendar link in plain text: encrypt it.
   if (config.data.skills && config.data.skills.calendarUrl) {
     setSecret('calendar', config.data.skills.calendarUrl);

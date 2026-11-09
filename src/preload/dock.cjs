@@ -46,5 +46,7 @@ contextBridge.exposeInMainWorld('dock', {
   onReset: on('dock:reset'),
   onFocus: on('dock:focus'),
   onSettings: on('dock:settings'),
+  onCores: on('dock:cores'),
+  onRecipient: on('dock:recipient'),
   onBusy: on('dock:busy'),
 });

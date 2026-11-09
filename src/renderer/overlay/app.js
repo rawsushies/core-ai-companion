@@ -174,7 +174,16 @@
       caption.classList.remove('show');
       return;
     }
-    caption.textContent = text;
+    caption.textContent = '';
+    // Meiosis: say who is talking (helpers always; COre when helpers are out).
+    const sp = cfg.speaker;
+    if (sp && sp.show && sp.name) {
+      const n = document.createElement('span');
+      n.className = 'speaker';
+      n.textContent = sp.name;
+      if (/^#[0-9a-f]{6}$/i.test(sp.color || '')) n.style.color = sp.color;
+      caption.append(n, document.createTextNode(text));
+    } else caption.textContent = text;
     caption.classList.add('show');
   }
 
@@ -751,6 +760,7 @@
       bridge.onSpeechStop(stopAll);
       bridge.onHover((over) => { hoverSince = over ? performance.now() : 0; });
       bridge.onConfig(applyConfig);
+      bridge.onSpeaker((sp) => { cfg.speaker = sp; });
       bridge.onDockVisible((v) => { dockVisible = !!v; });
       bridge.onStage((st) => { if (st) stage = { ...st }; });
       bridge.onCursor((c) => {

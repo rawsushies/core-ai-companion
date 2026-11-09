@@ -83,10 +83,12 @@ at the computer but paused, never in quiet hours, at most a few times a day, and
 Pet it, tickle it, poke it (double click) or toss it across the screen, and it reacts. Ask for **trivia, a
 riddle or 20 questions**.
 
-**Helpers ("Many COres").** Ask for several things at once, or type `/clone <task>`. COre splits off up to 3
-helper copies in a meiosis-style burst. Each has its own colour, voice, conversation and spot on screen,
-away from COre, the chat and each other. Helpers queue to speak so voices never overlap, and their results land
-in the chat. Click a finished helper (or `/merge`) to fold it back in.
+**Meiosis Mode: four cores, one chat.** COre coordinates three specialists that split off as smoke helpers:
+**Scout** (research), **Forge** (build) and **Sentinel** (review/QA). Start a message with `@Scout`, `@Forge` or
+`@Sentinel` (or pick one with the chip beside the input; `@` autocompletes) to talk to one directly. Address
+several to run a shared task that COre then sums up. Every reply in the single chat is labelled with who
+said it, subtitles name the speaker, and only one core speaks at a time. Specialists can't touch files or
+the web yet. See [docs/dev/MEIOSIS.md](docs/dev/MEIOSIS.md).
 
 **Screen partner.** When an error dialog, crash report or "(Not Responding)" window appears, COre offers a
 **Take a look** button. It notices from window titles only; a screenshot is taken when you click. When it points

@@ -53,6 +53,21 @@ function cloneTaskPrompt(task, name) {
   ].join('\n');
 }
 
+// The message a specialist core receives (Meiosis Mode). The user's text is
+// passed through untouched (code and symbols intact): prompts reach the brain
+// over stdin, never through a shell.
+function corePrompt(core, text, task) {
+  return [
+    `[core ${core.name}] ${core.prompt}`,
+    task
+      ? `This is part of shared task ${task.id}, coordinated by COre (Prime). Other specialists may work on the same request in parallel: stay within your role.`
+      : "The user is talking to you directly in COre's shared chat.",
+    'Answer format: first ONE short spoken sentence that sums up your answer (it is read aloud), then a blank line, then the full answer (markdown welcome). No [[tags]].',
+    '',
+    String(text || '').slice(0, 8000),
+  ].join('\n');
+}
+
 // First paragraph as a short spoken summary, without markdown or tags.
 function spokenSummary(reply, max = 220) {
   const first = String(reply || '').trim().split(/\n\s*\n/)[0] || '';
@@ -96,4 +111,4 @@ class SpeechFloor {
   }
 }
 
-module.exports = { MAX_CLONES, LOOKS, placeClone, orbRect, cloneTaskPrompt, spokenSummary, SpeechFloor, overlaps };
+module.exports = { MAX_CLONES, LOOKS, placeClone, orbRect, cloneTaskPrompt, corePrompt, spokenSummary, SpeechFloor, overlaps };
