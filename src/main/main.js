@@ -863,6 +863,67 @@ function phoneQr(url) {
   return qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
 }
 
+// ---------------------------------------------------------------- Google Drive memory (optional)
+// See gdrive.js. Off until you add your OAuth client and connect.
+const GD = require('./gdrive');
+let drive = null;
+let driveSyncTimer = null;
+let driveSyncing = false;
+
+function noteMemoryRemoved(text) {
+  const list = (state.get('memoryRemoved') || []).filter((r) => Date.now() - r.at < 90 * 864e5).slice(-300);
+  list.push({ text: String(text).slice(0, 300), at: Date.now() });
+  state.set('memoryRemoved', list);
+  scheduleDriveSync();
+}
+
+function googleDrive() {
+  const c = config.data.cloud || {};
+  if (!drive) {
+    drive = new GD.GoogleDrive({
+      clientId: c.googleClientId || '',
+      clientSecret: getSecret('googleClientSecret'),
+      refreshToken: getSecret('googleRefresh'),
+      fetch: (u, o) => require('electron').net.fetch(u, o),
+      openBrowser: (url) => shell.openExternal(url),
+      saveRefreshToken: (t) => setSecret('googleRefresh', t),
+    });
+  }
+  return drive;
+}
+
+function scheduleDriveSync(ms = 30000) {
+  if (!(config.data.cloud && config.data.cloud.autoSync !== false) || !getSecret('googleRefresh')) return;
+  clearTimeout(driveSyncTimer);
+  driveSyncTimer = setTimeout(() => syncDrive().catch(() => {}), ms);
+}
+
+async function syncDrive() {
+  if (driveSyncing || !memory) return { ok: false, error: 'busy' };
+  driveSyncing = true;
+  try {
+    const d = googleDrive();
+    const cloud = await d.read();
+    const local = { items: memory.items.map((i) => ({ text: i.text, at: i.updatedAt || i.ts || 0 })), removed: state.get('memoryRemoved') || [] };
+    const merged = GD.mergeMemory(local, cloud);
+    const have = new Set(memory.items.map((i) => i.text.toLowerCase().replace(/\s+/g, ' ').trim()));
+    let added = 0;
+    for (const it of merged.items) if (!have.has(it.text.toLowerCase().replace(/\s+/g, ' ').trim())) { if (memory.remember(it.text, { source: { via: 'cloud' } })) added++; }
+    let dropped = 0;
+    for (const r of merged.removed) {
+      const hit = memory.items.find((i) => i.text.toLowerCase().replace(/\s+/g, ' ').trim() === r.text && (i.updatedAt || i.ts || 0) <= r.at);
+      if (hit && memory.forget(hit.id)) dropped++;
+    }
+    await d.write(merged);
+    state.set('memoryRemoved', merged.removed);
+    state.set('driveSyncedAt', Date.now());
+    if (added || dropped) toDock('dock:memory', memory.list());
+    return { ok: true, added, dropped, total: merged.items.length };
+  } finally {
+    driveSyncing = false;
+  }
+}
+
 // ---------------------------------------------------------------- backups
 const BK = require('./backup');
 
@@ -918,6 +979,22 @@ async function settingsAction(name) {
       const res = changeSetting('backup.folder', found[0].suggested);
       return { message: res.ok ? `Backups go to ${found[0].name}, in COre Backups. ${getSecret('backup') ? '' : 'Tip: set a passphrase so the cloud copy is encrypted.'}`.trim() : res.error, values: res.values, secrets: res.secrets };
     }
+    case 'connectGoogle': {
+      drive = null; // pick up the client ID / secret just entered
+      try {
+        await googleDrive().connect();
+        const r = await syncDrive();
+        return { message: `Connected to Google. Memory synced (${r.total} facts in your Drive's private COre folder).` };
+      } catch (err) { return { message: `Google: ${err.message}` }; }
+    }
+    case 'syncGoogle': {
+      if (!getSecret('googleRefresh')) return { message: 'Connect your Google account first.' };
+      try { const r = await syncDrive(); return { message: r.ok ? `Synced: ${r.added} new here, ${r.dropped} removed, ${r.total} in total.` : 'A sync is already running.' }; } catch (err) { return { message: `Google: ${err.message}` }; }
+    }
+    case 'disconnectGoogle':
+      await googleDrive().disconnect().catch(() => {});
+      drive = null;
+      return { message: 'Disconnected from Google. The copy in Drive stays until you delete COre from your Google account\'s connected apps.' };
     case 'backupNow': {
       const r = runBackup('manual');
       return { message: r.ok ? `Backed up ${r.count} files${r.encrypted ? ', encrypted' : ''}.` : r.error };
@@ -1303,6 +1380,7 @@ function handleActionTag(item) {
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
     const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
+    if (r && (r.created || r.replaced)) scheduleDriveSync();
     if (r && r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
     else if (r && r.replaced) toDock('dock:message', { role: 'system', text: `Updated: ${r.item.text} (was: ${r.replaced})` });
     toDock('dock:memory', memory.list());
@@ -1310,6 +1388,7 @@ function handleActionTag(item) {
   }
   if (item.name === 'forget') {
     const gone = memory && memory.forget(item.text);
+    if (gone) noteMemoryRemoved(gone.text);
     if (gone) toDock('dock:message', { role: 'system', text: `Forgot: ${gone.text}` });
     toDock('dock:memory', memory ? memory.list() : []);
     return true;
@@ -2668,7 +2747,7 @@ function wireIpc() {
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
   ipcMain.on('dock:memoryEdit', (e, { id, text } = {}) => { if (fromDock(e) && memory) { memory.edit(String(id), String(text || '')); toDock('dock:memory', memory.list()); } });
-  ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { memory.forget(String(id)); toDock('dock:memory', memory.list()); } });
+  ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { const gone = memory.forget(String(id)); if (gone) noteMemoryRemoved(gone.text); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
   ipcMain.handle('dock:reminders', (e) => (fromDock(e) && reminders ? reminders.items : []));
   ipcMain.on('dock:reminderCancel', (e, id) => { if (fromDock(e) && reminders) { reminders.cancel(String(id)); toDock('dock:reminders', reminders.items); } });
@@ -3073,6 +3152,8 @@ app.whenReady().then(async () => {
   syncPhone();
   watchPower();
   setTimeout(prewarmQuickVoice, 45_000);
+  scheduleDriveSync(120_000);
+  setInterval(() => scheduleDriveSync(0), 3600_000).unref();
   setInterval(checkAutoBackup, 3600_000).unref();
   reminders = new Reminders({ store: state, onFire: onReminder });
 

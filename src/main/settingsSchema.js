@@ -105,6 +105,16 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'cloud',
+    title: 'Cloud',
+    fields: [
+      { key: 'cloud.googleClientId', label: 'Google OAuth client ID (Desktop app, from your Google Cloud Console)', type: 'text', maxLength: 200, optional: true, pattern: '^[\\w.-]+\\.apps\\.googleusercontent\\.com$' },
+      { key: 'cloud.googleClientSecret', label: 'Client secret', type: 'text', maxLength: 200, optional: true, secret: 'googleClientSecret' },
+      { key: 'cloud.actions', label: "COre's memory in your Google Drive's private app folder (COre can't see anything else)", type: 'actions', items: [['connectGoogle', 'Connect Google'], ['syncGoogle', 'Sync now'], ['disconnectGoogle', 'Disconnect']] },
+      { key: 'cloud.autoSync', label: 'Sync memory automatically', type: 'toggle' },
+    ],
+  },
+  {
     id: 'agent',
     title: 'Agent',
     fields: [

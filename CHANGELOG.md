@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Memory in your Google account (optional)
+- Settings → **Cloud**: connect your Google account and COre keeps its memory in your Drive's private app folder.
+  It asks for the `drive.appdata` permission only and can't see anything else.
+- Memory is merged both ways after every change and hourly. Deletions stay deleted.
+- Sign-in is Google's desktop flow (PKCE, local callback). Only the refresh token is kept, encrypted.
+- You need your own free OAuth client: steps in `docs/dev/CLOUD.md`.
+
 ### COre for Android (new app)
 - `mobile/` is a real Android app (Capacitor). CI builds an installable debug APK.
 - **With your PC** on the same Wi-Fi, it's paired like the phone page (encrypted) and gets chat, status, the media
