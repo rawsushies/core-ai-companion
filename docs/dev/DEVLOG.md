@@ -12,4 +12,5 @@ Nothing is pushed without explicit approval. See APPROVALS.md for the queue.
 - **M-001** (`a083070`): gated release engineering, CI, smoke-test mode, installer test script.
 - **M-002** (`5d059a2`): quarantine of corrupt data files, release-channel source updates, backup/rollback,
   crash-loop rollback with the `boot.js` bootstrap.
-- **M-003:** calendar time zones and recurrence, encrypted calendar link, visible main-process errors.
+- **M-003** (`9462f35`): calendar time zones and recurrence, encrypted calendar link, visible main-process errors.
+- **M-004:** brain watchdogs, partial-answer recovery with Continue, provider health, history size budget, Ollama keep_alive.

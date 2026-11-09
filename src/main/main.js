@@ -1147,6 +1147,7 @@ function runAction(id) {
   actions.delete(id);
   if (a.kind === 'open' && /^https?:\/\//i.test(a.value)) shell.openExternal(a.value);
   if (a.kind === 'copy') Promise.resolve(require('electron').clipboard.writeText(a.value)).catch(() => {});
+  if (a.kind === 'continue') handleUserText('Please continue your previous answer exactly where it stopped.', { typed: true });
   if (a.kind === 'look') {
     const t = String(a.value).replace(/["&|<>^%!]/g, '');
     handleUserText(`Take a look at my screen. A window called ${t} just appeared. What does it say, and how do I fix it?`, { withScreen: true });
@@ -1624,7 +1625,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   toDock('dock:busy', true);
   toDock('dock:message', { role: 'core-start' });
   try {
-    const { reply } = await brain.ask({
+    const { reply, truncated, error: cutReason } = await brain.ask({
       text,
       shot,
       typed,
@@ -1651,6 +1652,13 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       },
     });
     if (reply) addTranscript('core', reply);
+    if (truncated) {
+      // The brain dropped mid-answer: keep what was said, say so, offer to continue.
+      const id = require('crypto').randomUUID();
+      actions.set(id, { kind: 'continue', value: '' });
+      addTranscript('system', `My answer was cut off (${cutReason}).`);
+      toDock('dock:action', { id, kind: 'continue', label: 'Continue the answer' });
+    }
     if (turnSync && syncTurn === turnSync) {
       // Show the full answer when the voice finishes (or soon, if it never starts).
       turnSync.finished = true;
@@ -2098,6 +2106,7 @@ async function diagnostics() {
     stage,
     brain: brainStatusCache.map((b) => `${b.name}: ${b.state}`),
     recentProblems: crashLog.recent(5),
+    brainHealth: brain ? brain.health() : [],
   };
 }
 

@@ -45,6 +45,17 @@
   automatically), is never shown again in Settings ("Saved (hidden)" with Remove), and can't leak into the
   chat, the brain or logs through error messages.
 
+### A sturdier brain (same brains, better behaved)
+- Watchdogs on every provider: one that doesn't start answering within 90 s, or goes silent for 45 s
+  mid-answer, is abandoned (configurable via `brain.timeouts`). If nothing was said yet, the next brain in
+  your chain takes over. Before, a stalled provider could hold a turn for four minutes.
+- An answer that breaks off midway keeps what was already said, says why, and offers **Continue the
+  answer** instead of discarding everything.
+- Stopping a reply yourself is no longer counted as a provider failure.
+- Per-provider health (successes, failures, last error, typical time to first word) appears in Copy diagnostics.
+- Conversation history for Gemini/Groq/OpenRouter/Ollama is bounded by size as well as count, so long pastes
+  can't overflow small local models. Ollama keeps the model loaded between turns instead of reloading it.
+
 ### Problems are no longer silent
 - If something unexpected breaks inside COre, it now says so once in the chat (and tints the orb if it keeps
   happening) instead of only writing to the crash log.
