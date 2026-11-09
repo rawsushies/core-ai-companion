@@ -21,12 +21,21 @@
     if (near) log.scrollTop = log.scrollHeight;
   }
 
-  function add(role, text) {
+  function add(role, text, extra) {
     stickToBottom(() => {
       const el = document.createElement('div');
       el.className = `msg ${role}`;
       if (role === 'core') el.appendChild(window.renderMarkdown(text));
       else el.textContent = text;
+      if (extra && extra.label) {
+        el.className = 'msg core helper';
+        el.textContent = '';
+        const head = document.createElement('div');
+        head.className = 'helper-head';
+        head.textContent = extra.label;
+        if (extra.color) el.style.setProperty('--helper', extra.color);
+        el.append(head, window.renderMarkdown(text));
+      }
       log.appendChild(el);
       trim();
     });
@@ -271,8 +280,9 @@
     reportSize();
   });
 
-  api.onMessage(({ role, text }) => {
+  api.onMessage(({ role, text, label, color }) => {
     if (role === 'core-start') { startStream(); return; }
+    if (role === 'helper') { add('core', text, { label, color }); return; }
     add(role, text);
   });
   api.onDelta((d) => {

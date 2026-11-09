@@ -19,6 +19,7 @@ const { Memory } = require('./memory');
 const { Reminders } = require('./reminders');
 const SCHEMA = require('./settingsSchema');
 const { Presence, chitchatPrompt } = require('./presence');
+const CL = require('./clones');
 
 const IS_LINUX = process.platform === 'linux';
 const ROOT = path.join(__dirname, '..', '..');
@@ -83,6 +84,11 @@ let currentPipeline = null;
 let memory = null;
 let reminders = null;
 let presence = null;
+const clones = new Map(); // id -> helper clone
+let cloneSeq = 0;
+let mainSpeaking = false; // the main orb has sentences queued or playing
+let mainSpeakingSince = 0;
+let floor = null;
 let lastReaction = 0;
 const actions = new Map(); // one-click actions offered in the chat: id -> { kind, value }
 // Spoken questions: the chat reveals each sentence as it is spoken, then the
@@ -427,6 +433,7 @@ function createOverlay() {
 function updateHitTest() {
   if (!overlay || overlay.isDestroyed() || !overlay.isVisible()) return;
   const p = screen.getCursorScreenPoint();
+  if (clones.size) cloneHitTest(p);
   const b = primaryDisplay().bounds; // orbBounds are display coordinates
   const dx = p.x - b.x - orbBounds.x;
   const dy = p.y - b.y - orbBounds.y;
@@ -767,6 +774,7 @@ function createTray() {
     { type: 'separator' },
     { label: 'Hide / show COre', click: toggleOrb },
     { label: 'New conversation', click: resetConversation },
+    { label: 'Call helpers back', click: mergeAllClones },
     {
       label: 'Play a game',
       submenu: [
@@ -941,6 +949,7 @@ function fmtTime(ts) {
 
 // Tags that act instead of animating. Returns true when handled here.
 function handleActionTag(item) {
+  if (item.name === 'clone') { spawnClone(item.task); return true; }
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
     const r = memory.remember(item.text);
@@ -1061,6 +1070,7 @@ function makeVoicePipeline({ speak }) {
     synth: useKokoro ? (text) => tts.synth(text, { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed }) : null,
     forward: (item) => {
       if (item.type === 'say' && !speak) return;
+      if (item.type === 'say') { mainSpeaking = true; mainSpeakingSince = Date.now(); stopCloneSpeech(); }
       toOverlay('speak:item', item);
     },
     onError: (err) => {
@@ -1089,6 +1099,193 @@ function speakLine(text) {
   const p = makeVoicePipeline({ speak: true });
   p.push({ type: 'say', text });
   p.push({ type: 'end' });
+}
+
+// ---------------------------------------------------------------- helper clones (Many COres)
+
+const CLONE_WIN = 300; // window side; the helper's orb sits in the middle
+
+function cloneRadius() { return Math.round((config.data.orb.radius || 60) * 0.62); }
+
+// Everything a new helper must not cover, in screen coordinates.
+function cloneObstacles(except) {
+  const d = primaryDisplay();
+  const r = orbBounds.r || 60;
+  const out = [CL.orbRect(d.bounds.x + orbBounds.x, d.bounds.y + orbBounds.y, r)];
+  if (dock && !dock.isDestroyed() && dock.isVisible()) out.push(dock.getBounds());
+  for (const c of clones.values()) if (c !== except && c.slot) out.push({ x: c.slot.x - CLONE_WIN * 0.4, y: c.slot.y - CLONE_WIN * 0.4, w: CLONE_WIN * 0.8, h: CLONE_WIN * 0.8 });
+  return out;
+}
+
+function animateWindow(win, from, to, ms, done) {
+  const t0 = Date.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const iv = setInterval(() => {
+    if (!win || win.isDestroyed()) { clearInterval(iv); return; }
+    const k = Math.min(1, (Date.now() - t0) / ms);
+    const e = ease(k);
+    win.setPosition(Math.round(from.x + (to.x - from.x) * e - CLONE_WIN / 2), Math.round(from.y + (to.y - from.y) * e - CLONE_WIN / 2));
+    if (k >= 1) { clearInterval(iv); if (done) done(); }
+  }, 16);
+}
+
+function toClone(c, channel, payload) {
+  if (c && c.win && !c.win.isDestroyed()) c.win.webContents.send(channel, payload);
+}
+
+function stopCloneSpeech() {
+  if (!floor || !floor.holder) return;
+  const c = clones.get(floor.holder);
+  toClone(c, 'speech:stop');
+  floor.release(floor.holder);
+}
+
+function spawnClone(task) {
+  task = String(task || '').trim();
+  if (!task) return null;
+  if (clones.size >= CL.MAX_CLONES) {
+    addTranscript('system', `All ${CL.MAX_CLONES} helpers are busy. Merge one first (click it when it glows).`);
+    return null;
+  }
+  const used = new Set([...clones.values()].map((c) => c.look.name));
+  const look = CL.LOOKS.find((l) => !used.has(l.name)) || CL.LOOKS[0];
+  const id = `h${++cloneSeq}`;
+  const r = cloneRadius();
+  const d = primaryDisplay();
+  const from = { x: d.bounds.x + orbBounds.x, y: d.bounds.y + orbBounds.y };
+  const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: Math.max(r * 5.2, CLONE_WIN * 0.8), near: from });
+  if (!slot) { addTranscript('system', 'No free spot on the screen for a helper.'); return null; }
+  const name = `Helper ${look.name}`;
+  const c = { id, look, name, task, r, slot, state: 'working', reply: '', brain: null, win: null, ac: new AbortController() };
+  clones.set(id, c);
+
+  c.win = new BrowserWindow({
+    x: Math.round(from.x - CLONE_WIN / 2),
+    y: Math.round(from.y - CLONE_WIN / 2),
+    width: CLONE_WIN,
+    height: CLONE_WIN,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    focusable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    title: name,
+    webPreferences: { preload: path.join(PRELOAD, 'clone.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  c.win.setAlwaysOnTop(true, 'screen-saver');
+  c.win.setIgnoreMouseEvents(true, { forward: true });
+  c.win.loadFile(path.join(RENDERER, 'overlay', 'index.html'), { query: { clone: id } });
+  c.win.once('ready-to-show', () => {
+    c.win.showInactive();
+    // Meiosis: COre stretches and pushes apart while the helper condenses
+    // out of its smoke and drifts to its own spot.
+    toOverlay('speak:item', { type: 'gesture', name: 'gesture', gesture: 'split' });
+    setTimeout(() => animateWindow(c.win, from, slot, 900, () => toClone(c, 'state', 'thinking')), 350);
+  });
+  c.win.on('closed', () => { clones.delete(id); if (floor) floor.release(id); });
+  addTranscript('system', `${look.emoji} ${name} split off to work on: ${task}`);
+  runClone(c);
+  return c;
+}
+
+async function runClone(c) {
+  const mem = {};
+  try {
+    c.brain = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+    let context = '';
+    if (memory && config.data.memory.enabled !== false) context = memory.contextFor(c.task) || '';
+    const { reply } = await c.brain.ask({ text: CL.cloneTaskPrompt(c.task, c.name), typed: true, context, signal: c.ac.signal, onItem: () => {} });
+    c.reply = String(reply || '').trim();
+    if (!clones.has(c.id)) return;
+    c.state = 'done';
+    toDock('dock:message', { role: 'helper', label: `${c.look.emoji} ${c.name} · ${c.task.slice(0, 60)}`, color: `rgb(${c.look.tint.map((v) => Math.round(v * 255)).join(',')})`, text: c.reply || '(no answer)' });
+    toClone(c, 'state', 'idle');
+    toClone(c, 'attention', { level: 'success' });
+    floor.request(c.id, () => speakForClone(c, CL.spokenSummary(c.reply) || 'Done.'));
+    c.mergeTimer = setTimeout(() => mergeClone(c.id), 4 * 60_000);
+  } catch (err) {
+    if (err.aborted || !clones.has(c.id)) return;
+    c.state = 'failed';
+    addTranscript('system', `${c.name} could not finish: ${err.message}`);
+    toClone(c, 'attention', { level: 'warn' });
+    c.mergeTimer = setTimeout(() => mergeClone(c.id), 60_000);
+  } finally {
+    if (c.brain) for (const p of c.brain.chain) if (p.dispose) p.dispose();
+  }
+}
+
+function speakForClone(c, text) {
+  if (!c.win || c.win.isDestroyed()) { floor.release(c.id); return; }
+  const v = config.data.voice;
+  const useKokoro = v.tts !== false && v.engine !== 'system' && !tts.failed && tts.ready;
+  const p = new OrderedVoicePipeline({
+    synth: useKokoro ? (t) => tts.synth(t, { voice: c.look.voice, semitones: c.look.semitones, speed: v.speed }) : null,
+    forward: (item) => toClone(c, 'speak:item', item),
+    onError: () => {},
+  });
+  p.push({ type: 'say', text });
+  p.push({ type: 'end' });
+  // If the helper never reports back (no voice at all), free the floor anyway.
+  c.floorTimer = setTimeout(() => floor.release(c.id), 20_000);
+}
+
+function mergeClone(id) {
+  const c = clones.get(id);
+  if (!c || c.merging) return;
+  c.merging = true;
+  clearTimeout(c.mergeTimer);
+  clearTimeout(c.floorTimer);
+  c.ac.abort();
+  if (floor) floor.release(id);
+  const d = primaryDisplay();
+  const to = { x: d.bounds.x + orbBounds.x, y: d.bounds.y + orbBounds.y };
+  toClone(c, 'speech:stop');
+  animateWindow(c.win, c.slot, to, 700, () => {
+    toClone(c, 'dissolve');
+    toOverlay('speak:item', { type: 'gesture', name: 'gesture', gesture: 'merge' });
+    setTimeout(() => { if (c.win && !c.win.isDestroyed()) c.win.destroy(); }, 600);
+  });
+}
+
+function mergeAllClones() {
+  for (const id of [...clones.keys()]) mergeClone(id);
+}
+
+function cloneFrom(e) {
+  for (const c of clones.values()) if (c.win && !c.win.isDestroyed() && e.sender === c.win.webContents) return c;
+  return null;
+}
+
+function cloneConfig(c) {
+  const { orb, voice } = config.data;
+  return {
+    orb: { ...orb, radius: c.r, home: null, particles: Math.min(orb.particles || 24000, 9000), idleFps: Math.min(orb.idleFps || 30, 24) },
+    voice: { ...voice, tts: voice.tts !== false, semitones: c.look.semitones },
+    lightTheme: !nativeTheme.shouldUseDarkColors,
+    view: { w: CLONE_WIN, h: CLONE_WIN },
+    stage: { x: 0, y: 0, w: CLONE_WIN, h: CLONE_WIN },
+    defaultHome: { x: CLONE_WIN / 2, y: CLONE_WIN / 2 },
+    clone: { id: c.id, tint: c.look.tint },
+  };
+}
+
+// Helpers are click-through except over their smoke (polled with COre's own hit test).
+function cloneHitTest(p) {
+  for (const c of clones.values()) {
+    if (!c.win || c.win.isDestroyed() || !c.slot) continue;
+    const b = c.win.getBounds();
+    const over = Math.hypot(p.x - (b.x + b.width / 2), p.y - (b.y + b.height / 2)) < c.r * 1.45;
+    if (over !== !!c.interactive) {
+      c.interactive = over;
+      c.win.setIgnoreMouseEvents(!over, { forward: true });
+      toClone(c, 'hover', over);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- presence
@@ -1147,9 +1344,12 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   abortCurrent();
   toOverlay('speech:stop');
   if (!internal) {
+    if (/^\/clone\s+\S/i.test(text)) { spawnClone(text.replace(/^\/clone\s+/i, '')); return; }
+    if (/^\/merge\b/i.test(text)) { mergeAllClones(); return; }
     addTranscript('user', text);
     if (presence) presence.noteInteraction();
   }
+  stopCloneSpeech();
   if (!brain) {
     addTranscript('system', 'No brain is configured. Open Settings and check brain.provider.');
     toOverlay('attention', { level: 'urgent', title: 'No brain configured' });
@@ -1333,6 +1533,25 @@ function wireIpc() {
     applyStage(r);
   });
   ipcMain.on('orb:click', (e) => { if (fromOverlay(e)) { toggleDock(); if (presence) presence.noteInteraction(); } });
+  ipcMain.handle('clone:init', (e) => { const c = cloneFrom(e); return c ? cloneConfig(c) : null; });
+  ipcMain.on('clone:idle', (e) => {
+    const c = cloneFrom(e);
+    if (c && floor && floor.holder === c.id) { clearTimeout(c.floorTimer); floor.release(c.id); }
+  });
+  ipcMain.on('clone:click', (e) => {
+    const c = cloneFrom(e);
+    if (!c) return;
+    if (c.state === 'working') {
+      addTranscript('system', `${c.look.emoji} ${c.name} is still working on: ${c.task}. Poke it (double click) to call it back.`);
+      setDockVisible(true);
+      if (c.lastClick && Date.now() - c.lastClick < 400) mergeClone(c.id);
+      c.lastClick = Date.now();
+      return;
+    }
+    setDockVisible(true);
+    mergeClone(c.id); // its answer is already in the chat
+  });
+  ipcMain.on('clone:interaction', (e, kind) => { const c = cloneFrom(e); if (c && kind === 'poke') mergeClone(c.id); });
   ipcMain.on('orb:interaction', (e, kind) => { if (fromOverlay(e) && ['pet', 'tickle', 'poke', 'toss'].includes(kind)) onInteraction(kind); });
   ipcMain.on('orb:anchor', (e, a) => {
     if (!fromOverlay(e) || !a) return;
@@ -1426,6 +1645,7 @@ function wireIpc() {
     syncTurn.spokenAny = true;
   });
   ipcMain.on('voice:idle', (e) => {
+    if (fromOverlay(e)) mainSpeaking = false;
     if (!fromOverlay(e) || !syncTurn || !syncTurn.finished) return;
     toDock('dock:done', { text: syncTurn.reply });
     syncTurn = null;
@@ -1683,6 +1903,8 @@ app.whenReady().then(async () => {
   updater.start(relaunchAfterUpdate);
   reminders.start();
   startPresence();
+  floor = new CL.SpeechFloor({ mainBusy: () => !!current || !!listening || (mainSpeaking && Date.now() - mainSpeakingSince < 60_000) });
+  setInterval(() => floor.pump(), 500);
   if (process.env.CORE_DEBUG_CHITCHAT) setTimeout(() => startChitchat({ quietMinutes: 30 }), 9000); // end-to-end tests
   setTimeout(greetIfFirstToday, 3500);
 

@@ -117,3 +117,7 @@ textarea.scroll { overflow-y: auto; }
 textarea::-webkit-scrollbar { width: 6px; } textarea::-webkit-scrollbar-thumb { background: rgba(77, 255, 154, 0.2); border-radius: 6px; }
 textarea::-webkit-scrollbar-button { display: none; }
 .log::-webkit-scrollbar { width: 6px; } .log::-webkit-scrollbar-thumb { background: rgba(77, 255, 154, 0.15); border-radius: 6px; }
+
+/* Results from helper clones: a coloured edge and a name. */
+.msg.helper { border-left: 3px solid var(--helper, #4dff9a); }
+.msg.helper .helper-head { font-size: 11px; font-weight: 600; color: var(--helper, #4dff9a); margin-bottom: 4px; letter-spacing: 0.02em; }

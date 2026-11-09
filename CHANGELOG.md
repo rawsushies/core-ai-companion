@@ -1,5 +1,20 @@
 # Changelog
 
+## 5.0.0 — Many COres
+- Helpers: COre can split off up to 3 helper copies that work on tasks in parallel (research from what it
+  knows, drafting, planning, writing code) while you keep talking to COre itself. Ask for several things at
+  once, or type `/clone <task>` in the chat.
+- Meiosis split: COre pushes apart in a burst of smoke and the helper condenses out of it, then drifts to
+  its own spot. Clicking a finished helper (or `/merge`, or tray → Call helpers back) merges it back in.
+- No overlap: each helper picks the nearest free spot that covers neither COre, the chat nor another
+  helper. Each has its own colour (cyan, amber, violet), its own voice and pitch, and its own separate
+  conversation, so their contexts never mix.
+- One voice at a time: helpers wait for the floor and only speak (a one-sentence summary) while COre is
+  quiet. COre always has priority, and starting to talk to COre stops a helper mid-sentence. Full results
+  appear in the chat, marked with the helper's name and colour.
+- Light: helpers use a smaller orb, fewer particles and a lower idle frame rate, and their brain process
+  stops as soon as the task is done.
+
 ## 4.0.0 — Companion presence
 - Idle chit-chat: after a quiet while (25 min by default) COre starts a short, relevant conversation on
   its own: the time of day, what you seem to be working on, something it remembers, a fun fact or a game.

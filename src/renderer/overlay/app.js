@@ -325,11 +325,13 @@
 
   function updateVisuals(dt, now) {
     const m = MODES[mode];
-    let tint = m.tint;
+    // Helpers wear their own colour while idle or talking.
+    let tint = cfg.clone && (mode === 'idle' || mode === 'speaking') ? cfg.clone.tint : m.tint;
     let glow = m.glow;
     let halo = 0;
     if (attention) {
-      tint = ATTENTION[attention.level];
+      // A finished helper keeps its own colour, just brighter with a halo.
+      tint = cfg.clone && attention.level === 'success' ? cfg.clone.tint : ATTENTION[attention.level];
       glow = Math.max(glow, 0.55);
       halo = attention.level === 'urgent' ? 1 : 0.75;
     }
@@ -458,6 +460,7 @@
 
   // Grow the window when COre needs more room, shrink it when it's settled.
   function updateStage(now, pos, arms) {
+    if (cfg.clone) return; // a helper's window is fixed; main places it
     // While dragging, check often and leave lots of room ahead of the orb so
     // the smoke is never clipped at the window edge.
     if (!bridge || now - lastStageReq < 80) return;
@@ -589,6 +592,7 @@
       }
       if (e.buttons === 0) return release(); // button was released somewhere we didn't hear
       const p = toView(e);
+      if (cfg.clone) return; // helpers can't be dragged (click or poke them)
       if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 6) {
         down.moved = true;
         body.dragging = true;

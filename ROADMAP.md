@@ -45,12 +45,12 @@ Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
   meetings).
 - Interactions: poke, pet, toss, tickle reactions; mini games (riddles, 20 questions, trivia).
 
-## 🔨 v5.0.0 — Many COres
+## ✅ v5.0.0 — Many COres
 - Clones: COre splits (meiosis animation) into helpers, each with its own window, voice, context and task;
   they lay themselves out so they never overlap each other or your focus window; merge back when done.
 - Voice routing so clones never talk over each other (queue / priority / per-clone voice).
 
-## ⏳ v6.0.0 — Hands-free
+## 🔨 v6.0.0 — Hands-free
 - Wake word ("Hey COre", on-device), push-to-talk hold mode, barge-in (talk over COre to interrupt),
   continuous conversation mode.
 

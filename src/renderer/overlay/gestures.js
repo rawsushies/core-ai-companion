@@ -128,6 +128,24 @@
     nod: { dur: 1.4, arms: () => [null, null], body: (e) => ({ dy: 0.12 * Math.max(0, S(e * 9)) * env(e, 1.4, 0.1, 0.3) }) },
     shake: { dur: 1.4, arms: () => [null, null], body: (e) => ({ dx: 0.13 * S(e * 12) * env(e, 1.4, 0.1, 0.3) }) },
     spin: { dur: 1.8, arms: () => [null, null], body: (e) => ({ spin: 4 * env(e, 1.8, 0.3, 0.8) }) },
+    // Internal (not offered to the model): the meiosis split and the merge.
+    split: {
+      internal: true,
+      dur: 1.8,
+      arms: (e) => {
+        const push = Math.min(1, e / 1.1);
+        return both(hand(0.5 + 1.5 * push, -0.1 + 0.2 * Math.sin(e * 6), OPEN, -1.4));
+      },
+      body: (e) => ({ dx: 0.12 * Math.sin(e * 22) * env(e, 1.8, 0.2, 0.5), squash: -0.1 * env(e, 1.8, 0.4, 0.5) }),
+      pulse: 1.1,
+    },
+    merge: {
+      internal: true,
+      dur: 1.4,
+      arms: (e) => both(hand(2.0 - 1.4 * Math.min(1, e / 1.0), 0, OPEN, -1.2 - Math.min(1, e) * 0.6)),
+      body: (e) => ({ squash: 0.08 * env(e, 1.4) }),
+      pulse: 0.9,
+    },
     bounce: { dur: 1.6, arms: () => [null, null], body: (e) => ({ dy: -0.3 * Math.abs(S(e * 6)) * env(e, 1.6, 0.1, 0.3), squash: 0.05 * S(e * 12) }) },
   };
 
@@ -142,7 +160,7 @@
     hooray: 'celebrate', strong: 'flex', sparkle: 'magic', jump: 'bounce', hop: 'bounce',
   };
 
-  const NAMES = Object.keys(LIB);
+  const NAMES = Object.keys(LIB).filter((k) => !LIB[k].internal);
 
   function resolve(name) {
     const n = String(name || '').toLowerCase().trim().replace(/\s+/g, ' ');
