@@ -149,6 +149,8 @@ const SECTIONS = [
     title: 'Privacy',
     fields: [
       { key: 'memory.enabled', label: 'Remember things about me', type: 'toggle' },
+      { key: 'memory.autoCapture', label: 'Pick up facts I mention ("my name is…", "I prefer…"), shown in the chat', type: 'toggle' },
+      { key: 'memory.semantic', label: 'Smarter memory search with a small local model (downloads about 23 MB once)', type: 'toggle', restart: true },
       { key: 'watch.enabled', label: 'Notice error pop-ups and offer help (reads window titles only)', type: 'toggle' },
       { key: 'watch.speak', label: 'Say it out loud when something pops up', type: 'toggle' },
       { key: 'screen.autoShareOnDeixis', label: 'Look at my screen when I say "look at this"', type: 'toggle' },

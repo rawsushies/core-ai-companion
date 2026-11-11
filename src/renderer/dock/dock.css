@@ -256,3 +256,8 @@ body.large-text .msg.system { font-size: 13.5px; }
 .agent-why:empty { display: none; }
 .agent-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .ghost.danger:hover { color: var(--danger); }
+
+/* Memory: confidence dot, history rows quieter. */
+.item.memory .conf { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); margin-top: 6px; }
+.item.memory[data-kind="episode"] { opacity: 0.7; font-size: 12px; }
+.item.memory[data-kind="episode"] .conf { background: var(--muted); }

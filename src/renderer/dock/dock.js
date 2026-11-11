@@ -546,6 +546,14 @@
   function memoryRow(m) {
     const row = document.createElement('div');
     row.className = 'item memory';
+    row.dataset.kind = m.kind || 'fact';
+    // Confidence as a small dot: solid = sure, hollow = unsure.
+    const dot = document.createElement('i');
+    dot.className = 'conf';
+    const c = typeof m.confidence === 'number' ? m.confidence : 0.85;
+    dot.style.opacity = String(0.35 + 0.65 * c);
+    dot.title = `${m.kind || 'fact'} · ${Math.round(c * 100)}% sure`;
+    row.append(dot);
     if (m.project) { const p = document.createElement('span'); p.className = 'when tag'; p.textContent = m.project; row.append(p); }
     const t = document.createElement('span');
     t.textContent = m.text;
@@ -553,6 +561,10 @@
     const when = new Date(m.updatedAt || m.ts).toLocaleDateString();
     const was = m.history && m.history.length ? ` · was: ${m.history.map((h) => h.text).join(' → ')}` : '';
     t.title = `${when}${via ? ` · ${via}` : ''}${was}`;
+    const pin = button(m.pinned ? '★' : '☆', 'x', () => api.memoryPin(m.id, !m.pinned));
+    pin.setAttribute('aria-label', `${m.pinned ? 'Unpin' : 'Pin'}: ${m.text}`);
+    pin.title = m.pinned ? 'Pinned: always kept and used' : 'Pin: always keep and use this';
+    row.append(pin);
     const edit = button('✎', 'x', () => {
       const input = document.createElement('input');
       input.type = 'text';
@@ -604,7 +616,9 @@
 
   function renderMemory(list) {
     memoryList.textContent = '';
-    memoryCount.textContent = list && list.length ? `${list.length} saved` : '';
+    const facts = (list || []).filter((m) => m.kind !== 'episode');
+    memoryCount.textContent = list && list.length ? `${facts.length} facts · ${list.length - facts.length} history` : '';
+    list = facts.concat((list || []).filter((m) => m.kind === 'episode').slice(0, 5));
     if (!list || !list.length) { memoryList.append(empty('Nothing yet. Tell me about yourself and I will remember.')); return reportSize(); }
     for (const m of list) memoryList.append(memoryRow(m));
     reportSize();

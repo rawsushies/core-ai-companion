@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### COre 2.0, part 1: Memory Intelligence Engine
+- Every memory now has a kind (profile, preference, project, history, fact), a confidence score, its sources and
+  its history.
+- **Automatic capture:** clear statements in your messages ("my name is…", "I live in…", "I prefer…",
+  "remember that…", some Bahasa Indonesia) are saved and shown in the chat. Questions and "what if" sentences are
+  ignored. Off switch: Settings → Privacy.
+- **Confidence:** saying something again makes COre surer. Unused facts slowly lose certainty unless pinned, and
+  unsure facts are marked as such to the brain.
+- **Contradictions:** a new fact replaces an opposite one ("likes X" → "hates X") or another value for the same slot
+  (where you live, your name…). The old one is kept in its history.
+- **Project history:** finished shared tasks and desktop-agent tasks are remembered as episodes, tagged with the
+  current project, and recalled when relevant.
+- **Smarter search:** keywords plus fuzzy matching, plus meaning-based search with a small local model (downloads
+  about 23 MB once; falls back gracefully when offline).
+- **Consolidation:** a daily pass merges near-duplicates and retires stale, unused history.
+- **Pin** (★) keeps a fact always in use. The memory list shows confidence and separates facts from history.
+
 ### Fixed
 - The chat stopped following new messages when several arrived quickly (a shared task): it now stays pinned to
   the newest message unless you scroll up yourself.

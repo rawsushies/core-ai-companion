@@ -863,9 +863,49 @@ function phoneQr(url) {
   return qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
 }
 
+// ---------------------------------------------------------------- memory intelligence
+// Automatic capture from the user's own words, project history, semantic
+// search (optional local model) and a daily consolidation pass.
+let embedder = null;
+
+function currentProject() {
+  const root = config.data.tools && config.data.tools.projectRoot;
+  return root ? path.basename(root).replace(/[^\p{L}\p{N}_.-]/gu, '').slice(0, 40) || null : null;
+}
+
+function autoCapture(text) {
+  const m = config.data.memory || {};
+  if (!memory || m.enabled === false || m.autoCapture === false) return;
+  try {
+    for (const r of memory.capture(text)) {
+      if (r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
+      else if (r.replaced) toDock('dock:message', { role: 'system', text: `Updated: ${r.item.text} (was: ${r.replaced})` });
+    }
+    toDock('dock:memory', memory.list());
+    scheduleDriveSync();
+  } catch {}
+}
+
+function noteEpisode(text) {
+  if (!memory || (config.data.memory || {}).enabled === false) return;
+  try { memory.noteEpisode(text, { project: currentProject() }); } catch {}
+}
+
+function startMemoryEngine() {
+  if (!memory) return;
+  if ((config.data.memory || {}).semantic !== false) {
+    embedder = new Embedder({ cacheDir: path.join(app.getPath('userData'), 'models') });
+    memory.setEmbedder((texts) => embedder.embed(texts));
+  }
+  const pass = () => { try { const r = memory.consolidate(); if (r.merged || r.retired) toDock('dock:memory', memory.list()); } catch {} };
+  setTimeout(pass, 90_000);
+  setInterval(pass, 24 * 3600_000).unref();
+}
+
 // ---------------------------------------------------------------- Google Drive memory (optional)
 // See gdrive.js. Off until you add your OAuth client and connect.
 const GD = require('./gdrive');
+const { Embedder } = require('./embed');
 let drive = null;
 let driveSyncTimer = null;
 let driveSyncing = false;
@@ -1693,6 +1733,7 @@ async function startAgent(goal, { remote = false } = {}) {
       : `Agent stopped: ${r.reason || r.status}.`;
   addTranscript('core', msg);
   toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
+  noteEpisode(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`);
   if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
   return r;
 }
@@ -2091,7 +2132,7 @@ function askCore(coreId, text, { task } = {}) {
     const ac = new AbortController();
     c.ac = ac;
     try {
-      const context = memory && config.data.memory.enabled !== false ? memory.contextFor(text) || '' : '';
+      const context = memory && config.data.memory.enabled !== false ? (await memory.contextForAsync(text)) || '' : '';
       // Up to 3 rounds of read-only project tools before the final answer.
       let msg = CL.corePrompt(c.core, text, task);
       let reply = ''; let truncated = false; let error = null;
@@ -2173,6 +2214,7 @@ async function runSharedTask(targets, text) {
   const done = task.steps.filter((s) => s.status === 'completed');
   task.status = done.length === task.steps.length ? 'completed' : done.length ? 'partial' : task.steps.every((s) => s.status === 'cancelled') ? 'cancelled' : 'failed';
   saveTask(task);
+  if (task.status !== 'cancelled') noteEpisode(`Shared task (${task.steps.map((st) => coreById(st.core).name).join(', ')}, ${task.status}): ${String(text).slice(0, 160)}`);
   if (task.status === 'cancelled') return task;
   // Prime coordinates: wait for any conversation in progress, then sum up.
   await waitPrimeIdle();
@@ -2419,6 +2461,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     addTranscript('user', text);
     if (presence) presence.noteInteraction();
     stopCloneSpeech(); // the user talking to COre interrupts a specialist; COre's own turns don't
+    autoCapture(text);
   }
   if (!brain) {
     addTranscript('system', 'No brain is configured. Open Settings and check brain.provider.');
@@ -2445,7 +2488,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   const contextBlocks = [];
   try {
     if (memory && config.data.memory.enabled !== false) {
-      const mem = memory.contextFor(text);
+      const mem = await memory.contextForAsync(text);
       if (mem) contextBlocks.push(mem);
     }
     if (plugins.length) contextBlocks.push(`[Skills] Extra skills you can use with the do tag (do NAME QUERY): ${plugins.map((p) => `${p.name} (${p.description || 'opens a link'})`).join(', ')}`);
@@ -2746,6 +2789,7 @@ function wireIpc() {
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
+  ipcMain.on('dock:memoryPin', (e, { id, on } = {}) => { if (fromDock(e) && memory) { memory.pin(String(id), !!on); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryEdit', (e, { id, text } = {}) => { if (fromDock(e) && memory) { memory.edit(String(id), String(text || '')); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { const gone = memory.forget(String(id)); if (gone) noteMemoryRemoved(gone.text); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
@@ -3120,6 +3164,7 @@ app.whenReady().then(async () => {
   });
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
+  startMemoryEngine();
   notes = new SK.Notes(path.join(userData, 'notes.json'));
   refreshCores();
   // Shared tasks that were running when COre stopped are marked interrupted,
@@ -3250,6 +3295,7 @@ app.on('will-quit', () => {
   stopGlanceReader();
   if (companion) companion.stop();
   stopAgent('quitting');
+  if (embedder) embedder.dispose();
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
   if (!restarting) {

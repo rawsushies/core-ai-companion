@@ -47,6 +47,8 @@ const DEFAULTS = {
   },
   memory: {
     enabled: true, // COre remembers facts about you across conversations (⚙ → Memory)
+    autoCapture: true, // save clear statements like "my name is…" / "I prefer…" from your messages (shown in the chat)
+    semantic: true, // semantic search with a small local model (downloads ~23 MB once)
   },
   voice: {
     tts: true, // speak replies
