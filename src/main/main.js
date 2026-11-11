@@ -690,6 +690,85 @@ function openSettings() {
   settingsWin.on('closed', () => { settingsWin = null; });
 }
 
+// ---------------------------------------------------------------- command center
+// One window for everything COre is doing: the agent task, cores, shared tasks,
+// workflows, memory health, playbooks, devices, files and the audit log, with
+// the emergency stop always in reach.
+let centerWin = null;
+function openCommandCenter() {
+  if (centerWin && !centerWin.isDestroyed()) { centerWin.show(); centerWin.focus(); return; }
+  centerWin = new BrowserWindow({
+    width: 960, height: 680, minWidth: 640, minHeight: 460, show: false, frame: false, transparent: true, backgroundColor: '#00000000',
+    title: 'COre command center', icon: path.join(ROOT, 'assets', 'icon.png'),
+    webPreferences: { preload: path.join(PRELOAD, 'command.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  centerWin.loadFile(path.join(RENDERER, 'command', 'index.html'));
+  centerWin.once('ready-to-show', () => { centerWin.center(); centerWin.show(); });
+  centerWin.on('closed', () => { centerWin = null; });
+}
+
+function readAudit(n = 80) {
+  try {
+    const f = path.join(app.getPath('userData'), 'logs', 'tools.log');
+    const st = fs.statSync(f);
+    const len = Math.min(st.size, 96 * 1024);
+    const fd = fs.openSync(f, 'r');
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    fs.closeSync(fd);
+    return buf.toString('utf8').split('\n').filter((l) => l.startsWith('{')).slice(-n).reverse().map((l) => {
+      try {
+        const { at, ...rest } = JSON.parse(l);
+        const what = rest.event || rest.guard || rest.skill || rest.tool || Object.keys(rest)[0] || 'entry';
+        const detail = Object.entries(rest).filter(([k]) => k !== 'event').map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · ');
+        return { at, what: String(what).slice(0, 160), detail: detail.slice(0, 400) };
+      } catch { return null; }
+    }).filter(Boolean);
+  } catch { return []; }
+}
+
+function centerState() {
+  const t = readAgentTask();
+  let changed = 0;
+  try { if (t && t.taskId) changed = agentFiles().changed(t.taskId).length; } catch {}
+  const shelfItems = shelf || fs.existsSync(path.join(app.getPath('userData'), 'files')) ? fileShelf().list() : [];
+  const phone = config.data.phone || {};
+  return {
+    version: app.getVersion(),
+    brain: brainStatus(),
+    agent: { enabled: !!(config.data.agent || {}).enabled, running: !!(agentRunner && agentRunner.running), task: t ? { goal: String(t.goal || ''), step: t.step, status: t.status, at: t.at, changed } : null },
+    cores: cores.map((c) => { const h = clones.get(c.id); return { id: c.id, name: c.name, role: c.role, color: c.color, active: c.id === 'prime' || !!h, busy: h ? h.busy : 0 }; }),
+    tasks: (state.get('tasks') || []).slice(-8).reverse().map((k) => ({ id: k.id, text: String(k.text || '').slice(0, 200), status: k.status, at: k.createdAt, steps: (k.steps || []).map((x) => ({ core: (coreById(x.core) || { name: x.core }).name, status: x.status })) })),
+    workflows: playbookScheduler ? playbookScheduler.upcoming() : [],
+    playbooks: playbooks.map((p) => ({ name: p.name, description: p.description, core: (coreById(p.core) || { name: 'COre' }).name, schedule: p.schedule, enabled: p.enabled })),
+    playbooksOn: playbooksOn(),
+    memory: memory ? { ...memory.stats(), enabled: config.data.memory.enabled !== false, recent: memory.conflicts.slice(0, 6).map((c) => ({ was: c.was, now: c.now, at: c.at })) } : null,
+    files: { total: shelfItems.length, ready: shelfItems.filter((f) => f.status === 'ready').length, errors: shelfItems.filter((f) => f.status === 'error').length, recent: shelfItems.slice(0, 5).map((f) => ({ name: f.name, kind: f.kind, info: f.info, status: f.status })) },
+    devices: {
+      phone: { enabled: !!phone.enabled, paired: companion ? companion.list().length : (state.get('phoneDevices') || []).length },
+      drive: { connected: !!getSecret('googleRefresh'), syncedAt: state.get('driveSyncedAt') || 0 },
+      backup: { folder: !!(config.data.backup && config.data.backup.folder), last: state.get('lastBackup') || '' },
+    },
+    audit: readAudit(),
+  };
+}
+
+async function centerAction(name, arg) {
+  switch (name) {
+    case 'emergency': emergencyStop('you pressed Emergency stop in the command center'); return { ok: true };
+    case 'agentResume': startAgent('resume'); return { ok: true };
+    case 'agentUndo': undoAgentTask(); return { ok: true };
+    case 'agentStop': stopAgent('you pressed Stop in the command center'); return { ok: true };
+    case 'runWorkflow': { const s = playbooks.find((p) => p.name === String(arg)); if (!s) return { ok: false, error: 'No such playbook.' }; runWorkflow(s); return { ok: true }; }
+    case 'consolidate': { if (!memory) return { ok: false }; const r = memory.consolidate(); toDock('dock:memory', memory.list()); return { ok: true, message: `Merged ${r.merged}, retired ${r.retired}; ${r.total} memories.` }; }
+    case 'openSkills': fs.mkdirSync(playbookDir(), { recursive: true }); shell.openPath(playbookDir()); return { ok: true };
+    case 'openLogs': { const d = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); shell.openPath(d); return { ok: true }; }
+    case 'openSettings': openSettings(); return { ok: true };
+    case 'openChat': setDockVisible(true, true); return { ok: true };
+    default: return { ok: false, error: 'unknown action' };
+  }
+}
+
 // Only the values the window shows: never secrets.
 function settingsValues() {
   const out = {};
@@ -1192,6 +1271,7 @@ function createTray() {
 function createTrayMenu() {
   const menu = Menu.buildFromTemplate([
     { label: 'Talk to COre', click: () => startListening(false) },
+    { label: 'Command center', click: () => openCommandCenter() },
     { label: 'Hands-free ("Hey COre")', type: 'checkbox', checked: !!config.data.voice.wakeWord, click: (item) => setHandsFree(item.checked) },
     { label: 'Talk about my screen', click: () => startListening(true) },
     { label: 'Show chat under the orb', click: () => setDockVisible(true, true) },
@@ -2007,7 +2087,8 @@ function toolAudit(entry) {
   try {
     const dir = path.join(app.getPath('userData'), 'logs');
     fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+    const e = typeof entry === 'string' ? { event: entry } : entry; // the agent logs plain lines
+    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), ...e })}\n`);
   } catch {}
 }
 
@@ -2664,6 +2745,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (agentRunner && agentRunner.running && typed) stopAgent('you sent a message');
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
+    if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
     if (ctl) {
@@ -3011,6 +3093,11 @@ function wireIpc() {
     const { text, files } = typeof payload === 'string' ? { text: payload } : (payload || {});
     handleUserText(String(text || ''), { typed: true, files: Array.isArray(files) ? files.slice(0, 10).map(String) : [] });
   });
+  const fromCenter = (e) => isFrom(centerWin, e);
+  ipcMain.handle('center:state', (e) => (fromCenter(e) ? centerState() : null));
+  ipcMain.handle('center:action', (e, { name, arg } = {}) => (fromCenter(e) ? centerAction(String(name || ''), arg == null ? '' : String(arg)) : null));
+  ipcMain.on('center:close', (e) => { if (fromCenter(e)) centerWin.close(); });
+  ipcMain.on('dock:openCenter', (e) => { if (fromDock(e)) openCommandCenter(); });
   ipcMain.handle('dock:files', (e) => (fromDock(e) ? fileShelf().list() : []));
   ipcMain.handle('dock:filesAdd', (e, paths) => (fromDock(e) && Array.isArray(paths) ? addFiles(paths.filter((p) => typeof p === 'string' && path.isAbsolute(p))) : []));
   ipcMain.on('dock:filesMedia', (e, { id, ...rest } = {}) => { if (fromDock(e)) fileMedia(id, rest); });

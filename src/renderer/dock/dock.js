@@ -858,6 +858,8 @@
   // A core suggests a command (Navigator's "/do ..."): it waits in the box for your Enter.
   if (api.onSuggest) api.onSuggest((t) => { if (!input.value.trim() && typeof t === 'string') { input.value = t.slice(0, 500); autosize(); input.focus(); } });
 
+  document.getElementById('open-center').addEventListener('click', () => api.openCenter());
+
   api.onReset(() => { log.textContent = ''; streaming = null; reportSize(); });
   api.onFocus(() => input.focus());
   api.onSettings(applySettings);

@@ -426,6 +426,33 @@ test('playbooks: bundled examples are listed, fit requests, run on a core, and n
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('command center: shows cores, tasks, playbooks, memory, devices and the activity log; its emergency stop works', async () => {
+  await send('/center');
+  let cc = null;
+  for (let i = 0; i < 40 && !cc; i++) { cc = app.windows().find((p) => p.url().includes('/command/')); if (!cc) await wait(250); }
+  assert.ok(cc, 'the command center opened');
+  await cc.waitForFunction(() => window.__centerReady && document.querySelectorAll('#cores li').length === 6, null, { timeout: 10000 });
+  const names = await cc.$$eval('#cores li .grow > div:first-child', (n) => n.map((x) => x.textContent));
+  assert.deepStrictEqual(names, ['COre', 'Scout', 'Forge', 'Sentinel', 'Archivist', 'Navigator']);
+  assert.match(await cc.textContent('#tasks'), /compare SQLite and LevelDB/);
+  assert.match(await cc.textContent('#playbooks'), /code-review → Sentinel/);
+  assert.match(await cc.textContent('#playbooks'), /weekdays 08:45 \(off\)/);
+  assert.match(await cc.textContent('#agent'), /Step \d+/, 'the last agent task is shown');
+  assert.match(await cc.textContent('#files'), /No files yet|ready/);
+  assert.match(await cc.textContent('#memory'), /\d+memories\d+pinned\d+replaced/, 'memory numbers are shown');
+  await cc.waitForFunction(() => document.querySelectorAll('#audit li time').length > 3, null, { timeout: 5000 });
+  if (process.env.E2E_SHOTS) await cc.screenshot({ path: path.join(process.env.E2E_SHOTS, 'command-center.png') });
+  await cc.fill('#filter', 'workflow-that-never-ran');
+  assert.match(await cc.textContent('#audit'), /Nothing matches/);
+  await cc.fill('#filter', '');
+  await cc.click('#stop-all');
+  await dock.waitForFunction(() => /Emergency stop/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  await cc.waitForFunction(() => [...document.querySelectorAll('#audit .what')].some((e) => /emergency-stop/.test(e.textContent)), null, { timeout: 6000 });
+  await cc.press('body', 'Escape').catch(() => {}); // the window closes under the key press
+  for (let i = 0; i < 20 && app.windows().some((p) => p.url().includes('/command/')); i++) await wait(150);
+  assert.ok(!app.windows().some((p) => p.url().includes('/command/')), 'Esc closes it');
+});
+
 test('desktop agent: off by default and refused from the phone', async () => {
   await send('/do anything at all');
   await dock.waitForFunction(() => /desktop agent is off/.test(document.getElementById('log').innerText), null, { timeout: 5000 });

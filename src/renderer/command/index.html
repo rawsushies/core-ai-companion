@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>COre command center</title>
+  <link rel="stylesheet" href="../fonts/fonts.css">
+  <link rel="stylesheet" href="command.css">
+</head>
+<body>
+  <div class="window">
+    <header class="bar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span>Command center <span id="version" class="version"></span></div>
+      <div id="brain" class="brain"></div>
+      <button type="button" id="stop-all" class="stop-all" title="Stop everything COre is doing (Ctrl+Alt+Shift+X)">Emergency stop</button>
+      <button type="button" id="close" class="icon" aria-label="Close" title="Close (Esc)">✕</button>
+    </header>
+    <main class="grid">
+      <section class="card" id="agent-card" aria-labelledby="h-agent">
+        <h2 id="h-agent">Desktop agent</h2>
+        <div id="agent"></div>
+      </section>
+      <section class="card" aria-labelledby="h-cores">
+        <h2 id="h-cores">Cores</h2>
+        <ul id="cores" class="cores"></ul>
+      </section>
+      <section class="card" aria-labelledby="h-tasks">
+        <h2 id="h-tasks">Shared tasks</h2>
+        <ul id="tasks" class="list"></ul>
+      </section>
+      <section class="card" aria-labelledby="h-flows">
+        <h2 id="h-flows">Playbooks and workflows <button type="button" id="open-skills" class="link">Open folder</button></h2>
+        <ul id="playbooks" class="list"></ul>
+      </section>
+      <section class="card" aria-labelledby="h-memory">
+        <h2 id="h-memory">Memory <button type="button" id="consolidate" class="link">Tidy up now</button></h2>
+        <div id="memory"></div>
+      </section>
+      <section class="card" aria-labelledby="h-devices">
+        <h2 id="h-devices">Devices and sync</h2>
+        <ul id="devices" class="list"></ul>
+        <h2 class="sub">Files</h2>
+        <div id="files"></div>
+      </section>
+      <section class="card wide" aria-labelledby="h-audit">
+        <h2 id="h-audit">Activity log <input id="filter" type="search" placeholder="Filter" aria-label="Filter the activity log"> <button type="button" id="open-logs" class="link">Open logs</button></h2>
+        <ol id="audit" class="audit"></ol>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </div>
+  <script src="command.js"></script>
+</body>
+</html>

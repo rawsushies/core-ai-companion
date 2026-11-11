@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('dock', {
   stop: () => ipcRenderer.send('dock:stop'),
   listen: () => ipcRenderer.send('dock:listen'),
   openPanel: () => ipcRenderer.send('dock:openPanel'),
+  openCenter: () => ipcRenderer.send('dock:openCenter'),
   hide: () => ipcRenderer.send('dock:hide'),
   resize: (h) => ipcRenderer.send('dock:resize', h),
   setSetting: (key, value) => ipcRenderer.send('dock:setting', { key, value }),

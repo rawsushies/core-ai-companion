@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### COre 2.0, part 7: Command center
+
+- **One window for everything COre is doing** (tray → Command center, the button in quick settings, or `/center`): the desktop agent's task with Stop / Resume / Undo, the six cores and which are working, recent shared tasks, playbooks with their next scheduled run and a Run button, memory health (counts, recently replaced facts, Tidy up now), phone / Google Drive / backup status, recent files, and a filterable activity log with warnings highlighted.
+- A large **Emergency stop** button in the header (same as Ctrl+Alt+Shift+X).
+- Fixed: agent steps were written to the activity log one character per field.
+
 ### COre 2.0, part 6: Playbooks and workflows
 
 - **Playbooks**: reusable how-tos as `SKILL.md` files (the Agent Skills format) in COre's data folder, `skills/<name>/SKILL.md`. COre knows each one by name and description, follows a playbook when a request fits it (trigger phrases or matching words), and can hand it to a specific core (`core: sentinel`).
