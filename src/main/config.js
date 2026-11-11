@@ -90,6 +90,7 @@ const DEFAULTS = {
     allowWrites: false, // let cores PROPOSE file changes; each one is applied only when you click Apply
   },
   skills: {
+    playbooks: true, // use saved SKILL.md playbooks (userData/skills) when they fit, and run scheduled ones
     weather: true,
     city: '', // used when you ask for the weather without a place
     music: true,

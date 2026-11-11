@@ -130,6 +130,11 @@ let floor = null;
 let lastReaction = 0;
 let notes = null;
 let plugins = [];
+const PB = require('./playbooks');
+let playbooks = [];
+let playbookScheduler = null;
+const playbookDir = () => path.join(app.getPath('userData'), 'skills');
+const playbooksOn = () => config.data.skills.playbooks !== false;
 let turnSkills = null;
 let turnVia = 'chat'; // where the current turn came from (memory provenance) // skill lookups started during the current turn
 let followUpPending = false; // conversation mode: listen again when this spoken reply ends
@@ -1708,6 +1713,65 @@ function agentTools(taskId) {
   };
 }
 
+// ---------------------------------------------------------------- playbooks
+// SKILL.md how-tos in userData/skills: offered by name, joined to requests they
+// fit, run with /skill NAME, and run on their schedule when they have one.
+function reloadPlaybooks() {
+  playbooks = PB.loadSkills(playbookDir());
+  if (!playbookScheduler) playbookScheduler = new PB.Scheduler({ run: runWorkflow, state });
+  playbookScheduler.sync(playbooksOn() ? playbooks : []);
+  return playbooks;
+}
+let playbookWatch = null;
+function watchPlaybooks() {
+  let t = null;
+  try { playbookWatch = fs.watch(playbookDir(), { recursive: process.platform !== 'linux' || Number(process.versions.node.split('.')[0]) >= 20 }, () => { clearTimeout(t); t = setTimeout(reloadPlaybooks, 800); }); } catch {}
+}
+async function runWorkflow(s) {
+  if (!playbooksOn()) return;
+  toolAudit({ event: 'workflow', name: s.name });
+  addTranscript('system', `Workflow: ${s.name} (${s.schedule}).`, { kind: 'progress' });
+  noteEpisode(`Ran workflow ${s.name}`);
+  if (s.core !== 'prime' && coreById(s.core)) await askCore(s.core, PB.skillBlock(s, 'scheduled run'));
+  else { await waitPrimeIdle(); handleUserText(`[workflow ${s.name}] Run the "${s.name}" playbook now.`, { internal: true, typed: true, playbook: s }); }
+}
+function listPlaybooks() {
+  reloadPlaybooks();
+  if (!playbooks.length) return `No playbooks yet. Save one from this conversation with /skill save NAME, or add SKILL.md files to ${playbookDir()}.`;
+  const up = new Map((playbookScheduler ? playbookScheduler.upcoming() : []).map((u) => [u.name, u]));
+  return `Playbooks (${playbooks.length}), run with /skill NAME:\n${playbooks.map((p) => `• ${p.name}${p.enabled ? '' : ' (off)'}${p.core !== 'prime' ? ` → ${coreById(p.core).name}` : ''}: ${p.description}${up.has(p.name) ? ` · next ${new Date(up.get(p.name).at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}`).join('\n')}`;
+}
+// "/skill save NAME": COre writes a playbook from the conversation so far.
+async function savePlaybookFromChat(name) {
+  const recent = transcript.filter((e) => e.role === 'user' || e.role === 'core').slice(-24).map((e) => `${e.role === 'user' ? 'User' : 'COre'}: ${String(e.text).slice(0, 1200)}`).join('\n');
+  if (!recent) { addTranscript('system', 'Nothing to learn from yet: talk it through first, then save it.'); return; }
+  addTranscript('system', `Writing playbook "${PB.slug(name)}" from this conversation…`, { kind: 'progress' });
+  try {
+    const { reply } = await agentBrain().ask({ text: `[playbook] Turn the procedure in this conversation into a reusable playbook (a SKILL.md file) named "${PB.slug(name)}". Output only the file: a frontmatter block between --- lines with name, description (one sentence: what it does and when to use it) and triggers (3-6 short phrases, comma-separated), then numbered plain-language steps someone could follow next time with different inputs. Leave out one-off details (specific names, numbers, dates) unless they are always the same. No [[tags]].\n\nConversation:\n${recent}`, typed: true });
+    const s = PB.saveSkill(playbookDir(), reply, name);
+    reloadPlaybooks();
+    addTranscript('system', `Saved playbook "${s.name}": ${s.description} Run it with /skill ${s.name}. File: ${s.file}`);
+    toolAudit({ event: 'playbook-saved', name: s.name });
+  } catch (err) { addTranscript('system', `Could not save the playbook: ${err.message}`, { kind: 'error' }); }
+}
+// "/skills", "/skill save NAME", "/skill NAME input". Returns true when handled.
+function playbookCommand(text, { files = [] } = {}) {
+  if (/^\/skills\s*$/i.test(text)) { addTranscript('user', text); addTranscript('system', listPlaybooks()); return true; }
+  const save = /^\/skill\s+save\s+(\S+)\s*$/i.exec(text);
+  if (save) { addTranscript('user', text); savePlaybookFromChat(save[1]); return true; }
+  const run = /^\/skill\s+(\S+)\s*([\s\S]*)$/i.exec(text);
+  if (!run) return false;
+  reloadPlaybooks();
+  const s = playbooks.find((p) => p.name === PB.slug(run[1]));
+  if (!s) { addTranscript('user', text); addTranscript('system', `No playbook called ${run[1]}. ${listPlaybooks()}`, { kind: 'error' }); return true; }
+  const input = run[2].trim();
+  if (s.core !== 'prime' && coreById(s.core)) {
+    addTranscript('user', text, { to: [s.core] });
+    askCore(s.core, PB.skillBlock(s, input || 'see the files and context you have'));
+  } else handleUserText(input || `Run the "${s.name}" playbook.`, { typed: true, playbook: s, files });
+  return true;
+}
+
 // ---------------------------------------------------------------- file intelligence
 // Files dropped on the chat become cards; attached cards go with your messages
 // as untrusted text (and one image). Audio and video are decoded in the dock.
@@ -2590,7 +2654,7 @@ function playGame(name) {
 // as something the user said.
 // chain: a follow-up turn right after the previous one (skill results): the
 // previous reply keeps speaking and this one queues after it.
-async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false, files = [] } = {}) {
+async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false, files = [], playbook = null } = {}) {
   text = String(text || '').trim();
   if (!text) return;
   // Meiosis routing: decide the recipient before touching Prime's turn, so
@@ -2599,6 +2663,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/do\s+\S/i.test(text)) { startAgent(text.replace(/^\/do\s+/i, '').slice(0, 500), { remote }); return; }
     if (agentRunner && agentRunner.running && typed) stopAgent('you sent a message');
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
+    if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
     if (ctl) {
@@ -2637,7 +2702,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     }
     if (route.targets.includes('prime')) text = route.text || text; // "@COre explain this"
   }
-  if (!internal && !chain && !withScreen && !files.length) {
+  if (!internal && !chain && !withScreen && !files.length && !playbook) {
     // Instant answers for short requests (time, music keys, lyrics card).
     const busyBefore = !!current;
     if (quickReply(text, { typed })) { if (!busyBefore) toOverlay('state', 'idle'); return; }
@@ -2694,6 +2759,11 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       if (fileCtx.image && !shot) shot = fileImageShot(fileCtx.image, fileCtx.imageName);
       if (fileCtx.flags.length) toolAudit({ guard: 'injection-suspected', source: `files ${fileCtx.names.join(', ')}`, flags: fileCtx.flags });
     }
+    if (playbook) contextBlocks.push(PB.skillBlock(playbook));
+    else if (playbooksOn() && playbooks.length && !internal) {
+      for (const s of PB.matchSkills(playbooks, text)) contextBlocks.push(PB.skillBlock(s));
+    }
+    if (playbooksOn() && playbooks.length) { const cat = PB.catalog(playbooks); if (cat) contextBlocks.push(cat); }
     if (plugins.length) contextBlocks.push(`[Skills] Extra skills you can use with the do tag (do NAME QUERY): ${plugins.map((p) => `${p.name} (${p.description || 'opens a link'})`).join(', ')}`);
     if (CLIPBOARD_RE.test(text)) {
       // Electron 45+: clipboard.readText() returns a Promise (older: a string).
@@ -3410,6 +3480,9 @@ app.whenReady().then(async () => {
     }
   }
   plugins = SK.loadPlugins(path.join(userData, 'skills'));
+  PB.seedExamples(playbookDir(), path.join(__dirname, '..', '..', 'assets', 'skills'));
+  reloadPlaybooks();
+  watchPlaybooks();
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();
@@ -3512,6 +3585,7 @@ app.on('will-quit', () => {
   stopGlanceReader();
   if (companion) companion.stop();
   stopAgent('quitting');
+  try { if (playbookScheduler) playbookScheduler.stop(); if (playbookWatch) playbookWatch.close(); } catch {}
   if (embedder) embedder.dispose();
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);

@@ -93,6 +93,7 @@ const SECTIONS = [
     id: 'skills',
     title: 'Skills',
     fields: [
+      { key: 'skills.playbooks', label: 'Playbooks: use my saved SKILL.md how-tos when they fit, and run scheduled ones (/skills lists them)', type: 'toggle' },
       { key: 'skills.weather', label: 'Weather (free Open-Meteo service)', type: 'toggle' },
       { key: 'skills.city', label: 'My city (for weather)', type: 'text', maxLength: 80, optional: true },
       { key: 'skills.music', label: 'Control music (play, pause, next, volume)', type: 'toggle' },

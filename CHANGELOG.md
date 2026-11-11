@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### COre 2.0, part 6: Playbooks and workflows
+
+- **Playbooks**: reusable how-tos as `SKILL.md` files (the Agent Skills format) in COre's data folder, `skills/<name>/SKILL.md`. COre knows each one by name and description, follows a playbook when a request fits it (trigger phrases or matching words), and can hand it to a specific core (`core: sentinel`).
+- **`/skills`** lists them, **`/skill NAME input`** runs one, **`/skill save NAME`** has COre write a new playbook from the current conversation (it never overwrites an existing one).
+- **Workflows**: a playbook with `schedule:` (`daily 08:30`, `weekdays 17:00`, `mon,wed 09:15`, `every 2h`) runs on its own; runs are logged and remembered across restarts.
+- Four examples on first run: meeting-notes (Archivist), code-review (Sentinel), site-report for IFC/DXF (Archivist), and daily-briefing (scheduled, off until you enable it).
+- Fixed: a brain request without an item handler could crash the speech planner.
+
 ### COre 2.0, part 5: Collaborating specialists
 
 - Two new cores: **Archivist** (memory and files: answers from what COre remembers, past work and the file shelf, cites its sources, and points out stale or conflicting memories) and **Navigator** (desktop and browser operator: plans the clicks and shortcuts, and leaves a ready `/do …` in the message box for you to start).

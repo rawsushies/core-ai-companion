@@ -404,6 +404,28 @@ test('files: picked files become cards, are read, and go with the message as unt
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('playbooks: bundled examples are listed, fit requests, run on a core, and new ones are learned from the chat', async () => {
+  await send('/skills');
+  await dock.waitForFunction(() => /Playbooks \(\d+\), run with \/skill NAME/.test(document.getElementById('log').innerText) && /meeting-notes → Archivist/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  fs.writeFileSync(script, JSON.stringify([
+    { match: 'Playbook "code-review"', reply: 'Reviewed with the playbook.\n\nOne critical issue. Verdict: fix first' },
+    { match: 'Playbook "meeting-notes"', reply: 'Using your meeting notes playbook: decisions first.' },
+    { match: '\\[playbook\\] Turn the procedure', reply: '---\nname: tea-timer\ndescription: Brew green tea with a timer.\ntriggers: brew tea, tea timer\n---\n1. Boil water to 80 C\n2. Set a 3 minute timer' },
+    ...baseRules,
+  ]));
+  // A request that fits a playbook gets its instructions.
+  await send('write the meeting notes for today please');
+  await dock.waitForFunction(() => /Using your meeting notes playbook/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  // /skill NAME runs it on the playbook's core.
+  await send('/skill code-review function add(a,b){return a-b}');
+  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-sentinel .msg')].some((m) => /Verdict: fix first/.test(m.innerText)), null, { timeout: 20000 });
+  // Learn a new playbook from the conversation.
+  await send('/skill save tea-timer');
+  await dock.waitForFunction(() => /Saved playbook "tea-timer"/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  assert.match(fs.readFileSync(path.join(userData, 'skills', 'tea-timer', 'SKILL.md'), 'utf8'), /Set a 3 minute timer/);
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('desktop agent: off by default and refused from the phone', async () => {
   await send('/do anything at all');
   await dock.waitForFunction(() => /desktop agent is off/.test(document.getElementById('log').innerText), null, { timeout: 5000 });

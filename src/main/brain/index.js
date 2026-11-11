@@ -132,7 +132,7 @@ class Brain {
   // context: extra blocks for the model ([Memory], [Clipboard]), appended to the message.
   // Returns { reply, provider, truncated?, error? }: when a provider fails
   // after it already started answering, the partial reply is kept (truncated).
-  async ask({ text, shot, typed = false, context = '', signal, onItem, onText, onStatus = () => {} }) {
+  async ask({ text, shot, typed = false, context = '', signal, onItem = () => {}, onText, onStatus = () => {} }) {
     // Providers without a key are skipped quietly instead of failing loudly.
     const providers = this.chain.filter((p) => !p.available || p.available());
     const failures = [];
