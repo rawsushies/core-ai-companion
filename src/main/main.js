@@ -1669,7 +1669,56 @@ function emergencyStop(reason = 'emergency stop') {
 // Every step is shown; actions that change something need your OK (or "Allow
 // all steps" for this task). Esc or the Stop button ends it at once.
 const AG = require('./agent');
+const AT = require('./agentTools');
 let agentRunner = null;
+const agentTaskFile = () => path.join(app.getPath('userData'), 'agent-task.json');
+function readAgentTask() { try { return JSON.parse(fs.readFileSync(agentTaskFile(), 'utf8')); } catch { return null; } }
+function writeAgentTask(s) { try { const f = agentTaskFile(); fs.writeFileSync(`${f}.tmp`, JSON.stringify(s)); fs.renameSync(`${f}.tmp`, f); } catch {} }
+
+function agentFiles() {
+  const root = config.data.tools && config.data.tools.projectRoot;
+  return new AT.FileOps({ roots: root ? [root] : [], backupDir: path.join(app.getPath('userData'), 'agent-backups') });
+}
+
+// Commands, files and web pages for the agent. Every result is untrusted data.
+function agentTools(taskId) {
+  const ag = config.data.agent || {};
+  const files = agentFiles();
+  return {
+    mustAsk: (a) => {
+      if (a.type !== 'run') return false;
+      const c = AT.checkCommand(a.cmd);
+      return !(c.ok && AT.allowed(c.argv, ag.allowCommands || []));
+    },
+    run: async (a, { signal }) => {
+      const c = AT.checkCommand(a.cmd);
+      if (!c.ok) throw new Error(`Command refused: ${c.reason}.`);
+      const cwd = files.resolve(a.cwd || '.', { mustExist: true });
+      toolAudit(`agent command: ${c.argv.join(' ')} (in ${cwd})`);
+      const r = await AT.runCommand(c.argv, { cwd, signal, timeoutMs: Math.max(5, Math.min(600, Number(ag.commandTimeout) || 60)) * 1000 });
+      const head = r.timedOut ? 'timed out' : r.aborted ? 'stopped' : `exit code ${r.code}`;
+      if (r.code !== 0 && !r.out) throw new Error(head);
+      return `${head}\n${r.out}`;
+    },
+    read: async (a) => files.read(a.path),
+    write: async (a) => { const f = files.write(taskId, a.path, a.text); toolAudit(`agent wrote ${f}`); return `wrote ${a.text.length} characters to ${a.path}`; },
+    rename: async (a) => { const f = files.move(taskId, a.from, a.to); toolAudit(`agent moved ${a.from} to ${f}`); return `moved to ${a.to}`; },
+    delete: async (a) => { const f = files.remove(taskId, a.path); toolAudit(`agent deleted ${f} (backup kept)`); return `deleted ${a.path} (backup kept)`; },
+    fetch: async (a) => AT.fetchText(a.url, (u, o) => require('electron').net.fetch(u, o)),
+  };
+}
+
+// "/do undo": put back every file the last task changed.
+function undoAgentTask() {
+  const t = readAgentTask();
+  if (!t || !t.taskId) { addTranscript('system', 'No agent task to undo.'); return; }
+  if (agentRunner && agentRunner.running) { addTranscript('system', 'Stop the agent first.', { kind: 'error' }); return; }
+  try {
+    const n = agentFiles().rollback(t.taskId);
+    toolAudit(`agent undo ${t.taskId}: ${n} files restored`);
+    addTranscript('system', n ? `Undone: ${n} file${n === 1 ? '' : 's'} put back as before "${String(t.goal).slice(0, 80)}".` : 'That task changed no files (or was already undone).');
+  } catch (err) { addTranscript('system', `Could not undo: ${err.message}`, { kind: 'error' }); }
+}
 let agentBrainInst = null;
 const agentApprovals = new Map();
 
@@ -1688,13 +1737,23 @@ function stopAgent(reason) {
 
 async function startAgent(goal, { remote = false } = {}) {
   const ag = config.data.agent || {};
+  if (/^undo$/i.test(goal.trim())) { addTranscript('user', '/do undo'); undoAgentTask(); return; }
+  let resume = null;
+  let taskId = `${Date.now().toString(36)}-${require('crypto').randomBytes(3).toString('hex')}`;
+  if (/^resume$/i.test(goal.trim())) {
+    const t = readAgentTask();
+    if (!t || !t.goal || t.status === 'done') { addTranscript('system', 'No unfinished agent task to resume.'); return; }
+    resume = t;
+    goal = t.goal;
+    taskId = t.taskId || taskId;
+  }
   if (!ag.enabled) { addTranscript('system', 'The desktop agent is off. Turn it on in Settings, Agent.', { kind: 'error' }); return; }
   if (remote) { addTranscript('system', 'The desktop agent can only be started at the PC.', { kind: 'error' }); return; }
   const driver = AG.driverFor(process.platform);
   if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
   if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
-  addTranscript('user', `/do ${goal}`);
-  addTranscript('system', `Agent: working on "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
+  addTranscript('user', resume ? '/do resume' : `/do ${goal}`);
+  addTranscript('system', `Agent: ${resume ? `resuming at step ${resume.step + 1}:` : 'working on'} "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
   toOverlay('state', 'thinking');
   try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
   // The agent's own Esc presses must not trip the Esc-to-stop shortcut.
@@ -1723,7 +1782,7 @@ async function startAgent(goal, { remote = false } = {}) {
     approve: (action, info) => new Promise((resolve) => {
       const id = require('crypto').randomUUID();
       agentApprovals.set(id, { resolve });
-      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: action.why || '' });
+      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: action.why || '', forced: !!info.forced });
       if (action.type === 'click' || action.type === 'move') {
         // COre points at where it wants to click.
         const d = primaryDisplay();
@@ -1742,16 +1801,26 @@ async function startAgent(goal, { remote = false } = {}) {
       else if (o.ok === false) addTranscript('system', `Agent step ${o.step} failed: ${o.error}`, { kind: 'error' });
     },
     log: toolAudit,
+    tools: ag.tools !== false ? agentTools(taskId) : null,
+    untrusted: (t, src) => {
+      const g = GUARD.untrusted(t, src);
+      if (g.flags.length) { toolAudit({ guard: 'injection-suspected', source: src, flags: g.flags }); addTranscript('system', `Heads up: the ${src} contains text that looks like instructions. The agent treats it as data only.`, { kind: 'error' }); }
+      return g.text;
+    },
+    checkpoint: (st) => writeAgentTask({ ...st, taskId }),
   });
   let r;
-  try { r = await agentRunner.run(goal); } catch (err) { r = { status: 'failed', reason: err.message }; }
+  try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
   try { globalShortcut.unregister('Escape'); } catch {}
+  { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }
   toDock('dock:agent-approve', null);
   toOverlay('state', 'idle');
   const msg = r.status === 'done' ? `Agent finished: ${r.summary || 'done'}`
     : r.status === 'ask' ? `Agent needs you: ${r.question}`
       : `Agent stopped: ${r.reason || r.status}.`;
   addTranscript('core', msg);
+  try { if (agentFiles().changed(taskId).length) addTranscript('system', 'Files were changed. Type /do undo to put them back.'); } catch {}
+  if (r.status !== 'done' && r.status !== 'ask') addTranscript('system', 'Type /do resume to continue this task later.');
   toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
   noteEpisode(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`);
   if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
@@ -3193,6 +3262,11 @@ app.whenReady().then(async () => {
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
   startMemoryEngine();
+  // A task cut off by a crash or quit can pick up where it stopped.
+  setTimeout(() => {
+    const t = readAgentTask();
+    if (t && t.status === 'running' && Date.now() - (t.at || 0) < 7 * 864e5) addTranscript('system', `An agent task was interrupted at step ${t.step}: "${String(t.goal).slice(0, 80)}". Type /do resume to continue it.`);
+  }, 4000);
   notes = new SK.Notes(path.join(userData, 'notes.json'));
   refreshCores();
   // Shared tasks that were running when COre stopped are marked interrupted,

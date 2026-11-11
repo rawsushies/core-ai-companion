@@ -301,6 +301,7 @@ test('desktop agent: /do clicks and types into another window, with step approva
     { match: 'Step 1 of', reply: `Clicking the box. [[act {"type":"click","x":${cx},"y":${cy},"why":"focus the text box"}]]` },
     { match: 'Step 2 of', reply: 'Typing. [[act {"type":"type","text":"hello from the agent"}]]' },
     { match: 'Step 3 of', reply: 'Done. [[act {"type":"done","summary":"typed the greeting"}]]' },
+    { match: 'Step 4 of', reply: 'Checked. [[act {"type":"done","summary":"typed the greeting"}]]' },
   ]));
   await send('/do type a greeting into the box');
   await dock.waitForSelector('#agent-card:not([hidden])', { timeout: 20000 });
@@ -324,6 +325,32 @@ test('emergency stop: the global hotkey halts a running agent task at once', { s
   await dock.waitForFunction(() => /Emergency stop/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
   await dock.waitForFunction(() => /Agent stopped/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
   assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'the approval card is gone');
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('desktop agent: tools write a file and run a command (always asked), results come back, /do undo restores', { skip: process.platform !== 'linux' }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: 'reply done again', reply: 'Looks right. [[act {"type":"done","summary":"notes written and checked"}]]' },
+    { match: '<<untrusted command output>>', reply: 'The command printed 42. [[act {"type":"done","summary":"notes written"}]]' },
+    { match: 'Step 2 of', reply: 'Checking with node. [[act {"type":"run","cmd":"node -e \\"console.log(6*7)\\"","why":"compute"}]]' },
+    { match: 'Step 1 of', reply: 'Writing. [[act {"type":"write","path":"notes.txt","text":"agent notes","why":"save notes"}]]' },
+  ]));
+  await send('/do write my notes');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write notes\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  assert.ok(!(await dock.evaluate(() => document.getElementById('agent-all').hidden)), 'file steps can be allowed for the whole task');
+  await dock.click('#agent-all');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Run/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-all').hidden), 'a command is approved on its own, even after allow-all');
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => /Agent finished: notes written and checked/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  assert.strictEqual(fs.readFileSync(path.join(project, 'notes.txt'), 'utf8'), 'agent notes');
+  await dock.waitForFunction(() => /\/do undo/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
+  await send('/do undo');
+  await dock.waitForFunction(() => /Undone: 1 file/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(!fs.existsSync(path.join(project, 'notes.txt')));
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });

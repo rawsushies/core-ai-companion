@@ -110,6 +110,9 @@ const DEFAULTS = {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
     maxSteps: 25,
+    tools: true, // commands, files and web pages (inside the project folder), on top of mouse and keyboard
+    allowCommands: [], // commands that never ask, matched by their start, e.g. "git status", "npm test"
+    commandTimeout: 60, // seconds
   },
   phone: {
     enabled: false, // the phone companion: chat with COre from your phone's browser on the same Wi-Fi

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### COre 2.0, part 3: Autonomous agent tools
+
+- The desktop agent can now also **run commands, read/write/move/delete files and read web pages** (Settings, Agent; on by default once the agent is enabled).
+  - Commands: no shell (argv only), pipes/redirects/variables refused, destructive programs and git push/reset blocked, working folder jailed to the project, secrets removed from the environment, timeout and capped output. **Every command asks**, even after "Allow all steps", unless it matches `agent.allowCommands` (e.g. `git status`).
+  - Files: only inside the project folder (symlinks resolved), secret files (`.env`, keys, credentials) refused, atomic writes, and a backup before every change. **`/do undo`** puts back every file the last task touched.
+  - Web: https only, no local network addresses, text pages only, size-capped.
+  - Every result goes back to the brain fenced as untrusted data (prompt-injection guard), and suspicious text is flagged.
+- **Verification**: a task that changed something gets one more look (a fresh screenshot) before it counts as done.
+- **Recovery**: after a failed step the brain is told to try another way; four failures in a row end the task.
+- **Persistent tasks**: progress is checkpointed every step. **`/do resume`** continues a stopped, limited or crashed task; COre mentions an interrupted task at startup.
+
 ### COre 2.0, part 2: Security core
 - **Emergency stop:** Ctrl+Alt+Shift+X (changeable) or the tray's "Emergency stop" halts everything at once:
   - the desktop agent

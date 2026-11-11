@@ -708,6 +708,7 @@
       document.getElementById('agent-step-no').textContent = `Step ${a.step}`;
       document.getElementById('agent-label').textContent = a.label;
       document.getElementById('agent-why').textContent = a.why || '';
+      document.getElementById('agent-all').hidden = !!a.forced; // commands are approved one by one
       document.getElementById('agent-yes').focus();
     }
     reportSize();
