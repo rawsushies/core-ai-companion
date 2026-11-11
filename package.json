@@ -54,7 +54,8 @@
       "assets/**/*",
       "package.json",
       "!**/*.map",
-      "!test/**/*"
+      "!test/**/*",
+      "!assets/brand/v11/**"
     ],
     "win": {
       "target": [

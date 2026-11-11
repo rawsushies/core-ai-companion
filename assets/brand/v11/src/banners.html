@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>COre 11 banners</title>
+<link rel="stylesheet" href="../../../../src/renderer/fonts/fonts.css">
+<style>
+  :root { --void:#05070a; --smoke:#0b1f15; --emerald:#3dff85; --mint:#7dffb0; --ink:#e8fff1; --muted:#86a595; --line:#1d3327; --edge:#1f6b42; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #222; font-family: 'COre Sans', Inter, sans-serif; color: var(--ink); padding: 40px; display: flex; flex-direction: column; gap: 40px; align-items: flex-start; }
+  .art { position: relative; overflow: hidden; background: var(--void); }
+  .art::before { content: ""; position: absolute; inset: 0; background: radial-gradient(60% 80% at 75% 50%, rgba(61,255,133,0.10), transparent 70%); }
+  .orb { position: absolute; mix-blend-mode: screen; pointer-events: none; }
+  h1, .display { font-family: 'COre Display', 'COre Sans', sans-serif; font-weight: 600; letter-spacing: -0.03em; line-height: 1.02; }
+  .accent { color: var(--emerald); }
+  .muted { color: var(--muted); }
+  .mono { font-family: 'COre Mono', monospace; }
+  .kicker { font-family: 'COre Mono', monospace; color: var(--emerald); font-size: 15px; letter-spacing: 0.02em; }
+  .mark { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 10px; font: 600 20px/1 'COre Display', sans-serif; letter-spacing: -0.03em; }
+  /* cards: the app's glance card */
+  .card { background: rgba(5,7,10,0.94); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px 15px; box-shadow: 0 18px 50px rgba(0,0,0,0.55); width: 290px; }
+  .card .k { font: 12px 'COre Mono', monospace; color: var(--emerald); margin-bottom: 4px; }
+  .card .t { font: 600 17px/1.25 'COre Display', sans-serif; letter-spacing: -0.02em; }
+  .card .s { color: var(--muted); font-size: 14px; }
+  .card .prev, .card .next { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .card .prev { opacity: 0.6; margin-top: 10px; }
+  .card .cur { color: var(--mint); font: 600 18px/1.3 'COre Display', sans-serif; margin-top: 4px; }
+  .card .bar { margin-top: 12px; height: 3px; background: var(--line); border-radius: 2px; }
+  .card .bar i { display: block; height: 100%; width: 32%; background: var(--emerald); border-radius: 2px; }
+  .card .big { font: 600 40px/1.1 'COre Mono', monospace; color: var(--mint); margin-top: 6px; letter-spacing: -0.02em; }
+  .card .head { display: flex; gap: 12px; align-items: center; }
+  .art-thumb { width: 54px; height: 54px; border-radius: 10px; background: linear-gradient(135deg, #0b1f15, #1f6b42 60%, #3dff85); border: 1px solid var(--line); flex: none; }
+  .step { display: grid; grid-template-columns: 9px 1fr auto; gap: 10px; align-items: center; font-size: 15px; margin-top: 7px; }
+  .step i { width: 9px; height: 9px; border-radius: 50%; }
+  .step em { font: 12px 'COre Mono', monospace; font-style: normal; color: var(--muted); }
+  /* chat panel: the app's dock */
+  .panel { border: 1px solid var(--line); border-radius: 18px; background: rgba(5,7,10,0.72); width: 400px; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+  .ph { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .ph .n { font: 600 16px 'COre Display', sans-serif; letter-spacing: -0.03em; }
+  .ph .st { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .ph .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); }
+  .pb { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .b { max-width: 88%; padding: 9px 13px; border-radius: 14px; font-size: 15px; line-height: 1.45; }
+  .b.core { background: var(--smoke); border: 1px solid #18382a; align-self: flex-start; }
+  .b.user { background: var(--void); border: 1px solid var(--edge); align-self: flex-end; }
+  .note { font-size: 13px; color: var(--ink); margin-left: 4px; }
+  .note b { font: 600 12px 'COre Mono', monospace; color: var(--emerald); margin-right: 6px; }
+  .approve { margin: 0 14px 14px; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 14px; background: var(--void); }
+  .approve .l { font-size: 15px; } .approve .l b { font: 600 12px 'COre Mono', monospace; color: var(--emerald); margin-right: 6px; }
+  .approve .w { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .btns { display: flex; gap: 8px; margin-top: 10px; }
+  .btn { padding: 7px 14px; border-radius: 10px; font-size: 13.5px; border: 1px solid var(--line); background: var(--void); }
+  .btn.p { background: var(--emerald); color: var(--void); border: 0; font-weight: 600; }
+  code { font: 13px 'COre Mono', monospace; color: var(--mint); background: var(--void); padding: 1px 5px; border-radius: 5px; }
+  .tile { border: 1px solid var(--line); border-radius: 16px; background: rgba(11,31,21,0.55); padding: 16px 18px; }
+  .tile h3 { font: 600 19px/1.2 'COre Display', sans-serif; letter-spacing: -0.02em; margin-bottom: 6px; }
+  .tile p { color: var(--muted); font-size: 14.5px; line-height: 1.4; }
+  .tile .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--emerald); margin-bottom: 12px; box-shadow: 0 0 12px rgba(61,255,133,0.7); }
+  .phone { position: absolute; width: 470px; height: 956px; border-radius: 58px; background: #000; border: 2px solid #1d3327; padding: 14px; box-shadow: 0 40px 120px rgba(0,0,0,0.7), 0 0 0 10px #0b0f0d; }
+  .phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 46px; }
+</style>
+</head>
+<body>
+
+<!-- 1. Hero: X / Twitter header 1500x500 -->
+<section class="art" id="b1-hero" style="width:1500px;height:500px">
+  <img class="orb" src="../../renders/orb-wave.jpg" style="right:230px;top:-60px;height:640px">
+  <div style="position:absolute;left:90px;top:92px;width:700px">
+    <div class="brand"><img class="mark" src="../../icon-128.png">COre <span class="accent mono" style="font-size:15px;margin-left:6px">11</span></div>
+    <h1 style="font-size:84px;margin-top:34px">Not a chatbot.<br><span class="accent">A presence.</span></h1>
+    <p class="muted" style="font-size:22px;margin-top:22px;line-height:1.4">It drives your desktop, sings along with your music,<br>and now fits in your pocket.</p>
+  </div>
+  <div class="card" style="position:absolute;right:70px;top:170px;transform:rotate(-2deg)">
+    <div class="head"><div class="art-thumb"></div><div><div class="k">Lyrics</div><div class="t">Midnight Signal</div><div class="s">The Smoke Choir</div></div></div>
+    <div class="prev">Static on the window glass</div>
+    <div class="cur">Green light humming in the dark</div>
+    <div class="next">Every word dissolves to smoke</div>
+    <div class="bar"><i></i></div>
+  </div>
+</section>
+
+<!-- 2. Desktop agent: 1200x628 -->
+<section class="art" id="b2-agent" style="width:1200px;height:628px">
+  <img class="orb" src="../../renders/orb-point.jpg" style="left:250px;top:230px;height:520px;transform:scaleX(-1)">
+  <div style="position:absolute;left:70px;top:64px;width:520px">
+    <div class="kicker">NEW · DESKTOP AGENT</div>
+    <h1 style="font-size:70px;margin-top:16px">It can <span class="accent">drive</span> now.</h1>
+    <p class="muted" style="font-size:20px;margin-top:16px;line-height:1.45">Type <code style="font-size:17px">/do</code> and a task. COre looks, clicks and types,<br>one step at a time. You approve every step.<br>Esc stops it.</p>
+  </div>
+  <div class="panel" style="position:absolute;right:70px;top:110px;width:440px">
+    <div class="ph"><img class="mark" src="../../icon-128.png"><div><div class="n">COre</div><div class="st">Thinking…</div></div></div>
+    <div class="pb">
+      <div class="b user">/do rename my screenshots by date</div>
+      <div class="note"><b>Step 1</b>Open Files</div>
+      <div class="note"><b>Step 2</b>Select the Screenshots folder</div>
+    </div>
+    <div class="approve">
+      <div class="l"><b>Step 3</b>Click "Sort by date"</div>
+      <div class="w">so the oldest file gets number 1</div>
+      <div class="btns"><span class="btn p">Allow</span><span class="btn">Allow all steps</span><span class="btn">Stop</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Phone: story 1080x1920 -->
+<section class="art" id="b3-phone" style="width:1080px;height:1920px">
+  <img class="orb" src="../../renders/orb-speaking.jpg" style="left:50%;top:40px;height:620px;transform:translateX(-50%)">
+  <div style="position:absolute;left:0;right:0;top:560px;text-align:center">
+    <div class="kicker" style="font-size:22px">NEW · COre FOR ANDROID</div>
+    <h1 style="font-size:104px;margin-top:22px">COre, in your<br><span class="accent">pocket.</span></h1>
+    <p class="muted" style="font-size:30px;margin-top:26px;line-height:1.4">With your PC on Wi-Fi. Gemini when you're out.<br>Light enough for older phones.</p>
+  </div>
+  <div class="phone" style="left:305px;top:1060px"><img src="mobile-chat.png"></div>
+</section>
+
+<!-- 4. Cards: square 1080x1080 -->
+<section class="art" id="b4-cards" style="width:1080px;height:1080px">
+  <img class="orb" src="../../renders/orb-idle.jpg" style="right:-120px;top:240px;height:760px">
+  <div style="position:absolute;left:80px;top:80px;width:900px">
+    <div class="kicker" style="font-size:18px">CARDS BESIDE THE ORB</div>
+    <h1 style="font-size:78px;margin-top:16px">Lives beside<br>what you're <span class="accent">doing.</span></h1>
+  </div>
+  <div class="card" style="position:absolute;left:80px;top:430px;width:330px;transform:scale(1.15);transform-origin:left top">
+    <div class="head"><div class="art-thumb"></div><div><div class="k">Now playing</div><div class="t">Midnight Signal</div><div class="s">The Smoke Choir</div></div></div>
+    <div class="bar"><i></i></div>
+  </div>
+  <div class="card" style="position:absolute;left:80px;top:610px;width:330px;transform:scale(1.15);transform-origin:left top">
+    <div class="k">Timer</div><div class="t">Tea</div><div class="big">7:12</div><div class="bar"><i style="width:30%"></i></div>
+  </div>
+  <div class="card" style="position:absolute;left:80px;top:820px;width:330px;transform:scale(1.15);transform-origin:left top">
+    <div class="k">Shared task</div><div class="t">Plan the backup feature</div>
+    <div class="step"><i style="background:#40ccff"></i><span>Scout</span><em style="color:#3dff85">done</em></div>
+    <div class="step"><i style="background:#ff7a24"></i><span>Forge</span><em style="color:#7dffb0">working…</em></div>
+  </div>
+</section>
+
+<!-- 5. Feature grid: 1200x628 (Product Hunt / Open Graph) -->
+<section class="art" id="b5-features" style="width:1200px;height:628px">
+  <img class="orb" src="../../renders/orb-celebrate.jpg" style="right:-110px;top:-80px;height:420px;opacity:0.9">
+  <div style="position:absolute;left:60px;top:50px">
+    <div class="brand"><img class="mark" src="../../icon-128.png">COre <span class="accent mono" style="font-size:15px;margin-left:6px">11</span></div>
+    <h1 style="font-size:52px;margin-top:20px">Your desktop companion,<br><span class="accent">made of smoke.</span></h1>
+  </div>
+  <div style="position:absolute;left:60px;right:60px;bottom:50px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+    <div class="tile"><div class="dot"></div><h3>Drives your desktop</h3><p>/do a task. Every step approved.</p></div>
+    <div class="tile"><div class="dot"></div><h3>Cards beside the orb</h3><p>Lyrics, timers, weather, live tasks.</p></div>
+    <div class="tile"><div class="dot"></div><h3>Four cores, one chat</h3><p>Scout, Forge and Sentinel split off to help.</p></div>
+    <div class="tile"><div class="dot"></div><h3>In your pocket</h3><p>Android app. Encrypted, works away too.</p></div>
+    <div class="tile"><div class="dot"></div><h3>Instant answers</h3><p>Time, music, timers in a blink. No brain.</p></div>
+    <div class="tile"><div class="dot"></div><h3>Light on your PC</h3><p>Hidden means zero frames. 1.7% CPU.</p></div>
+  </div>
+</section>
+
+</body>
+</html>

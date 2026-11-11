@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>COre 11 promo (30 s, 120 BPM)</title>
+<link rel="stylesheet" href="../../../../src/renderer/fonts/fonts.css">
+<style>
+  :root { --void:#05070a; --smoke:#0b1f15; --emerald:#3dff85; --mint:#7dffb0; --ink:#e8fff1; --muted:#86a595; --line:#1d3327; --edge:#1f6b42; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--void); color: var(--ink); font-family: 'COre Sans', sans-serif; }
+  #stage { position: absolute; inset: 0; overflow: hidden; }
+  #glow { position: absolute; inset: 0; background: radial-gradient(50% 60% at 50% 50%, rgba(61,255,133,0.16), transparent 70%); }
+  canvas { position: absolute; inset: 0; }
+  .abs { position: absolute; will-change: transform, opacity; opacity: 0; }
+  .orb { mix-blend-mode: screen; -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 98%); mask-image: radial-gradient(closest-side, #000 62%, transparent 98%); }
+  .display { font-family: 'COre Display', sans-serif; font-weight: 600; letter-spacing: -0.035em; line-height: 1; white-space: nowrap; }
+  .mono { font-family: 'COre Mono', monospace; }
+  .accent { color: var(--emerald); }
+  .w { display: inline-block; opacity: 0; will-change: transform, opacity; }
+  .kicker { font: 500 28px 'COre Mono', monospace; color: var(--emerald); letter-spacing: 0.08em; }
+  .card { background: rgba(5,7,10,0.94); border: 1px solid var(--line); border-radius: 22px; padding: 22px 26px 24px; box-shadow: 0 24px 70px rgba(0,0,0,0.6); width: 470px; }
+  .card .k { font: 18px 'COre Mono', monospace; color: var(--emerald); margin-bottom: 6px; }
+  .card .t { font: 600 27px/1.25 'COre Display', sans-serif; letter-spacing: -0.02em; }
+  .card .s { color: var(--muted); font-size: 21px; }
+  .card .ln { color: var(--muted); font-size: 21px; margin-top: 6px; min-height: 30px; }
+  .card .cur { color: var(--mint); font: 600 29px/1.3 'COre Display', sans-serif; margin-top: 6px; min-height: 38px; }
+  .card .bar { margin-top: 18px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .card .bar i { display: block; height: 100%; width: 100%; background: var(--emerald); transform-origin: 0 50%; }
+  .card .big { font: 600 64px/1.1 'COre Mono', monospace; color: var(--mint); margin-top: 8px; letter-spacing: -0.02em; }
+  .head { display: flex; gap: 18px; align-items: center; }
+  .thumb { width: 84px; height: 84px; border-radius: 14px; background: linear-gradient(135deg, #0b1f15, #1f6b42 60%, #3dff85); border: 1px solid var(--line); flex: none; }
+  .step { display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; font-size: 23px; margin-top: 10px; }
+  .step i { width: 14px; height: 14px; border-radius: 50%; }
+  .step em { font: 18px 'COre Mono', monospace; font-style: normal; color: var(--muted); }
+  .panel { border: 1px solid var(--line); border-radius: 26px; background: rgba(5,7,10,0.86); width: 700px; overflow: hidden; box-shadow: 0 30px 90px rgba(0,0,0,0.6); }
+  .ph { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+  .ph img { width: 54px; height: 54px; border-radius: 50%; border: 1px solid var(--line); }
+  .ph .n { font: 600 27px 'COre Display', sans-serif; letter-spacing: -0.03em; }
+  .ph .st { font-size: 19px; color: var(--muted); }
+  .pb { padding: 22px 24px 8px; display: flex; flex-direction: column; gap: 12px; min-height: 190px; }
+  .b { padding: 13px 20px; border-radius: 20px; font-size: 25px; background: var(--void); border: 1px solid var(--edge); align-self: flex-end; min-height: 56px; }
+  .note { font-size: 22px; opacity: 0; }
+  .note b { font: 600 19px 'COre Mono', monospace; color: var(--emerald); margin-right: 10px; }
+  .approve { margin: 8px 24px 24px; padding: 18px 22px; border: 1px solid var(--edge); border-radius: 20px; background: var(--void); }
+  .approve .l { font-size: 25px; } .approve .l b { font: 600 19px 'COre Mono', monospace; color: var(--emerald); margin-right: 10px; }
+  .btns { display: flex; gap: 12px; margin-top: 16px; }
+  .btn { padding: 10px 24px; border-radius: 14px; font-size: 21px; border: 1px solid var(--line); }
+  .btn.p { background: var(--emerald); color: var(--void); border: 0; font-weight: 600; }
+  .phone { width: 430px; height: 880px; border-radius: 56px; background: #000; border: 2px solid #1d3327; padding: 13px; box-shadow: 0 40px 120px rgba(0,0,0,0.75), 0 0 0 10px #0b0f0d; }
+  .phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 44px; }
+  .corename { font: 600 34px 'COre Display', sans-serif; letter-spacing: -0.02em; text-align: center; width: 300px; }
+  .corename small { display: block; font: 18px 'COre Mono', monospace; color: var(--muted); letter-spacing: 0; margin-top: 4px; }
+  #flash { position: absolute; inset: 0; background: var(--mint); opacity: 0; mix-blend-mode: screen; pointer-events: none; }
+  #vig { position: absolute; inset: 0; background: radial-gradient(75% 75% at 50% 50%, transparent 55%, rgba(0,0,0,0.6)); pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="glow"></div>
+  <canvas id="fx" width="1920" height="1080"></canvas>
+
+  <!-- real renders of the orb (brand rule: never illustrations) -->
+  <img id="o-idle" class="abs orb" src="../../renders/orb-idle.jpg" style="height:900px">
+  <img id="o-speak" class="abs orb" src="../../renders/orb-speaking.jpg" style="height:900px">
+  <img id="o-point" class="abs orb" src="../../renders/orb-point.jpg" style="height:900px">
+  <img id="o-wave" class="abs orb" src="../../renders/orb-wave.jpg" style="height:900px">
+  <img id="o-cele" class="abs orb" src="../../renders/orb-celebrate.jpg" style="height:900px">
+  <img id="o-ice" class="abs orb" src="../../renders/orb-ice.jpg" style="height:520px">
+  <img id="o-ember" class="abs orb" src="../../renders/orb-ember.jpg" style="height:520px">
+  <img id="o-violet" class="abs orb" src="../../renders/orb-violet.jpg" style="height:520px">
+
+  <!-- S1 0-6 -->
+  <div id="t1" class="abs display" style="font-size:150px"><span class="w">Not</span> <span class="w">a</span> <span class="w">chatbot.</span></div>
+  <div id="t2" class="abs display accent" style="font-size:230px">A presence.</div>
+
+  <!-- S2 6-10 -->
+  <div id="v1" class="abs display" style="font-size:210px">It talks.</div>
+  <div id="v2" class="abs display" style="font-size:210px">It points.</div>
+  <div id="v3" class="abs display" style="font-size:210px">It <span class="accent">waves.</span></div>
+  <div id="v4" class="abs display" style="font-size:120px">Made of <span class="accent">smoke.</span></div>
+
+  <!-- S3 10-14 cards -->
+  <div id="k3" class="abs kicker">CARDS BESIDE THE ORB</div>
+  <div id="h3" class="abs display" style="font-size:104px">Lives beside<br>what you're <span class="accent">doing.</span></div>
+  <div id="c-ly" class="abs card"><div class="head"><div class="thumb"></div><div><div class="k">Lyrics</div><div class="t">Midnight Signal</div><div class="s">The Smoke Choir</div></div></div><div class="ln" id="ly-p"></div><div class="cur" id="ly-c"></div><div class="ln" id="ly-n"></div><div class="bar"><i id="ly-b"></i></div></div>
+  <div id="c-tm" class="abs card" style="width:360px"><div class="k">Timer</div><div class="t">Tea</div><div class="big" id="tm">4:00</div><div class="bar"><i id="tm-b"></i></div></div>
+  <div id="c-tk" class="abs card" style="width:430px"><div class="k">Shared task</div><div class="t">Plan the backup</div>
+    <div class="step"><i style="background:#40ccff"></i><span>Scout</span><em id="tk1">working…</em></div>
+    <div class="step"><i style="background:#ff7a24"></i><span>Forge</span><em id="tk2">working…</em></div>
+    <div class="step"><i style="background:#b475ff"></i><span>Sentinel</span><em id="tk3">waiting</em></div></div>
+
+  <!-- S4 14-18 agent -->
+  <div id="k4" class="abs kicker">NEW · DESKTOP AGENT</div>
+  <div id="h4" class="abs display" style="font-size:118px">It can <span class="accent">drive</span> now.</div>
+  <div id="s4" class="abs" style="font-size:36px;color:var(--muted)">You approve every step. Esc stops it.</div>
+  <div id="pn" class="abs panel">
+    <div class="ph"><img src="../../icon-128.png"><div><div class="n">COre</div><div class="st" id="pst">● Online</div></div></div>
+    <div class="pb"><div class="b mono" id="cmd"></div><div class="note" id="n1"><b>Step 1</b>Open Files</div><div class="note" id="n2"><b>Step 2</b>Select Screenshots</div></div>
+    <div class="approve" id="ap"><div class="l"><b>Step 3</b>Click "Sort by date"</div><div class="btns"><span class="btn p" id="allow">Allow</span><span class="btn">Allow all steps</span><span class="btn">Stop</span></div></div>
+  </div>
+
+  <!-- S5 18-22 cores -->
+  <div id="h5" class="abs display" style="font-size:150px">Four cores. <span class="accent">One chat.</span></div>
+  <div id="cn0" class="abs corename" style="color:#3dff85">COre<small>prime</small></div>
+  <div id="cn1" class="abs corename" style="color:#40ccff">Scout<small>research</small></div>
+  <div id="cn2" class="abs corename" style="color:#ff7a24">Forge<small>build</small></div>
+  <div id="cn3" class="abs corename" style="color:#b475ff">Sentinel<small>review</small></div>
+
+  <!-- S6 22-26 phone -->
+  <div id="k6" class="abs kicker">NEW · COre FOR ANDROID</div>
+  <div id="h6" class="abs display" style="font-size:170px">In your<br><span class="accent">pocket.</span></div>
+  <div id="s6" class="abs" style="font-size:36px;color:var(--muted);line-height:1.4">With your PC on Wi-Fi.<br>Gemini when you're out.</div>
+  <div id="phn" class="abs phone"><img src="mobile-chat.png"></div>
+
+  <!-- S7 26-30 outro -->
+  <img id="mark" class="abs" src="../../icon-512.png" style="width:190px;height:190px;border-radius:50%">
+  <div id="h7" class="abs display" style="font-size:230px">COre <span class="accent">11</span></div>
+  <div id="s7" class="abs" style="font-size:42px;color:var(--muted)">Your desktop companion, made of smoke.</div>
+  <div id="u7" class="abs mono" style="font-size:30px;color:var(--emerald)">github.com/rawsushies/core-ai-companion</div>
+
+  <div id="vig"></div>
+  <div id="flash"></div>
+</div>
+<script>
+'use strict';
+// Everything is a pure function of time (seconds), so frames can be rendered
+// one by one: window.render(t). 120 BPM: a beat every 0.5 s, cuts on bars.
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const outCubic = (x) => 1 - Math.pow(1 - x, 3);
+const outBack = (x) => { const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const inCubic = (x) => x * x * x;
+const beat = (t) => (t < 4 || t >= 26 ? 0 : Math.exp(-7 * ((t * 2) % 1))); // kick pulse
+const W = 1920, H = 1080;
+
+// Place an element: centre at (x, y), with scale / rotation / opacity.
+function put(el, { x = W / 2, y = H / 2, s = 1, r = 0, o = 1, ax = 0.5, ay = 0.5 }) {
+  el = typeof el === 'string' ? $(el) : el;
+  el.style.opacity = o;
+  if (o <= 0) { el.style.transform = 'translate(-9999px,0)'; return; }
+  el.style.left = '0'; el.style.top = '0';
+  el.style.transformOrigin = `${ax * 100}% ${ay * 100}%`;
+  el.style.transform = `translate(${x}px, ${y}px) translate(${-ax * 100}%, ${-ay * 100}%) scale(${s}) rotate(${r}deg)`;
+}
+// Standard life of an element: in at a, out at b.
+function life(t, a, b, din = 0.35, dout = 0.25) {
+  if (t < a || t > b) return { o: 0, i: 0, x: 1 };
+  const i = seg(t, a, a + din), x = seg(t, b - dout, b);
+  return { o: i * (1 - x), i, x };
+}
+function slam(id, t, a, b, opt = {}) { // text that hits on the beat
+  const L = life(t, a, b, 0.22, 0.18);
+  put(id, { ...opt, o: L.o, s: (opt.s || 1) * (1.35 - 0.35 * outCubic(L.i)) * (1 + 0.25 * inCubic(L.x)) });
+}
+function rise(id, t, a, b, opt = {}) { // text / UI that slides up
+  const L = life(t, a, b, 0.4, 0.25);
+  put(id, { ...opt, o: L.o, y: (opt.y || H / 2) + 60 * (1 - outCubic(L.i)) - 40 * inCubic(L.x) });
+}
+
+// Deterministic particles: a rotating shell that gathers out of the dark.
+const fx = $('fx').getContext('2d');
+const N = 1400;
+const P = Array.from({ length: N }, (_, i) => { const h = (n) => { const x = Math.sin(i * 127.1 + n * 311.7) * 43758.5453; return x - Math.floor(x); }; return { th: h(1) * 6.283, ph: Math.acos(2 * h(2) - 1), sp: 0.15 + h(3) * 0.5, r: 0.85 + h(4) * 0.3, s: 1 + h(5) * 2.2, sx: (h(6) - 0.5) * 2600, sy: (h(7) - 0.5) * 1500 }; });
+function particles(t, cx, cy, R, alpha, gather, tint = [61, 255, 133]) {
+  fx.globalCompositeOperation = 'lighter';
+  const bp = 1 + 0.07 * beat(t);
+  for (const q of P) {
+    const th = q.th + q.sp * t, wob = 1 + 0.06 * Math.sin(t * 0.9 + q.ph * 3);
+    const x3 = Math.sin(q.ph) * Math.cos(th), z3 = Math.sin(q.ph) * Math.sin(th), y3 = Math.cos(q.ph + 0.25 * Math.sin(t * 0.4));
+    const d = (z3 + 1.4) / 2.4;
+    const tx = cx + x3 * R * q.r * wob * bp, ty = cy + y3 * R * q.r * wob * bp;
+    const x = q.sx + W / 2 + (tx - q.sx - W / 2) * gather, y = q.sy + H / 2 + (ty - q.sy - H / 2) * gather;
+    const sz = q.s * (0.6 + d);
+    fx.fillStyle = `rgba(${tint[0]},${tint[1]},${tint[2]},${alpha * (0.2 + 0.6 * d)})`;
+    fx.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+  }
+  fx.globalCompositeOperation = 'source-over';
+}
+
+const LY = ['Static on the window glass', 'Green light humming in the dark', 'Every word dissolves to smoke', 'And comes back as a spark', ''];
+const CMD = '/do rename my screenshots by date';
+
+window.render = function (t) {
+  const b = beat(t);
+  fx.clearRect(0, 0, W, H);
+  $('glow').style.opacity = clamp(0.25 + 0.5 * seg(t, 0, 4) + 0.5 * b);
+
+  // ---- S1 0-6: out of the dark
+  const g = outCubic(seg(t, 0.2, 3.6));
+  const heroA = t < 6 ? 1 : t < 10 ? 0.55 : t < 26 ? 0.28 : 0.5 * (1 - seg(t, 26, 26.4)) + 0.35;
+  let cx = W / 2, cy = t < 6 ? 470 : H / 2, R = t < 4 ? 250 : 290;
+  if (t >= 10 && t < 14) { cx = 1480; cy = 330; R = 230; }
+  if (t >= 14 && t < 18) { cx = 520; cy = 790; R = 210; }
+  if (t >= 22 && t < 26) { cx = 1330; cy = 560; R = 420; }
+  if (t >= 26) { cy = 380; R = 330 + 500 * outCubic(seg(t, 26, 26.5)) * (1 - seg(t, 26.5, 27.5)) ; }
+  if (!(t >= 18 && t < 22)) particles(t, cx, cy, R, heroA, g);
+  const words = $('t1').children;
+  [0.5, 1.0, 1.5].forEach((at, i) => { const p = seg(t, at, at + 0.25); words[i].style.opacity = p; words[i].style.transform = `translateY(${30 * (1 - outCubic(p))}px) scale(${1.25 - 0.25 * outCubic(p)})`; });
+  put('t1', { y: 830, o: t < 4 ? 1 : 0, s: 1 - 0.04 * seg(t, 2, 4) });
+  slam('t2', t, 4, 6, { y: 850 });
+  put('o-idle', { y: 470, o: 0.9 * seg(t, 3.9, 4.15) * (1 - seg(t, 5.8, 6)), s: 0.92 + 0.05 * b + 0.03 * seg(t, 4, 6) });
+
+  // ---- S2 6-10: verbs on the beat, a render for each
+  const shots = [['o-speak', 'v1', 6, 7], ['o-point', 'v2', 7, 8], ['o-wave', 'v3', 8, 9]];
+  for (const [o, v, a, e] of shots) {
+    const L = life(t, a, e, 0.12, 0.1);
+    put(o, { x: 1340, y: 540, o: L.o, s: 1.0 + 0.06 * (t - a) + 0.05 * b });
+    slam(v, t, a, e, { x: 560, y: 540 });
+  }
+  put('o-cele', { y: 430, o: life(t, 9, 10, 0.12, 0.15).o, s: 0.95 + 0.08 * (t - 9) + 0.05 * b });
+  slam('v4', t, 9, 10, { y: 900 });
+
+  // ---- S3 10-14: cards
+  rise('k3', t, 10, 14, { x: 140, y: 190, ax: 0 });
+  rise('h3', t, 10.1, 14, { x: 140, y: 360, ax: 0 });
+  const cardIn = (id, at, x, y, rot) => { const L = life(t, at, 14, 0.45, 0.2); put(id, { x: x + 500 * (1 - outBack(L.i)) * (x > 900 ? 1 : -1), y: y - 60 * inCubic(L.x), r: rot * (1 - 0.4 * L.i), o: L.o, s: 1.2 + 0.02 * b }); };
+  cardIn('c-ly', 10.5, 400, 800, -3);
+  cardIn('c-tm', 11.0, 970, 830, 2);
+  cardIn('c-tk', 11.5, 1510, 790, -2);
+  const li = Math.min(3, Math.floor(seg(t, 10.5, 14) * 4));
+  $('ly-p').textContent = li > 0 ? LY[li - 1] : ''; $('ly-c').textContent = LY[li]; $('ly-n').textContent = LY[li + 1];
+  $('ly-b').style.transform = `scaleX(${0.2 + 0.25 * seg(t, 10.5, 14)})`;
+  const left = 240 - Math.floor((t - 11) * 6); $('tm').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  $('tm-b').style.transform = `scaleX(${0.1 + 0.3 * seg(t, 11, 14)})`;
+  $('tk1').textContent = t > 12.5 ? 'done' : 'working…'; $('tk1').style.color = t > 12.5 ? '#3dff85' : '#7dffb0';
+  $('tk2').textContent = t > 13.5 ? 'done' : 'working…'; $('tk2').style.color = t > 13.5 ? '#3dff85' : '#7dffb0';
+  $('tk3').textContent = t > 13 ? 'working…' : 'waiting'; $('tk3').style.color = t > 13 ? '#7dffb0' : '#86a595';
+
+  // ---- S4 14-18: agent
+  rise('k4', t, 14, 18, { x: 140, y: 200, ax: 0 });
+  slam('h4', t, 14, 18, { x: 140, y: 350, ax: 0 });
+  rise('s4', t, 14.6, 18, { x: 140, y: 480, ax: 0 });
+  const LP = life(t, 14.3, 18, 0.5, 0.2);
+  put('pn', { x: 1500 + 300 * (1 - outBack(LP.i)), y: 590 - 60 * inCubic(LP.x), o: LP.o });
+  $('cmd').textContent = CMD.slice(0, Math.floor(seg(t, 14.6, 15.6) * CMD.length)) + (t < 15.7 && Math.floor(t * 4) % 2 ? '▍' : '');
+  $('n1').style.opacity = seg(t, 15.75, 15.95); $('n2').style.opacity = seg(t, 16.25, 16.45);
+  $('ap').style.opacity = seg(t, 16.75, 17); $('ap').style.transform = `translateY(${20 * (1 - outCubic(seg(t, 16.75, 17)))}px)`;
+  const press = seg(t, 17.5, 17.6) * (1 - seg(t, 17.6, 17.8));
+  $('allow').style.transform = `scale(${1 - 0.12 * press})`; $('allow').style.boxShadow = t > 17.5 ? `0 0 ${40 * (1 - seg(t, 17.5, 18))}px rgba(61,255,133,0.9)` : 'none';
+  $('pst').textContent = t > 17.55 ? '● Working…' : '● Online';
+
+  // ---- S5 18-22: the cores split off
+  slam('h5', t, 18, 22, { y: 880 });
+  const L5 = life(t, 18, 22, 0.15, 0.2);
+  const X5 = [330, 750, 1170, 1590];
+  // Prime slides left while the three specialists split off to the right, one per beat.
+  const p0 = outCubic(seg(t, 18.4, 19.0));
+  particles(t, W / 2 + (X5[0] - W / 2) * p0, 400, 170, 0.95 * L5.o, 1);
+  put('cn0', { x: X5[0], y: 640, o: L5.o * seg(t, 18.9, 19.2) });
+  [['o-ice', 'cn1'], ['o-ember', 'cn2'], ['o-violet', 'cn3']].forEach(([o, n], i) => {
+    const at = 18.5 + i * 0.5, q = outBack(seg(t, at, at + 0.6));
+    put(o, { x: X5[0] + (X5[i + 1] - X5[0]) * q, y: 400, o: L5.o * seg(t, at, at + 0.2), s: 0.35 + 0.55 * q + 0.05 * b });
+    put(n, { x: X5[i + 1], y: 640, o: L5.o * seg(t, at + 0.45, at + 0.7) });
+  });
+
+  // ---- S6 22-26: phone
+  rise('k6', t, 22, 26, { x: 140, y: 250, ax: 0 });
+  slam('h6', t, 22, 26, { x: 140, y: 500, ax: 0 });
+  rise('s6', t, 22.6, 26, { x: 140, y: 800, ax: 0 });
+  const L6 = life(t, 22.2, 26, 0.6, 0.25);
+  put('phn', { x: 1330, y: 560 + 700 * (1 - outBack(L6.i)) - 80 * inCubic(L6.x), r: 5 - 9 * outCubic(L6.i), o: L6.o, s: 1 + 0.015 * b });
+
+  // ---- S7 26-30: outro
+  const L7 = life(t, 26, 30.1, 0.3, 0.01);
+  put('mark', { y: 250, o: L7.o, s: 1.4 - 0.4 * outBack(L7.i) });
+  put('h7', { y: 560, o: L7.o, s: 1.3 - 0.3 * outCubic(L7.i) + 0.01 * (t - 26) });
+  rise('s7', t, 26.5, 30.1, { y: 760 });
+  rise('u7', t, 27.0, 30.1, { y: 860 });
+
+  // hits: bar-line flashes and a fade to black at the very end
+  const hits = [4, 6, 10, 14, 18, 22, 26];
+  let fl = 0; for (const h of hits) if (t >= h) fl = Math.max(fl, (h === 4 || h === 26 ? 0.55 : 0.22) * Math.exp(-9 * (t - h)));
+  $('flash').style.opacity = fl;
+  $('stage').style.opacity = 1 - seg(t, 29.2, 30);
+  $('stage').style.transform = `scale(${1 + 0.012 * b})`;
+};
+window.render(0);
+</script>
+</body>
+</html>
