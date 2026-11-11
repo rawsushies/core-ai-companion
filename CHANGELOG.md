@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+- The chat stopped following new messages when several arrived quickly (a shared task): it now stays pinned to
+  the newest message unless you scroll up yourself.
+- Desktop agent on Linux: a click could fail under some window managers (`xdotool --sync`); it now retries without
+  waiting.
+
+### Launch kit
+- Five banners, a 30-second promo video with original synthesised music, and a 90-second demo recorded from the
+  real app: `assets/brand/v11/` (see `docs/BRAND.md`).
+
 ### Fewer antivirus false alarms
 - The song card and the desktop agent run their PowerShell helpers as plain script files that ship with the app
   (`src/main/ps/`), instead of encoded commands with the execution-policy bypass. Antivirus heuristics flag that

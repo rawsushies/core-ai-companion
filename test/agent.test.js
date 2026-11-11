@@ -38,6 +38,13 @@ test('keys map to xdotool names and Windows virtual keys', () => {
   assert.deepStrictEqual(AG.vkCodes('f5'), [0x74]);
 });
 
+test('the Linux driver retries a click without --sync when the window manager refuses it', async () => {
+  const calls = [];
+  const d = new AG.LinuxDriver({ run: async (args) => { calls.push(args); if (args.includes('--sync')) throw new Error('Command failed'); } });
+  await d.perform({ type: 'click', button: 'left', double: false }, { x: 5, y: 6 });
+  assert.deepStrictEqual(calls, [['mousemove', '--sync', '5', '6', 'click', '1'], ['mousemove', '5', '6'], ['click', '1']]);
+});
+
 test('the Linux driver passes arguments as data', async () => {
   const calls = [];
   const d = new AG.LinuxDriver({ run: async (args) => calls.push(args) });

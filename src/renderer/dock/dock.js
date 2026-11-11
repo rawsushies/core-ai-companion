@@ -15,10 +15,21 @@
     while (log.children.length > MAX_MESSAGES) log.removeChild(log.firstChild);
   }
 
+  // Follow new messages unless you scrolled up to read. "Pinned" changes only
+  // when you scroll yourself: checking the position while an animated scroll
+  // was still running made fast bursts of messages (shared tasks) stop following.
+  let pinned = true;
+  let autoScrolling = false;
+  log.addEventListener('scroll', () => {
+    if (autoScrolling) return;
+    pinned = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  });
   function stickToBottom(fn) {
-    const near = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
     fn();
-    if (near) log.scrollTop = log.scrollHeight;
+    if (!pinned) return;
+    autoScrolling = true;
+    log.scrollTop = log.scrollHeight;
+    requestAnimationFrame(() => { autoScrolling = false; });
   }
 
   // ---------------------------------------------------------- Meiosis: cores
