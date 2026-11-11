@@ -177,7 +177,7 @@ function addTranscript(role, text, meta = {}) {
   toPanel('transcript:add', entry);
   // Prime's own replies reach the dock as a live stream instead.
   if (role !== 'core' || (meta.author && meta.author !== 'prime')) {
-    toDock('dock:message', { role: role === 'notice' ? 'system' : role, text, author: meta.author, kind: meta.kind, to: meta.to });
+    toDock('dock:message', { role: role === 'notice' ? 'system' : role, text, author: meta.author, kind: meta.kind, to: meta.to, files: meta.files });
   }
 }
 
@@ -1708,6 +1708,57 @@ function agentTools(taskId) {
   };
 }
 
+// ---------------------------------------------------------------- file intelligence
+// Files dropped on the chat become cards; attached cards go with your messages
+// as untrusted text (and one image). Audio and video are decoded in the dock.
+const FI = require('./fileintel');
+let shelf = null;
+function fileShelf() { if (!shelf) shelf = new FI.FileShelf({ dir: path.join(app.getPath('userData'), 'files') }); return shelf; }
+function sendFiles() { toDock('dock:files', fileShelf().list()); }
+function shrinkImage(buf) {
+  const img = nativeImage.createFromBuffer(buf);
+  if (img.isEmpty()) return null;
+  const s = img.getSize();
+  const k = Math.min(1, 1600 / Math.max(s.width, s.height));
+  const out = k < 1 ? img.resize({ width: Math.round(s.width * k), height: Math.round(s.height * k), quality: 'good' }) : img;
+  return { base64: out.toJPEG(85).toString('base64'), mediaType: 'image/jpeg' };
+}
+async function addFiles(paths) {
+  const added = [];
+  for (const p of paths.slice(0, 20)) {
+    try {
+      const it = await fileShelf().add(String(p), { resizeImage: shrinkImage, onChange: sendFiles });
+      added.push(it);
+      if (it.flags) addTranscript('system', `Heads up: ${it.name} contains text that looks like instructions. COre treats it as data only.`, { kind: 'error' });
+    } catch (err) { addTranscript('system', `Could not add ${path.basename(String(p))}: ${err.message}`, { kind: 'error' }); }
+  }
+  sendFiles();
+  return added.map((i) => ({ id: i.id, name: i.name, kind: i.kind, status: i.status }));
+}
+async function fileMedia(id, { pcm, frames, duration, error } = {}) {
+  const it = fileShelf().get(String(id));
+  if (!it) return;
+  it.status = 'reading';
+  sendFiles();
+  let transcript = '';
+  if (pcm && pcm.length > 1600) {
+    try { transcript = String(await stt.transcribe(pcm instanceof Float32Array ? pcm : new Float32Array(pcm)) || '').trim(); } catch (err) { error = error || `transcription failed: ${err.message}`; }
+  }
+  fileShelf().setMedia(it.id, { transcript, frames: (Array.isArray(frames) ? frames : []).slice(0, 6).map(String), duration: Number(duration) || 0, error });
+  sendFiles();
+}
+// An image from an attached file, shaped like a screenshot for the brain.
+function fileImageShot(image, name) {
+  const buf = Buffer.from(image.base64, 'base64');
+  const size = FI.imageSize(buf) || { width: 0, height: 0 };
+  const dir = path.join(workDir, 'shots');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `file-${Date.now()}.${image.mediaType === 'image/png' ? 'png' : 'jpg'}`);
+  fs.writeFileSync(file, buf);
+  for (const f of fs.readdirSync(dir).filter((x) => x.startsWith('file-')).sort().slice(0, -3)) fs.rmSync(path.join(dir, f), { force: true });
+  return { path: file, base64: image.base64, mediaType: image.mediaType, width: size.width, height: size.height, canPoint: false, label: `An image from the attached file "${name}"` };
+}
+
 // "/do undo": put back every file the last task changed.
 function undoAgentTask() {
   const t = readAgentTask();
@@ -2489,7 +2540,7 @@ function playGame(name) {
 // as something the user said.
 // chain: a follow-up turn right after the previous one (skill results): the
 // previous reply keeps speaking and this one queues after it.
-async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false } = {}) {
+async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false, files = [] } = {}) {
   text = String(text || '').trim();
   if (!text) return;
   // Meiosis routing: decide the recipient before touching Prime's turn, so
@@ -2536,7 +2587,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     }
     if (route.targets.includes('prime')) text = route.text || text; // "@COre explain this"
   }
-  if (!internal && !chain && !withScreen) {
+  if (!internal && !chain && !withScreen && !files.length) {
     // Instant answers for short requests (time, music keys, lyrics card).
     const busyBefore = !!current;
     if (quickReply(text, { typed })) { if (!busyBefore) toOverlay('state', 'idle'); return; }
@@ -2553,8 +2604,9 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   turnSkills = mySkills;
   turnVia = internal ? 'COre' : typed ? 'chat' : 'voice';
   if (typed || internal) followUpPending = false;
+  const fileCtx = files.length ? fileShelf().contextFor(files) : null;
   if (!internal) {
-    addTranscript('user', text);
+    addTranscript('user', text, fileCtx ? { files: fileCtx.names } : {});
     if (presence) presence.noteInteraction();
     stopCloneSpeech(); // the user talking to COre interrupts a specialist; COre's own turns don't
     autoCapture(text);
@@ -2586,6 +2638,11 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (memory && config.data.memory.enabled !== false) {
       const mem = await memory.contextForAsync(text);
       if (mem) contextBlocks.push(mem);
+    }
+    if (fileCtx) {
+      contextBlocks.push(fileCtx.block);
+      if (fileCtx.image && !shot) shot = fileImageShot(fileCtx.image, fileCtx.imageName);
+      if (fileCtx.flags.length) toolAudit({ guard: 'injection-suspected', source: `files ${fileCtx.names.join(', ')}`, flags: fileCtx.flags });
     }
     if (plugins.length) contextBlocks.push(`[Skills] Extra skills you can use with the do tag (do NAME QUERY): ${plugins.map((p) => `${p.name} (${p.description || 'opens a link'})`).join(', ')}`);
     if (CLIPBOARD_RE.test(text)) {
@@ -2829,7 +2886,15 @@ function wireIpc() {
       .map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text, author: m.author, kind: m.kind, to: m.to })),
     cores: coresForUi(),
   } : null));
-  ipcMain.on('dock:ask', (e, text) => { if (fromDock(e)) handleUserText(text, { typed: true }); });
+  ipcMain.on('dock:ask', (e, payload) => {
+    if (!fromDock(e)) return;
+    const { text, files } = typeof payload === 'string' ? { text: payload } : (payload || {});
+    handleUserText(String(text || ''), { typed: true, files: Array.isArray(files) ? files.slice(0, 10).map(String) : [] });
+  });
+  ipcMain.handle('dock:files', (e) => (fromDock(e) ? fileShelf().list() : []));
+  ipcMain.handle('dock:filesAdd', (e, paths) => (fromDock(e) && Array.isArray(paths) ? addFiles(paths.filter((p) => typeof p === 'string' && path.isAbsolute(p))) : []));
+  ipcMain.on('dock:filesMedia', (e, { id, ...rest } = {}) => { if (fromDock(e)) fileMedia(id, rest); });
+  ipcMain.on('dock:filesRemove', (e, id) => { if (fromDock(e)) { fileShelf().remove(String(id)); sendFiles(); } });
   ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); cancelHelpers(); } });
   ipcMain.on('dock:listen', (e) => { if (fromDock(e)) startListening(false); });
   ipcMain.on('dock:openPanel', (e) => { if (fromDock(e)) togglePanel(true); });

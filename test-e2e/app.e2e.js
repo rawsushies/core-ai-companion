@@ -355,6 +355,37 @@ test('desktop agent: tools write a file and run a command (always asked), result
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('files: picked files become cards, are read, and go with the message as untrusted data', async () => {
+  const fdir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-files-'));
+  const csv = path.join(fdir, 'budget.csv');
+  fs.writeFileSync(csv, 'item,qty,price\nbrick,1200,0.45\ncement,30,7.5\n');
+  const ifc = path.join(fdir, 'house.ifc');
+  fs.writeFileSync(ifc, "ISO-10303-21;HEADER;FILE_SCHEMA(('IFC4'));ENDSEC;DATA;\n#1=IFCPROJECT('a',$,'Rumah',$,$,$,$,$,$);\n#2=IFCBUILDINGSTOREY('b',$,'Ground',$,$,$,$,$,.ELEMENT.,0.);\n#3=IFCWALL('c',$,'W',$,$,$,$,$,$);\nENDSEC;END-ISO-10303-21;");
+  const wav = path.join(fdir, 'tone.wav');
+  { const n = 16000; const b = Buffer.alloc(44 + n * 2); b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(16000, 24); b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40); for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(8000 * Math.sin(i / 8)), 44 + i * 2); fs.writeFileSync(wav, b); }
+  fs.writeFileSync(script, JSON.stringify([...baseRules, { match: '<<untrusted file budget.csv>>', reply: 'Your budget has 2 items; the IFC model is Rumah with 1 storey.' }]));
+  await (await dock.$('#file-input')).setInputFiles([csv, ifc, wav]);
+  await dock.waitForFunction(() => document.querySelectorAll('#file-cards .fcard').length === 3, null, { timeout: 10000 });
+  await dock.waitForFunction(() => [...document.querySelectorAll('#file-cards .fcard .info')].some((e) => /3 rows/.test(e.textContent)), null, { timeout: 10000 });
+  const ifcInfo = await dock.evaluate(() => [...document.querySelectorAll('#file-cards .fcard.k-bim .info')].map((e) => e.textContent)[0]);
+  assert.match(ifcInfo, /1 storey/);
+  // Audio is decoded in the dock and never stays stuck on "Decoding…".
+  await dock.waitForFunction(() => { const a = document.querySelector('#file-cards .fcard.k-audio'); return a && !a.classList.contains('media') && !a.classList.contains('reading'); }, null, { timeout: 60000 });
+  // (Without the speech model, as here, the card shows why; with it, a transcript.)
+  if (await dock.evaluate(() => document.querySelector('#file-cards .fcard.k-audio').classList.contains('ready'))) await dock.click('#file-cards .fcard.k-audio');
+  else assert.ok(!(await dock.evaluate(() => document.querySelector('#file-cards .fcard.k-audio').classList.contains('sel'))), 'a card that failed is not attached');
+  assert.match(await dock.textContent('#files-hint'), /2 attached/);
+  if (process.env.E2E_SHOTS) await dock.screenshot({ path: path.join(process.env.E2E_SHOTS, 'files-panel.png') });
+  await send('what is in these?');
+  await dock.waitForFunction(() => /Your budget has 2 items; the IFC model is Rumah/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  const chips = await dock.evaluate(() => [...document.querySelectorAll('#log .file-chip')].map((c) => c.textContent));
+  assert.deepStrictEqual(chips.slice(-2).sort(), ['budget.csv', 'house.ifc']);
+  // Remove the cards again.
+  for (let i = 0; i < 3; i++) await dock.evaluate(() => document.querySelector('#file-cards .fcard .x').click());
+  await dock.waitForFunction(() => document.getElementById('files').hidden, null, { timeout: 5000 });
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('desktop agent: off by default and refused from the phone', async () => {
   await send('/do anything at all');
   await dock.waitForFunction(() => /desktop agent is off/.test(document.getElementById('log').innerText), null, { timeout: 5000 });

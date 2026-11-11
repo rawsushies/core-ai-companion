@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### COre 2.0, part 4: File intelligence
+
+- **Drop files on the chat** (or use the paperclip) and they become Drive-style cards above the message box. Selected cards go with your messages; **Sum** summarizes one.
+- Read locally, no upload step: **PDF** (Mozilla pdf.js, scripts never run; a built-in reader as fallback), **Word/ODT**, **Excel/CSV/TSV** (every sheet as rows), **PowerPoint**, **images** (sent to a vision model, large ones shrunk), **code and text**, **IFC** (BIM: schema, project, storeys, element counts, spaces, materials) and **DXF** (CAD: version, extents, layers, entity counts, drawing text). DWG asks for a DXF export.
+- **Audio and video** are decoded in the app and transcribed by the local Whisper model (up to 15 minutes); videos also contribute four frames.
+- All file content reaches the brain fenced as untrusted data; files with instruction-like text are flagged.
+- Cards persist across restarts (up to 40, stored in the app's data folder).
+
 ### COre 2.0, part 3: Autonomous agent tools
 
 - The desktop agent can now also **run commands, read/write/move/delete files and read web pages** (Settings, Agent; on by default once the agent is enabled).

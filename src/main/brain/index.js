@@ -51,16 +51,19 @@ function screenContext(shot) {
 
 function buildPrompt(provider, text, shot) {
   if (!shot) return text;
-  const ctx = screenContext(shot);
+  // shot.label: an image from a file the user attached, not their screen.
+  const what = shot.label || 'A screenshot of my screen';
+  const ctx = shot.label ? '' : screenContext(shot);
   if (provider.id === 'claude-cli') {
     // Persistent Claude sessions get the image inline (no file-reading step).
-    if (provider.persistent) return `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.${ctx})`;
+    if (provider.persistent) return `${text}\n\n(${what} is attached, ${shot.width}x${shot.height} pixels.${ctx})`;
     const rel = path.relative(provider.workDir, shot.path).split(path.sep).join('/');
-    return `${text}\n\n(A screenshot of my screen is saved at ./${rel}, ${shot.width}x${shot.height} pixels. Read it before answering.${ctx})`;
+    return `${text}\n\n(${what} is saved at ./${rel}, ${shot.width}x${shot.height} pixels. Read it before answering.${ctx})`;
   }
   const canSee = (provider.id === 'ollama' && provider.cfg.visionModel) || (provider.id !== 'ollama' && provider.cfg.vision);
+  if (!canSee && shot.label) return `${text}\n\n(${what} was attached, but the model you are running on cannot see images. Say so briefly if it matters.)`;
   return canSee
-    ? `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.${ctx})`
+    ? `${text}\n\n(${what} is attached, ${shot.width}x${shot.height} pixels.${ctx})`
     : `${text}\n\n(I shared my screen, but the model you are running on cannot see images. Say so briefly if it matters.${ctx})`;
 }
 
