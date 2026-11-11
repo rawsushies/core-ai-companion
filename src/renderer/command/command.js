@@ -51,6 +51,23 @@
     if (row.childNodes.length) box.append(row);
   }
 
+  function renderBrains(r) {
+    const ul = $('brains');
+    ul.textContent = '';
+    if (!r) return;
+    $('route-mode').textContent = r.mode === 'auto' ? '· automatic' : '· manual order';
+    for (const p of r.providers) {
+      const li = el('li');
+      const g = el('div', 'grow');
+      const caps = [p.caps.vision ? 'sees images' : '', p.caps.local ? 'local' : '', p.firstTokenMs != null ? `${(p.firstTokenMs / 1000).toFixed(1)} s to first word` : ''].filter(Boolean).join(' · ');
+      g.append(el('div', '', `${p.name}${p.model ? ` (${p.model})` : ''}`), el('div', 'muted', p.state === 'cooling' || p.state === 'needs-login' ? `${p.reason} · retry at ${new Date(p.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : caps || `${p.ok} answers`));
+      const label = { ready: 'ready', cooling: 'resting', 'needs-login': 'needs setup', 'no-key': 'no key' }[p.state] || p.state;
+      li.append(g, el('span', `pill ${p.state === 'ready' ? 'ok' : p.state === 'no-key' ? '' : 'error'}`, label));
+      ul.append(li);
+    }
+    if (r.last) ul.append(el('li', 'muted', `Last answer: ${r.last.provider}${r.last.need && r.last.need.vision ? ' (needed vision)' : ''}`));
+  }
+
   function renderCores(list) {
     const ul = $('cores');
     ul.textContent = '';
@@ -152,6 +169,7 @@
     const b = s.brain || {};
     $('brain').textContent = `Brain: ${b.primary || 'not configured'}${b.fallback ? ` · then ${b.fallback}` : ''}`;
     renderAgent(s.agent);
+    renderBrains(s.route);
     renderCores(s.cores);
     renderTasks(s.tasks);
     renderPlaybooks(s);

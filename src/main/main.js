@@ -248,10 +248,18 @@ function setSecret(id, value) {
   else if (safeStorage.isEncryptionAvailable()) config.data.brain.secrets[id] = `enc:${safeStorage.encryptString(key).toString('base64')}`;
   else config.data.brain.secrets[id] = `plain:${key}`;
   config.save();
+  try { brainRouter.clear(id); } catch {} // a new key: try that brain again right away
 }
+
+// One router for every brain (Prime, the agent, the specialists): a provider
+// that is rate limited or down is skipped by all of them at once.
+const { Router: BrainRouter } = require('./brain/router');
+const brainRouter = new BrainRouter();
 
 function makeBrain() {
   return new Brain({
+    router: brainRouter,
+    profile: 'chat',
     config: config.data,
     workDir,
     state,
@@ -283,6 +291,7 @@ async function brainStatusList() {
       try {
         await p.detect();
         st = 'connected';
+        if ((brainRouter.h['claude-cli'] || {}).kind === 'auth') brainRouter.clear('claude-cli'); // logged in now
       } catch (err) {
         st = err.notLoggedIn ? 'login' : 'missing';
         detail = err.message;
@@ -736,6 +745,7 @@ function centerState() {
   return {
     version: app.getVersion(),
     brain: brainStatus(),
+    route: brain ? brain.routeStatus() : null,
     agent: { enabled: !!(config.data.agent || {}).enabled, running: !!(agentRunner && agentRunner.running), task: t ? { goal: String(t.goal || ''), step: t.step, status: t.status, at: t.at, changed } : null },
     cores: cores.map((c) => { const h = clones.get(c.id); return { id: c.id, name: c.name, role: c.role, color: c.color, active: c.id === 'prime' || !!h, busy: h ? h.busy : 0 }; }),
     tasks: (state.get('tasks') || []).slice(-8).reverse().map((k) => ({ id: k.id, text: String(k.text || '').slice(0, 200), status: k.status, at: k.createdAt, steps: (k.steps || []).map((x) => ({ core: (coreById(x.core) || { name: x.core }).name, status: x.status })) })),
@@ -1923,7 +1933,7 @@ const agentApprovals = new Map();
 function agentBrain() {
   if (!agentBrainInst) {
     const mem = {};
-    agentBrainInst = new Brain({ config: routedConfig('agent'), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+    agentBrainInst = new Brain({ router: brainRouter, profile: 'strong', config: routedConfig('agent'), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
   }
   return agentBrainInst;
 }
@@ -2408,13 +2418,13 @@ function routedConfig(kind) {
   const strong = b.claude && b.claude.strongModel;
   if (b.routing === 'off' || !strong || strong === b.claude.model) return config.data;
   if (!['agent', 'playbook', 'forge', 'sentinel', 'navigator', 'archivist', 'scout'].includes(kind)) return config.data;
-  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong } } };
+  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong, fallbackModel: b.claude.model } } };
 }
 
 function helperBrain(c) {
   if (!c.brain) {
     const mem = {}; // its own session id lives here: isolated from Prime's
-    c.brain = new Brain({ config: routedConfig(c.id), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+    c.brain = new Brain({ router: brainRouter, profile: 'strong', config: routedConfig(c.id), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
   }
   return c.brain;
 }
@@ -2859,7 +2869,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     else if (playbooksOn() && playbooks.length && !internal) {
       for (const s of PB.matchSkills(playbooks, text)) contextBlocks.push(PB.skillBlock(s));
     }
-    if (playbooksOn() && playbooks.length) { const cat = PB.catalog(playbooks); if (cat) contextBlocks.push(cat); }
+    // The playbook list costs tokens every turn: only when the user talks about skills.
+    if (playbooksOn() && playbooks.length && /\b(skills?|playbooks?|how-?tos?|workflows?|routines?)\b/i.test(text)) { const cat = PB.catalog(playbooks); if (cat) contextBlocks.push(cat); }
     if (plugins.length) contextBlocks.push(`[Skills] Extra skills you can use with the do tag (do NAME QUERY): ${plugins.map((p) => `${p.name} (${p.description || 'opens a link'})`).join(', ')}`);
     if (CLIPBOARD_RE.test(text)) {
       // Electron 45+: clipboard.readText() returns a Promise (older: a string).

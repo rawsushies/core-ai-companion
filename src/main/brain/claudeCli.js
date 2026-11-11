@@ -353,6 +353,14 @@ class ClaudeCliBrain {
         this.resetConversation();
         return turn({ prompt, image, tone, signal, onDelta, onTool });
       }
+      // The strong model hit its usage limit: step down to the fast model
+      // (same login, often a separate allowance) before giving up on Claude.
+      const fb = this.cfg.fallbackModel;
+      if (fb && fb !== this.cfg.model && !err.streamedAnything && /usage limit|rate.?limit|overloaded|429|529/i.test(err.message || '')) {
+        this.cfg = { ...this.cfg, model: fb, fallbackModel: '' };
+        this._killProc();
+        return turn({ prompt, image, tone, signal, onDelta, onTool });
+      }
       throw err;
     }
   }

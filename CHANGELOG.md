@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### COre 2.0, part 10: Brain router (no longer tied to Claude Code)
+
+- **Automatic brain choice** (Settings, Brain, "Choosing a brain"; default Automatic). For every request COre picks the best healthy brain based on what the request needs: an image (only brains that can see), deep work for the agent and specialists, or a fast reply for chat. Measured speed, success rate, and your preferred brain (a bonus, not a lock) also count. Manual keeps your exact order.
+- **Health and cooldowns**: each failure is classified (no key or login, usage or rate limit, overload, timeout, network, missing model) and that brain rests for a while that grows with repeats and honours the provider's Retry-After. Every brain (Prime, agent, specialists) shares what it learns, so a dead brain costs nothing on the next turn. Adding a key or logging in clears it at once.
+- **Faster failover**: once COre knows how fast a brain usually answers, it waits at most 4× that (minimum 20 s) before moving on, instead of always 90 s.
+- **Claude steps down** from the strong model to the fast one when the strong one hits its usage limit, before switching provider.
+- The command center has a **Brains** card: each brain's state (ready, resting until a time, needs setup, no key), speed and what answered last.
+- Fewer tokens per message: the playbook list is only sent when you talk about skills or playbooks.
+
 ### COre 2.0, part 9: Smart model routing
 
 - Conversation stays on the fast Claude model (Haiku by default) and its warm session is never restarted; the **desktop agent, the specialist cores and playbook writing run on the stronger model** (Sonnet by default). Settings, Brain: "Smart routing" and "Stronger Claude model"; choose "Use the model above for everything" to turn it off.

@@ -193,7 +193,10 @@ class OpenAICompatBrain extends HistoryMixin {
     if (!res.ok) {
       const t = await res.text().catch(() => '');
       if (res.status === 401 || res.status === 403) throw new Error(`${this.name} rejected the API key.`);
-      if (res.status === 429) throw new Error(`${this.name} is rate limited right now (free tier limit).`);
+      if (res.status === 429) {
+        const ra = Number(res.headers && res.headers.get && res.headers.get('retry-after'));
+        throw Object.assign(new Error(`${this.name} is rate limited right now (free tier limit).`), { retryAfterMs: Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3600) * 1000 : 0 });
+      }
       const err = new Error(`${this.name} error ${res.status}: ${t.slice(0, 200)}`);
       err.modelProblem = res.status === 404 || /model/i.test(t);
       throw err;

@@ -444,6 +444,8 @@ test('command center: shows cores, tasks, playbooks, memory, devices and the act
   const names = await cc.$$eval('#cores li .grow > div:first-child', (n) => n.map((x) => x.textContent));
   assert.deepStrictEqual(names, ['COre', 'Scout', 'Forge', 'Sentinel', 'Archivist', 'Navigator']);
   assert.match(await cc.textContent('#tasks'), /compare SQLite and LevelDB/);
+  assert.match(await cc.textContent('#brains'), /Claude \(haiku\)[\s\S]*ready/, 'the brain router shows each brain and its state');
+  assert.match(await cc.textContent('#route-mode'), /automatic/);
   assert.match(await cc.textContent('#playbooks'), /code-review → Sentinel/);
   assert.match(await cc.textContent('#playbooks'), /weekdays 08:45 \(off\)/);
   assert.match(await cc.textContent('#agent'), /Step \d+/, 'the last agent task is shown');

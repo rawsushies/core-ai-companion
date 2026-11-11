@@ -17,7 +17,11 @@ const DEFAULTS = {
     //   'openrouter'    OpenRouter (free ":free" models), key from openrouter.ai/keys
     //   'ollama'        free local model (https://ollama.com)
     //   'openai-compat' any OpenAI-style endpoint (DeepSeek, LM Studio...)
-    provider: 'claude-cli',
+    provider: 'claude-cli', // the preferred brain
+    // 'auto': COre picks the brain per request (what it needs, which brains are
+    // healthy and fast) and skips any that are down or rate limited.
+    // 'manual': always the exact order above, skipping only brains cooling down.
+    mode: 'auto',
     fallbacks: ['gemini', 'groq', 'openrouter', 'openai-compat', 'ollama'],
     claude: { command: 'claude', model: 'haiku', effort: '', strongModel: 'sonnet' },
     // Smart routing: conversation stays on the fast model; the desktop agent,
