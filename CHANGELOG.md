@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### COre 2.0, part 8: Ash and the board
+
+- **The board**: when an explanation deserves it, COre crumbles into ash, streams its smoke out into a board about **a third of the screen wide** beside itself, writes a title and up to four points in smoke while the crisp text condenses in (blur to sharp, points one by one), holds it while talking them through, then pulls the smoke back and reforms with a shockwave. The brain triggers it with `[[board TITLE; POINT; POINT]]`; demo key **B**.
+- **Ash dispersion**: grey ash with glowing embers that drift out and down through the smoke flow; used for the board transition and available to other effects.
+- After the words appear, the smoke settles into the board's frame so it never doubles the text. Reduced-motion skips the ash and the shockwave.
+- Fixed: the smoke jumped when COre's window grew or moved (for example when pointing); particles now stay put on the desktop.
+
 ### COre 2.0, part 7: Command center
 
 - **One window for everything COre is doing** (tray → Command center, the button in quick settings, or `/center`): the desktop agent's task with Stop / Resume / Undo, the six cores and which are working, recent shared tasks, playbooks with their next scheduled run and a Run button, memory health (counts, recently replaced facts, Tidy up now), phone / Google Drive / backup status, recent files, and a filterable activity log with warnings highlighted.

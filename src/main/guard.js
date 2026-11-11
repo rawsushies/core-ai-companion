@@ -14,7 +14,7 @@ const PATTERNS = [
   ['override', /\b(?:ignore|disregard|forget|override)\b.{0,30}\b(?:previous|prior|above|earlier|all|any|your)\b.{0,20}\b(?:instructions?|rules?|prompts?|messages?)\b/i],
   ['role', /\b(?:you are now|from now on you are|act as|pretend to be|new instructions?:|system prompt|developer mode|jailbreak)\b/i],
   ['spoof', /^\s*(?:system|assistant|developer)\s*:/im],
-  ['tags', /\[\[\s*(?:act|do|open|copy|remember|forget|read|list|find|delegate|clone)\b/i],
+  ['tags', /\[\[\s*(?:act|do|open|copy|remember|forget|read|list|find|delegate|clone|board)\b/i],
   ['exfil', /\b(?:send|post|upload|email|paste|reveal|print)\b.{0,40}\b(?:password|passwords|api[ -]?key|token|secret|credentials?|private key|seed phrase)\b/i],
   ['exec', /\b(?:run|execute|type|paste)\b.{0,30}\b(?:this|the following|these)\b.{0,20}\b(?:command|script|code)\b|powershell\s+-e(?:nc|ncodedcommand)?\s|\brm\s+-rf\s+\/|curl\s+[^|\n]{0,200}\|\s*(?:ba|z)?sh\b/i],
 ];

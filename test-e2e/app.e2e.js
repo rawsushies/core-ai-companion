@@ -453,6 +453,30 @@ test('command center: shows cores, tasks, playbooks, memory, devices and the act
   assert.ok(!app.windows().some((p) => p.url().includes('/command/')), 'Esc closes it');
 });
 
+test('board: COre crumbles to ash, spreads into a board a third of the screen wide, then reforms', async () => {
+  fs.writeFileSync(script, JSON.stringify([{ match: 'explain the release steps', reply: '[[board Release in three steps; Freeze the branch; Run every test; Tag and publish]] First we freeze the branch. Then we run every test. Then we tag it and publish.' }, ...baseRules]));
+  await send('explain the release steps');
+  await overlay.waitForFunction(() => window.__coreBoard().ashW > 0.5, null, { timeout: 15000 });
+  const shots = process.env.E2E_SHOTS;
+  if (shots) await overlay.screenshot({ path: path.join(shots, 'board-1-ash.png') });
+  await overlay.waitForFunction(() => { const b = window.__coreBoard(); return b.shown && b.boardW > 0.9; }, null, { timeout: 10000 });
+  const b = await overlay.evaluate(() => window.__coreBoard());
+  assert.strictEqual(b.title, 'Release in three steps');
+  assert.deepStrictEqual(b.points, ['Freeze the branch', 'Run every test', 'Tag and publish']);
+  const screenW = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().size.width);
+  assert.ok(b.rect.w >= screenW / 3 - 2 || b.rect.w === 680, `about a third of the screen (${b.rect.w} of ${screenW})`);
+  const text = await overlay.evaluate(() => document.getElementById('board').innerText);
+  assert.match(text, /Release in three steps[\s\S]*Freeze the branch[\s\S]*Tag and publish/);
+  if (shots) { await wait(1400); await overlay.screenshot({ path: path.join(shots, 'board-2-spread.png') }); }
+  // The words are not spoken as tags, and the chat shows the plain reply.
+  await dock.waitForFunction(() => /First we freeze the branch/.test(document.getElementById('log').innerText) && !/\[\[board/.test(document.getElementById('log').innerText), null, { timeout: 10000 });
+  // It pulls back together on its own.
+  await overlay.waitForFunction(() => { const s = window.__coreBoard(); return !s.title && s.boardW < 0.02; }, null, { timeout: 40000 });
+  if (shots) { await wait(600); await overlay.screenshot({ path: path.join(shots, 'board-3-reformed.png') }); }
+  assert.ok(await overlay.evaluate(() => document.getElementById('board').hidden));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('desktop agent: off by default and refused from the phone', async () => {
   await send('/do anything at all');
   await dock.waitForFunction(() => /desktop agent is off/.test(document.getElementById('log').innerText), null, { timeout: 5000 });

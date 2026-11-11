@@ -117,6 +117,13 @@
   // drawn shape (64 x 32 RG32F texture of positions in -1..1).
   uniform sampler2D uShapeTex;
   uniform float uShape;
+  // Board mode: the shape spreads over a box (centre xy, half size zw, css px)
+  // instead of the orb. uAsh 0..1 scatters the smoke as drifting ash.
+  uniform vec4  uShapeBox;
+  uniform float uAsh;
+  // The window (stage) moved on screen this frame: keep particles where they
+  // were on the desktop instead of jumping with the window.
+  uniform vec2  uStageShift;
   ${NOISE}
 
   vec2 rot2(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(v.x * c - v.y * s, v.x * s + v.y * c); }
@@ -156,7 +163,7 @@
     float seed = aMeta.y;
     float maxLife = aMeta.z;
     float layer = floor(aMeta.w + 0.01);
-    vec3 pos = aPos;
+    vec3 pos = aPos - vec3(uStageShift, 0.0);
     vec3 vel = aVel;
     vec3 h = hash31(seed * 977.3);
 
@@ -289,7 +296,23 @@
         vec2 sp = texelFetch(uShapeTex, ivec2(idx % 64, idx / 64), 0).xy;
         vec3 tgt = uCenter + vec3(sp * uR * 1.6, (h.z - 0.5) * uR * 0.08)
                  + vec3(sin(uTime * 2.1 + seed * 40.0), cos(uTime * 1.7 + seed * 33.0), 0.0) * uR * 0.008;
-        desired = mix(desired, (tgt - pos) * 12.0 + vec3(uCenterVel, 0.0), uShape);
+        if (uShapeBox.z > 0.0) {
+          // Each particle reaches the board after its own delay: the smoke
+          // streams out of the orb instead of teleporting.
+          tgt = vec3(uShapeBox.xy + sp * uShapeBox.zw, (h.z - 0.5) * uR * 0.05)
+              + vec3(sin(uTime * 1.3 + seed * 40.0), cos(uTime * 1.1 + seed * 33.0), 0.0) * uR * 0.012;
+        }
+        desired = mix(desired, (tgt - pos) * (uShapeBox.z > 0.0 ? mix(3.0, 9.0, fract(seed * 91.3)) : 12.0) + vec3(uCenterVel, 0.0), uShape);
+      }
+      // Ash: the smoke breaks apart and drifts out and down like burnt paper,
+      // curling in the flow; embers rise a little before they fall.
+      if (uAsh > 0.001) {
+        float ember = step(0.92, fract(seed * 97.3));
+        vec3 ashVel = n * uR * (1.6 + 2.4 * h.x)
+                    + flow * uR * 1.2
+                    + vec3(0.0, uR * mix(1.4, -0.9, ember) * (0.6 + h.y), 0.0)
+                    + vec3(sin(uTime * 3.0 + seed * 17.0), 0.0, 0.0) * uR * 0.6;
+        desired = mix(desired, ashVel, uAsh * (1.0 - 0.6 * shapeK));
       }
       // Shockwave: an expanding ring pushes the smoke outward as it passes.
       if (uPulse.w > 0.0) {
@@ -334,6 +357,7 @@
   uniform float uForm;
   uniform vec4  uPulse;
   uniform float uShape;
+  uniform float uAsh;
   void main() {
     gl_Position = vec4(aPos.x / uView.x * 2.0 - 1.0, 1.0 - aPos.y / uView.y * 2.0, 0.0, 1.0);
     float life = aMeta.x, seed = aMeta.y, maxL = aMeta.z;
@@ -345,6 +369,9 @@
     float twinkle = 0.55 + 0.45 * sin(uTime * (2.0 + 6.0 * fract(seed * 53.1)) + seed * 91.0);
     gl_PointSize = max(1.0, uSize * uPx * (0.5 + 0.8 * fract(seed * 311.7)) * (1.0 + 0.6 * spark));
     vec3 col = mix(uTint, vec3(1.0), 0.3 * spark + 0.1 * uAmp);
+    // Ash greys the smoke; a few embers glow orange while it scatters.
+    float ember = step(0.92, fract(seed * 97.3));
+    col = mix(col, mix(vec3(0.58, 0.6, 0.58), vec3(1.0, 0.52, 0.18), ember), uAsh * 0.85);
     // The shockwave front lights the smoke up as it passes.
     float flash = 0.0;
     if (uPulse.w > 0.0) {
@@ -353,6 +380,7 @@
     }
     float shapeDim = mix(1.0, fract(seed * 331.7) < 0.72 && dust < 0.5 ? 1.35 : 0.04, uShape);
     float a = shapeDim * (1.0 + flash) * mix(0.35, 1.0, uForm) * fade * front * (0.022 * (1.0 - 0.5 * dust) * (1.0 + 4.0 * tipGlow) + 0.22 * spark * twinkle) * (1.0 + 1.1 * uAmp + 0.6 * uGlow) * uBright;
+    a *= 1.0 + uAsh * (ember * 2.5 - 0.25);
     vCol = vec4(col * a, a);
   }`;
 
@@ -629,6 +657,13 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(su.uShapeTex, 5);
       gl.uniform1f(su.uShape, s.shape || 0);
+      const bx = s.board;
+      gl.uniform4f(su.uShapeBox, bx ? bx.x : 0, bx ? bx.y : 0, bx ? bx.hw : 0, bx ? bx.hh : 0);
+      gl.uniform1f(su.uAsh, s.ash || 0);
+      const og = s.origin;
+      if (og && this.lastOrigin) gl.uniform2f(su.uStageShift, og.x - this.lastOrigin.x, og.y - this.lastOrigin.y);
+      else gl.uniform2f(su.uStageShift, 0, 0);
+      this.lastOrigin = og ? { x: og.x, y: og.y } : null;
       const pl = s.pulse;
       gl.uniform4f(su.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
       gl.uniform1f(su.uSpin, s.spin || 0);
@@ -690,6 +725,7 @@
       gl.uniform1f(pu.uBright, 24000 / n); // same overall brightness with fewer particles
       gl.uniform1f(pu.uForm, s.form === undefined ? 1 : s.form);
       gl.uniform1f(pu.uShape, s.shape || 0);
+      gl.uniform1f(pu.uAsh, s.ash || 0);
       gl.uniform4f(pu.uPulse, pl ? pl.x : 0, pl ? pl.y : 0, pl ? pl.age : 0, pl ? pl.strength : 0);
       gl.bindVertexArray(this.drawVao[this.read]);
       gl.drawArrays(gl.POINTS, 0, n);

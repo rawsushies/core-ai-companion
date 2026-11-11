@@ -28,6 +28,7 @@ const Shapes = require('../../renderer/overlay/shapes');
 //   [[remind WHEN TEXT]]     reminder / timer, WHEN = 10m, 90s, 1h30m, 18:30, 7pm
 //   [[open URL]]             offer a website (the user confirms with a click)
 //   [[copy TEXT]]            offer to copy text to the clipboard (one click)
+//   [[board TITLE; A; B]]    spread into a big board beside COre with a title and up to 4 points
 function parseTag(body) {
   const raw = body.trim();
   const m = /^([a-z]+)\s*([\s\S]*)$/i.exec(raw);
@@ -74,6 +75,11 @@ function parseTag(body) {
     return /^https?:\/\/[^\s]+$/i.test(url) ? { name, url } : null;
   }
   if (name === 'copy' && rest) return { name, text: rest.slice(0, 2000) };
+  if (name === 'board' && rest) {
+    const parts = rest.split(/[;|]/).map((x) => x.trim()).filter(Boolean);
+    const b = Shapes.boardText(parts[0], parts.slice(1));
+    return b.title && b.points.length ? { name, ...b } : null;
+  }
   if (name === 'act' && rest) return { name, json: rest.slice(0, 2000) }; // desktop agent step (agent.js validates it)
   return null;
 }
@@ -123,7 +129,7 @@ class TagStreamParser {
   flush() {
     const out = [];
     // An unclosed run is plain text, unless it's clearly a cut-off tag.
-    const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|delegate|do|read|list|find|mood|remember|forget|remind|open|copy)\b/i.test(this.buf);
+    const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|delegate|do|read|list|find|mood|remember|forget|remind|open|copy|board)\b/i.test(this.buf);
     const rest = cutTag ? '' : this.buf;
     pushText(out, rest);
     this.buf = '';

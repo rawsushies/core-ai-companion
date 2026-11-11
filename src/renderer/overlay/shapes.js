@@ -166,5 +166,66 @@
     return out;
   }
 
-  return { NAMES, POINTS, resolve, exprFor, points, EXPR };
+  // ---------------------------------------------------------------- board
+  // COre spreads into a board to explain something: a title and up to four
+  // short points. The smoke traces the frame (about a third of the particles)
+  // and the strokes of the words; the crisp text is drawn by the overlay.
+  function boardText(title, items) {
+    const clean = (t, n) => String(t || '').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+    return { title: clean(title, 60), points: (Array.isArray(items) ? items : []).map((x) => clean(x, 90)).filter(Boolean).slice(0, 4) };
+  }
+
+  function sample(img, W, H, n, seed, out, offset) {
+    const lit = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (img[(y * W + x) * 4 + 3] > 90) lit.push(x, y);
+    const count = lit.length / 2;
+    let s = seed;
+    for (let i = 0; i < n; i++) {
+      s = (s * 1103515245 + 12345) >>> 0;
+      const k = count ? s % count : 0;
+      const px = count ? lit[k * 2] + ((s >>> 8) % 100) / 100 : W / 2;
+      const py = count ? lit[k * 2 + 1] + ((s >>> 16) % 100) / 100 : H / 2;
+      out[(offset + i) * 2] = (px / W) * 2 - 1;
+      out[(offset + i) * 2 + 1] = (py / H) * 2 - 1;
+    }
+  }
+
+  // aspect = width / height of the board. Returns POINTS * 2 coords in -1..1.
+  // frameOnly: every particle on the frame (after the crisp text has condensed,
+  // the smoke settles into the border so it never doubles the words).
+  function boardPoints({ title, points: items }, aspect, makeCanvas, { frameOnly = false } = {}) {
+    const W = 384;
+    const H = Math.max(120, Math.round(W / Math.max(0.8, Math.min(3, aspect))));
+    const mk = (w, h) => (makeCanvas ? makeCanvas(w, h) : new OffscreenCanvas(w, h));
+    const frame = mk(W, H).getContext('2d', { willReadFrequently: true });
+    frame.strokeStyle = '#fff';
+    frame.lineWidth = 3;
+    frame.beginPath();
+    if (frame.roundRect) frame.roundRect(4, 4, W - 8, H - 8, 18); else frame.rect(4, 4, W - 8, H - 8);
+    frame.stroke();
+    const words = mk(W, H).getContext('2d', { willReadFrequently: true });
+    words.fillStyle = '#fff';
+    words.strokeStyle = '#fff';
+    words.textBaseline = 'middle';
+    const pad = 22;
+    const rows = 1 + items.length;
+    const rowH = (H - pad * 2) / Math.max(3, rows + 0.4);
+    words.font = `bold ${Math.round(rowH * 0.62)}px sans-serif`;
+    words.fillText(title, pad, pad + rowH * 0.5, W - pad * 2);
+    words.lineWidth = 2;
+    words.beginPath(); words.moveTo(pad, pad + rowH * 1.02); words.lineTo(Math.min(W - pad, pad + words.measureText(title).width), pad + rowH * 1.02); words.stroke();
+    words.font = `${Math.round(rowH * 0.5)}px sans-serif`;
+    items.forEach((t, i) => {
+      const y = pad + rowH * (1.55 + i);
+      words.beginPath(); words.arc(pad + 5, y, 4, 0, TAU); words.fill();
+      words.fillText(t, pad + 18, y, W - pad * 2 - 18);
+    });
+    const out = new Float32Array(POINTS * 2);
+    const nFrame = frameOnly ? POINTS : Math.round(POINTS * 0.32);
+    sample(frame.getImageData(0, 0, W, H).data, W, H, nFrame, 7654321, out, 0);
+    sample(words.getImageData(0, 0, W, H).data, W, H, POINTS - nFrame, 1234567, out, nFrame);
+    return out;
+  }
+
+  return { NAMES, POINTS, resolve, exprFor, points, EXPR, boardText, boardPoints };
 });
