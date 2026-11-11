@@ -315,6 +315,19 @@ test('desktop agent: /do clicks and types into another window, with step approva
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
 });
 
+test('emergency stop: the global hotkey halts a running agent task at once', { skip: process.platform !== 'linux' || !require('fs').existsSync('/usr/bin/xdotool') }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([...baseRules, { match: 'Step 1 of', reply: 'Waiting. [[act {"type":"click","x":5,"y":5,"why":"test"}]]' }]));
+  await send('/do something long');
+  await dock.waitForSelector('#agent-card:not([hidden])', { timeout: 20000 });
+  require('child_process').execFileSync('xdotool', ['key', 'ctrl+alt+shift+x']);
+  await dock.waitForFunction(() => /Emergency stop/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  await dock.waitForFunction(() => /Agent stopped/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'the approval card is gone');
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('desktop agent: off by default and refused from the phone', async () => {
   await send('/do anything at all');
   await dock.waitForFunction(() => /desktop agent is off/.test(document.getElementById('log').innerText), null, { timeout: 5000 });

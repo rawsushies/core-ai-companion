@@ -23,6 +23,7 @@ const SECTIONS = [
       { key: 'hotkeys.listenWithScreen', label: 'Talk about my screen', type: 'hotkey' },
       { key: 'hotkeys.panel', label: 'Show / hide chat', type: 'hotkey' },
       { key: 'hotkeys.hide', label: 'Hide / show COre', type: 'hotkey' },
+      { key: 'hotkeys.emergency', label: 'Emergency stop (stops everything at once)', type: 'hotkey' },
     ],
   },
   {

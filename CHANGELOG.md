@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### COre 2.0, part 2: Security core
+- **Emergency stop:** Ctrl+Alt+Shift+X (changeable) or the tray's "Emergency stop" halts everything at once:
+  - the desktop agent
+  - every running reply
+  - helpers' work and speech
+  - song reading
+  - the phone link
+  - pending approvals
+
+  It's logged, and COre shows what it stopped.
+- **Prompt-injection guard:** file contents reach the brain fenced as data, with COre's own action syntax broken, so
+  a document can't trigger an action. Instruction-like text ("ignore previous instructions", "send your API key",
+  "run this command…") is flagged in the chat and in the audit log.
+
 ### COre 2.0, part 1: Memory Intelligence Engine
 - Every memory now has a kind (profile, preference, project, history, fact), a confidence score, its sources and
   its history.

@@ -905,6 +905,7 @@ function startMemoryEngine() {
 // ---------------------------------------------------------------- Google Drive memory (optional)
 // See gdrive.js. Off until you add your OAuth client and connect.
 const GD = require('./gdrive');
+const GUARD = require('./guard');
 const { Embedder } = require('./embed');
 let drive = null;
 let driveSyncTimer = null;
@@ -1192,6 +1193,7 @@ function createTrayMenu() {
     { label: 'Conversation history', click: () => togglePanel(true) },
     { type: 'separator' },
     { label: 'Hide / show COre', click: toggleOrb },
+    { label: 'Emergency stop (stop everything)', click: () => emergencyStop('tray menu') },
     { label: 'New conversation', click: resetConversation },
     { label: 'Call helpers back', click: mergeAllClones },
     { label: 'Show me around (tour)', click: runTour },
@@ -1644,6 +1646,24 @@ function showGlance(req) {
   }, 6000);
 }
 
+// ---------------------------------------------------------------- emergency stop
+// One hotkey (Ctrl+Alt+Shift+X by default) or the tray: the agent, every
+// running brain turn, helpers' work, speech, media readers, the phone server
+// and all pending approvals stop at once. Logged.
+function emergencyStop(reason = 'emergency stop') {
+  try { stopAgent(reason); } catch {}
+  try { abortCurrent(); } catch {}
+  try { toOverlay('speech:stop'); } catch {}
+  for (const c of clones.values()) { try { if (c.ac) c.ac.abort(); toClone(c, 'speech:stop'); } catch {} }
+  try { stopGlanceReader(); hideGlance(); } catch {}
+  try { if (companion) companion.stop(); } catch {}
+  try { for (const [id, a] of agentApprovals) { a.resolve('no'); agentApprovals.delete(id); } } catch {}
+  toDock('dock:agent-approve', null);
+  toolAudit({ event: 'emergency-stop', reason });
+  addTranscript('system', `Emergency stop: everything COre was doing has been stopped (${reason}). The phone link is off until you restart COre or turn it on again.`, { kind: 'error' });
+  toOverlay('attention', { level: 'urgent', title: 'Stopped' });
+}
+
 // ---------------------------------------------------------------- desktop agent
 // Off by default (Settings, Agent). Started only by you: "/do TASK" in the chat.
 // Every step is shown; actions that change something need your OK (or "Allow
@@ -1839,7 +1859,14 @@ function runToolTag(item, coreId) {
   const name = coreById(coreId) ? coreById(coreId).name : 'COre';
   toolAudit({ core: coreId, tool: item.tool, arg: String(item.arg).slice(0, 200), ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
   addTranscript('system', r.ok ? `${name} ${r.summary}` : `${name} couldn't ${item.tool} ${item.arg}: ${r.error}`, { author: coreId, kind: r.ok ? 'progress' : 'error' });
-  return r.ok ? `${item.tool} ${item.arg}:\n${r.text}` : `${item.tool} ${item.arg} failed: ${r.error}`;
+  if (!r.ok) return `${item.tool} ${item.arg} failed: ${r.error}`;
+  // File contents are data, never instructions (prompt-injection guard).
+  const g = GUARD.untrusted(r.text, `project ${item.tool === 'read' ? 'file' : 'listing'} ${String(item.arg).slice(0, 80)}`);
+  if (g.flags.length) {
+    toolAudit({ core: coreId, guard: 'injection-suspected', source: String(item.arg).slice(0, 200), flags: g.flags });
+    addTranscript('system', `Heads up: ${item.arg} contains text that looks like instructions (${g.flags.join(', ')}). ${name} treats it as data only.`, { author: coreId, kind: 'error' });
+  }
+  return `${item.tool} ${item.arg}:\n${g.text}`;
 }
 
 // Runs only when the user clicks the button in the chat.
@@ -2666,6 +2693,7 @@ function registerHotkeys() {
   bind(hk.listenWithScreen, () => { followCursorDisplay(); startListening(true); }, 'talk about screen');
   bind(hk.panel, () => { followCursorDisplay(); toggleDock(); }, 'chat');
   bind(hk.hide, toggleOrb, 'hide orb');
+  bind(hk.emergency, () => emergencyStop('you pressed the emergency hotkey'), 'emergency stop');
 }
 
 // ---------------------------------------------------------------- IPC

@@ -134,6 +134,7 @@ const DEFAULTS = {
     listenWithScreen: 'CommandOrControl+Alt+S',
     panel: 'CommandOrControl+Alt+C',
     hide: 'CommandOrControl+Alt+H',
+    emergency: 'CommandOrControl+Alt+Shift+X', // stop everything COre is doing (agent, replies, helpers, phone link)
   },
   update: {
     enabled: true,
