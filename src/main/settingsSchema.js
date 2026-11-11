@@ -86,6 +86,7 @@ const SECTIONS = [
       { key: 'tools.projectRoot', label: 'Project folder COre may read (never change)', type: 'folder', optional: true },
       { key: 'tools.enabled', label: 'Let COre and its cores read it', type: 'toggle' },
       { key: 'tools.allowWrites', label: 'Let cores propose changes (you review a diff and approve each one)', type: 'toggle' },
+      { key: 'meiosis.autoReview', label: 'Sentinel reviews every change Forge proposes before you apply it', type: 'toggle' },
     ],
   },
   {

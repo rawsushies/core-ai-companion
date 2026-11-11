@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### COre 2.0, part 5: Collaborating specialists
+
+- Two new cores: **Archivist** (memory and files: answers from what COre remembers, past work and the file shelf, cites its sources, and points out stale or conflicting memories) and **Navigator** (desktop and browser operator: plans the clicks and shortcuts, and leaves a ready `/do …` in the message box for you to start).
+- **Sentinel reviews Forge**: every file change Forge proposes gets an automatic review with a verdict (Settings, Projects; on by default). In a shared task with both, Sentinel reviews Forge's result instead of working blind in parallel.
+- Prime routes `[[delegate]]` work to the new roles by topic.
+
 ### COre 2.0, part 4: File intelligence
 
 - **Drop files on the chat** (or use the paperclip) and they become Drive-style cards above the message box. Selected cards go with your messages; **Sum** summarizes one.

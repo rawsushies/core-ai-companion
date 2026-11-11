@@ -855,6 +855,9 @@
   window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dropEl.hidden = true; });
   window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; dropEl.hidden = true; if (e.dataTransfer && e.dataTransfer.files.length) addFileObjects(e.dataTransfer.files); });
 
+  // A core suggests a command (Navigator's "/do ..."): it waits in the box for your Enter.
+  if (api.onSuggest) api.onSuggest((t) => { if (!input.value.trim() && typeof t === 'string') { input.value = t.slice(0, 500); autosize(); input.focus(); } });
+
   api.onReset(() => { log.textContent = ''; streaming = null; reportSize(); });
   api.onFocus(() => input.focus());
   api.onSettings(applySettings);

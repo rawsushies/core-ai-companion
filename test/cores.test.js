@@ -4,11 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { buildCores, findCore, parseMentions, roleForTask } = require('../src/main/cores');
 
-test('four cores total, Prime first, specialists with distinct colours and voices', () => {
+test('six cores total, Prime first, specialists with distinct colours and voices', () => {
   const c = buildCores();
-  assert.deepStrictEqual(c.map((x) => x.id), ['prime', 'scout', 'forge', 'sentinel']);
-  assert.strictEqual(new Set(c.map((x) => x.color)).size, 4);
-  assert.strictEqual(new Set(c.slice(1).map((x) => x.voice)).size, 3);
+  assert.deepStrictEqual(c.map((x) => x.id), ['prime', 'scout', 'forge', 'sentinel', 'archivist', 'navigator']);
+  assert.strictEqual(new Set(c.map((x) => x.color)).size, 6);
+  assert.strictEqual(new Set(c.slice(1).map((x) => x.voice)).size, 5);
   assert.strictEqual(c[0].name, 'COre');
 });
 
@@ -25,7 +25,7 @@ test('overrides are validated; ambiguous aliases belong to nobody', () => {
   assert.strictEqual(forge.name, 'Forge', 'invalid name ignored');
   assert.strictEqual(forge.color, '#ff7a24');
   assert.strictEqual(forge.voice, 'bm_george');
-  assert.strictEqual(c.length, 4, 'unknown ids ignored');
+  assert.strictEqual(c.length, 6, 'unknown ids ignored');
   assert.strictEqual(findCore(c, 'pf').id, 'scout');
   assert.strictEqual(findCore(c, 'shared'), null);
   assert.strictEqual(findCore(c, 'scout').id, 'scout', 'default alias kept');
@@ -48,6 +48,9 @@ test('delegated tasks pick a sensible specialist', () => {
   assert.strictEqual(roleForTask('review the login code for security bugs'), 'sentinel');
   assert.strictEqual(roleForTask('research which charting library is lighter'), 'scout');
   assert.strictEqual(roleForTask('write a haiku about rain'), 'forge');
+  assert.strictEqual(roleForTask('what do you remember about my diet'), 'archivist');
+  assert.strictEqual(roleForTask('open the browser and go to my bank statements page'), 'navigator');
+  assert.deepStrictEqual(parseMentions(buildCores(), '@Archivist @nav where is it').targets, ['archivist', 'navigator']);
 });
 
 test('specialist prompts keep the user text intact and name the role', () => {

@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('dock', {
   filesMedia: (id, data) => ipcRenderer.send('dock:filesMedia', { id: String(id), ...data }),
   filesRemove: (id) => ipcRenderer.send('dock:filesRemove', String(id)),
   onFiles: on('dock:files'),
+  onSuggest: on('dock:suggest'),
   stop: () => ipcRenderer.send('dock:stop'),
   listen: () => ipcRenderer.send('dock:listen'),
   openPanel: () => ipcRenderer.send('dock:openPanel'),

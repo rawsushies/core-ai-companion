@@ -40,7 +40,10 @@ test.before(async () => {
   fs.writeFileSync(script, JSON.stringify(baseRules = [
     { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
     { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
+    { match: 'Review the file changes', reply: 'Looks fine.\n\nThe readme change is plain text. Verdict: ship it' },
     { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
+    { match: 'open my downloads folder', reply: 'I would open the file manager.\n\n1. Open Files\n2. Click Downloads\nTask: open the Downloads folder in the file manager' },
+    { match: 'Memory stats\\] \\d+ memories', reply: 'From memory.\n\nArchivist checked: green tea, noted earlier.' },
   ]));
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
     orb: { graphics: 'software' },
@@ -270,6 +273,21 @@ test('approved file changes: Forge proposes, nothing is written until Apply, Und
   await dock.click('.msg.proposal button:has-text("Undo")');
   await dock.waitForFunction(() => /Undone|undone/.test(document.querySelector('.msg.proposal').innerText), null, { timeout: 5000 });
   assert.strictEqual(fs.readFileSync(path.join(project, 'readme.txt'), 'utf8'), 'old readme\n');
+  // Sentinel reviewed Forge's change on its own.
+  await dock.waitForFunction(() => /Sentinel is reviewing Forge/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
+  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-sentinel .msg')].some((m) => /Verdict: ship it/.test(m.innerText)), null, { timeout: 20000 });
+});
+
+test('Navigator plans a desktop task and leaves /do in the box for you to start', async () => {
+  await send('@Navigator open my downloads folder');
+  await dock.waitForFunction(() => /Navigator can do this on your desktop/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  assert.strictEqual(await dock.inputValue('#input'), '/do open the Downloads folder in the file manager');
+  await dock.fill('#input', '');
+});
+
+test('Archivist answers from memory and the file shelf', async () => {
+  await send('@Archivist what do you know about my tea');
+  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-archivist .msg')].some((m) => /Archivist checked: green tea/.test(m.innerText)), null, { timeout: 20000 });
 });
 
 test('the History panel shows the conversation', async () => {

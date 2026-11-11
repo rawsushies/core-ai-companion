@@ -2267,7 +2267,29 @@ function disposeHelperBrain(c) {
 
 // Send one message to a specialist. Messages to the same core run one at a
 // time (its context is sequential). Resolves { ok, reply?, error? }.
-function askCore(coreId, text, { task } = {}) {
+// Archivist works from memory, past work and the files you dropped in.
+async function archivistContext(text) {
+  const parts = [];
+  if (memory && config.data.memory.enabled !== false) {
+    const mem = await memory.contextForAsync(text, 14);
+    if (mem) parts.push(mem);
+    const st = memory.stats();
+    parts.push(`[Memory stats] ${st.total} memories (${Object.entries(st.byKind).map(([k, n]) => `${k} ${n}`).join(', ')}), ${st.pinned} pinned.`);
+    if (memory.conflicts.length) parts.push(`[Recently replaced memories]\n${memory.conflicts.slice(0, 8).map((c) => `- "${c.was}" was replaced by "${c.now}"`).join('\n')}`);
+  }
+  const ready = fileShelf().list().filter((f) => f.status === 'ready');
+  if (ready.length) {
+    parts.push(`[Files on the shelf] ${ready.map((f) => `${f.name} (${f.kind}${f.info ? `, ${f.info}` : ''})`).join('; ')}`);
+    const low = text.toLowerCase();
+    const named = ready.filter((f) => low.includes(f.name.toLowerCase()) || low.includes(f.name.toLowerCase().replace(/\.[^.]+$/, '')));
+    const pick = named.length ? named : ready.length <= 3 ? ready : [];
+    const fc = pick.length ? fileShelf().contextFor(pick.map((f) => f.id), { budget: 20000 }) : null;
+    if (fc) parts.push(fc.block);
+  }
+  return parts.join('\n\n');
+}
+
+function askCore(coreId, text, { task, review = false } = {}) {
   const c = ensureHelper(coreId);
   if (!c) return Promise.resolve({ ok: false, error: 'not available' });
   clearTimeout(c.mergeTimer);
@@ -2279,7 +2301,8 @@ function askCore(coreId, text, { task } = {}) {
     const ac = new AbortController();
     c.ac = ac;
     try {
-      const context = memory && config.data.memory.enabled !== false ? (await memory.contextForAsync(text)) || '' : '';
+      const context = c.id === 'archivist' ? await archivistContext(text)
+        : memory && config.data.memory.enabled !== false ? (await memory.contextForAsync(text)) || '' : '';
       // Up to 3 rounds of read-only project tools before the final answer.
       let msg = CL.corePrompt(c.core, text, task);
       let reply = ''; let truncated = false; let error = null;
@@ -2297,6 +2320,18 @@ function askCore(coreId, text, { task } = {}) {
       const details = full.split(/\n\s*\n/).slice(1).join('\n\n').trim();
       addTranscript('core', details || full || '(no answer)', { author: c.id, ...(task ? { task: task.id } : {}) });
       offerProposals(full, c.id);
+      // Navigator hands a plan to the desktop agent: you start it (Enter).
+      const navTask = c.id === 'navigator' && /^\s*Task:\s*(.{4,300})$/im.exec(full);
+      if (navTask) {
+        const goal = navTask[1].trim().replace(/^["']|["']$/g, '');
+        addTranscript('system', `${c.name} can do this on your desktop. Press Enter to start: /do ${goal}`, { author: c.id, kind: 'progress' });
+        toDock('dock:suggest', `/do ${goal}`);
+      }
+      // Forge's file changes get a second pair of eyes before you apply them.
+      if (c.id === 'forge' && !review && (config.data.meiosis || {}).autoReview !== false && extractProposals(full).length) {
+        addTranscript('system', `${coreById('sentinel').name} is reviewing ${c.name}'s changes.`, { author: 'sentinel', kind: 'progress' });
+        askCore('sentinel', `Review the file changes ${c.name} just proposed for this request: "${text.slice(0, 400)}". Check correctness, edge cases, security and anything that breaks existing behaviour. Do not rewrite the files.\n\n${full.slice(0, 12000)}`, { task, review: true });
+      }
       if (truncated) addTranscript('system', `${c.name}'s answer was cut off (${error}).`, { author: c.id, kind: 'error' });
       toClone(c, 'state', 'idle');
       floor.request(c.id, () => speakForClone(c, CL.spokenSummary(full) || 'Done.'));
@@ -2350,9 +2385,24 @@ async function runSharedTask(targets, text) {
   addTranscript('system', `Shared task: ${names} working in parallel. COre will sum up.`, { author: 'prime', kind: 'progress', task: task.id });
   for (const step of task.steps) step.status = 'running';
   glanceTask(task);
+  // Collaboration: when Forge and Sentinel are both on a task, Sentinel reviews
+  // Forge's result instead of working blind in parallel.
+  const forgeStep = task.steps.find((s) => s.core === 'forge');
+  let forgeResolve;
+  const forgeDone = new Promise((res) => { forgeResolve = res; });
+  const chained = (step) => step.core === 'sentinel' && forgeStep;
   await Promise.all(task.steps.map(async (step) => {
     saveTask(task);
-    const r = await askCore(step.core, text, { task });
+    let r;
+    if (chained(step)) {
+      const fr = await forgeDone;
+      r = fr.ok
+        ? await askCore('sentinel', `The user asked: ${text}\n${coreById('forge').name} produced this. Review it: what is wrong or missing, and how to fix it.\n\n${String(fr.reply || '').slice(0, 8000)}`, { task, review: true })
+        : await askCore('sentinel', text, { task });
+    } else if (step.core === 'forge') {
+      r = await askCore('forge', text, { task, review: task.steps.some((s) => s.core === 'sentinel') });
+      forgeResolve(r);
+    } else r = await askCore(step.core, text, { task });
     step.status = r.ok ? 'completed' : r.error === 'cancelled' ? 'cancelled' : 'failed';
     if (r.ok) step.result = r.reply.slice(0, 4000); else step.error = r.error;
     saveTask(task);

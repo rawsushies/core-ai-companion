@@ -106,6 +106,9 @@ const DEFAULTS = {
     googleClientSecret: '', // stored as an encrypted secret instead
     autoSync: true, // sync memory with your Google Drive's private app folder after changes and hourly
   },
+  meiosis: {
+    autoReview: true, // Sentinel checks Forge's proposed file changes
+  },
   agent: {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
