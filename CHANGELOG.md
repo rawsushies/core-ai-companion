@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### COre 2.0, part 9: Smart model routing
+
+- Conversation stays on the fast Claude model (Haiku by default) and its warm session is never restarted; the **desktop agent, the specialist cores and playbook writing run on the stronger model** (Sonnet by default). Settings, Brain: "Smart routing" and "Stronger Claude model"; choose "Use the model above for everything" to turn it off.
+- Changing brain settings now also refreshes the agent's and idle specialists' brains.
+
 ### COre 2.0, part 8: Ash and the board
 
 - **The board**: when an explanation deserves it, COre crumbles into ash, streams its smoke out into a board about **a third of the screen wide** beside itself, writes a title and up to four points in smoke while the crisp text condenses in (blur to sharp, points one by one), holds it while talking them through, then pulls the smoke back and reforms with a shockwave. The brain triggers it with `[[board TITLE; POINT; POINT]]`; demo key **B**.

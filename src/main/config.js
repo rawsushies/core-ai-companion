@@ -19,7 +19,10 @@ const DEFAULTS = {
     //   'openai-compat' any OpenAI-style endpoint (DeepSeek, LM Studio...)
     provider: 'claude-cli',
     fallbacks: ['gemini', 'groq', 'openrouter', 'openai-compat', 'ollama'],
-    claude: { command: 'claude', model: 'haiku', effort: '' },
+    claude: { command: 'claude', model: 'haiku', effort: '', strongModel: 'sonnet' },
+    // Smart routing: conversation stays on the fast model; the desktop agent,
+    // specialist cores and playbook writing use the strong model ('off' = all fast).
+    routing: 'auto',
     gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', prefer: 'flash', vision: true },
     groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', prefer: 'versatile|70b|llama', vision: false },
     openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', prefer: ':free$', vision: false },

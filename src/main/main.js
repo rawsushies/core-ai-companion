@@ -822,6 +822,9 @@ function applyLive(key, value) {
     try {
       if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
       if (brain) brain.reload(config.data); else brain = makeBrain();
+      // The agent and idle specialists pick up the new model on their next turn.
+      if (agentBrainInst && !(agentRunner && agentRunner.running)) { for (const p of agentBrainInst.chain) if (p.dispose) p.dispose(); agentBrainInst = null; }
+      for (const c of clones.values()) if (!c.busy) disposeHelperBrain(c);
     } catch (err) { addTranscript('system', err.message); }
     refreshBrainStatus().then(() => warmClaude());
   }
@@ -1920,7 +1923,7 @@ const agentApprovals = new Map();
 function agentBrain() {
   if (!agentBrainInst) {
     const mem = {};
-    agentBrainInst = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+    agentBrainInst = new Brain({ config: routedConfig('agent'), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
   }
   return agentBrainInst;
 }
@@ -2397,10 +2400,21 @@ function ensureHelper(coreId) {
   return c;
 }
 
+// Smart routing: heavy work (the desktop agent, specialists, writing playbooks)
+// runs on the strong model; Prime's conversation stays on the fast one so its
+// warm session is never restarted.
+function routedConfig(kind) {
+  const b = config.data.brain || {};
+  const strong = b.claude && b.claude.strongModel;
+  if (b.routing === 'off' || !strong || strong === b.claude.model) return config.data;
+  if (!['agent', 'playbook', 'forge', 'sentinel', 'navigator', 'archivist', 'scout'].includes(kind)) return config.data;
+  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong } } };
+}
+
 function helperBrain(c) {
   if (!c.brain) {
     const mem = {}; // its own session id lives here: isolated from Prime's
-    c.brain = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+    c.brain = new Brain({ config: routedConfig(c.id), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
   }
   return c.brain;
 }

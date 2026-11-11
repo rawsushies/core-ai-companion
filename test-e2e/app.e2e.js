@@ -59,7 +59,7 @@ test.before(async () => {
   app = await electron.launch({
     args: ['--no-sandbox', ROOT, `--user-data-dir=${userData}`],
     cwd: ROOT,
-    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_PLAYER: player,
+    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_CLAUDE_ARGS: path.join(userData, 'fake-args.log'), FAKE_PLAYER: player,
       PATH: `${path.join(ROOT, 'test', 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}` },
     timeout: 60000,
   });
@@ -276,6 +276,15 @@ test('approved file changes: Forge proposes, nothing is written until Apply, Und
   // Sentinel reviewed Forge's change on its own.
   await dock.waitForFunction(() => /Sentinel is reviewing Forge/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
   await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-sentinel .msg')].some((m) => /Verdict: ship it/.test(m.innerText)), null, { timeout: 20000 });
+});
+
+test('smart routing: chat stays on the fast model, specialists run on the strong one', async () => {
+  const runs = fs.readFileSync(path.join(userData, 'fake-args.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const model = (a) => (a.includes('--model') ? a[a.indexOf('--model') + 1] : '');
+  const by = (m) => runs.filter((a) => model(a) === m).length;
+  assert.strictEqual(by('haiku'), 1, "Prime's one warm session is on haiku and was never restarted");
+  assert.ok(by('sonnet') >= 2, 'specialists ran on sonnet');
+  assert.strictEqual(by('haiku') + by('sonnet'), runs.length, 'no other models');
 });
 
 test('Navigator plans a desktop task and leaves /do in the box for you to start', async () => {
