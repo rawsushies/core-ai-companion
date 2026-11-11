@@ -111,14 +111,24 @@ const XDO_KEYS = { enter: 'Return', return: 'Return', esc: 'Escape', escape: 'Es
 class LinuxDriver {
   constructor({ run = (args) => new Promise((res, rej) => execFile('xdotool', args, { timeout: 15000 }, (e) => (e ? rej(e) : res()))) } = {}) { this.run = run; }
   static xdoCombo(combo) { return combo.split('+').map((k) => XDO_KEYS[k] || (k.length === 1 || /^f\d+$/.test(k) ? k : k)).join('+'); }
+  // `mousemove --sync` waits for the pointer to arrive, which fails under some
+  // window managers / compositors: retry once without it.
+  async move(x, y, rest = []) {
+    try { return await this.run(['mousemove', '--sync', String(x), String(y), ...rest]); } catch {
+      await this.run(['mousemove', String(x), String(y)]);
+      await new Promise((r) => setTimeout(r, 60));
+      if (rest.length) return this.run(rest);
+      return undefined;
+    }
+  }
   async perform(a, p) {
-    if (a.type === 'click') return this.run(['mousemove', '--sync', String(p.x), String(p.y), 'click', ...(a.double ? ['--repeat', '2'] : []), a.button === 'right' ? '3' : a.button === 'middle' ? '2' : '1']);
-    if (a.type === 'move') return this.run(['mousemove', '--sync', String(p.x), String(p.y)]);
+    if (a.type === 'click') return this.move(p.x, p.y, ['click', ...(a.double ? ['--repeat', '2'] : []), a.button === 'right' ? '3' : a.button === 'middle' ? '2' : '1']);
+    if (a.type === 'move') return this.move(p.x, p.y);
     if (a.type === 'type') return this.run(['type', '--delay', '12', '--', a.text]);
     if (a.type === 'key') return this.run(['key', '--clearmodifiers', LinuxDriver.xdoCombo(a.combo)]);
     if (a.type === 'scroll') {
-      const pre = p ? ['mousemove', '--sync', String(p.x), String(p.y)] : [];
-      return this.run([...pre, 'click', '--repeat', String(Math.abs(a.dy)), a.dy > 0 ? '5' : '4']);
+      const wheel = ['click', '--repeat', String(Math.abs(a.dy)), a.dy > 0 ? '5' : '4'];
+      return p ? this.move(p.x, p.y, wheel) : this.run(wheel);
     }
     return undefined;
   }

@@ -52,7 +52,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .history-toggle { font-size: 12px; line-height: 1; }
 
 /* ---------------------------------------------------------------- messages */
-.log { max-height: 150px; overflow-y: auto; padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 4px; scroll-behavior: smooth; transition: opacity 0.4s ease; }
+.log { max-height: 150px; overflow-y: auto; padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 4px; transition: opacity 0.4s ease; }
 .log:empty { display: none; }
 .shell.expanded .log { max-height: 320px; }
 .shell.faded .log { opacity: 0.25; }          /* idle: old messages fade into the screen */
