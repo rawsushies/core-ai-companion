@@ -40,7 +40,10 @@ test.before(async () => {
   fs.writeFileSync(script, JSON.stringify(baseRules = [
     { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
     { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
+    { match: 'Review the file changes', reply: 'Looks fine.\n\nThe readme change is plain text. Verdict: ship it' },
     { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
+    { match: 'open my downloads folder', reply: 'I would open the file manager.\n\n1. Open Files\n2. Click Downloads\nTask: open the Downloads folder in the file manager' },
+    { match: 'Memory stats\\] \\d+ memories', reply: 'From memory.\n\nArchivist checked: green tea, noted earlier.' },
   ]));
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
     orb: { graphics: 'software' },
@@ -56,7 +59,7 @@ test.before(async () => {
   app = await electron.launch({
     args: ['--no-sandbox', ROOT, `--user-data-dir=${userData}`],
     cwd: ROOT,
-    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_PLAYER: player,
+    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_CLAUDE_ARGS: path.join(userData, 'fake-args.log'), FAKE_PLAYER: player,
       PATH: `${path.join(ROOT, 'test', 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}` },
     timeout: 60000,
   });
@@ -270,6 +273,30 @@ test('approved file changes: Forge proposes, nothing is written until Apply, Und
   await dock.click('.msg.proposal button:has-text("Undo")');
   await dock.waitForFunction(() => /Undone|undone/.test(document.querySelector('.msg.proposal').innerText), null, { timeout: 5000 });
   assert.strictEqual(fs.readFileSync(path.join(project, 'readme.txt'), 'utf8'), 'old readme\n');
+  // Sentinel reviewed Forge's change on its own.
+  await dock.waitForFunction(() => /Sentinel is reviewing Forge/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
+  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-sentinel .msg')].some((m) => /Verdict: ship it/.test(m.innerText)), null, { timeout: 20000 });
+});
+
+test('smart routing: chat stays on the fast model, specialists run on the strong one', async () => {
+  const runs = fs.readFileSync(path.join(userData, 'fake-args.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const model = (a) => (a.includes('--model') ? a[a.indexOf('--model') + 1] : '');
+  const by = (m) => runs.filter((a) => model(a) === m).length;
+  assert.strictEqual(by('haiku'), 1, "Prime's one warm session is on haiku and was never restarted");
+  assert.ok(by('sonnet') >= 2, 'specialists ran on sonnet');
+  assert.strictEqual(by('haiku') + by('sonnet'), runs.length, 'no other models');
+});
+
+test('Navigator plans a desktop task and leaves /do in the box for you to start', async () => {
+  await send('@Navigator open my downloads folder');
+  await dock.waitForFunction(() => /Navigator can do this on your desktop/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  assert.strictEqual(await dock.inputValue('#input'), '/do open the Downloads folder in the file manager');
+  await dock.fill('#input', '');
+});
+
+test('Archivist answers from memory and the file shelf', async () => {
+  await send('@Archivist what do you know about my tea');
+  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-archivist .msg')].some((m) => /Archivist checked: green tea/.test(m.innerText)), null, { timeout: 20000 });
 });
 
 test('the History panel shows the conversation', async () => {
@@ -301,6 +328,7 @@ test('desktop agent: /do clicks and types into another window, with step approva
     { match: 'Step 1 of', reply: `Clicking the box. [[act {"type":"click","x":${cx},"y":${cy},"why":"focus the text box"}]]` },
     { match: 'Step 2 of', reply: 'Typing. [[act {"type":"type","text":"hello from the agent"}]]' },
     { match: 'Step 3 of', reply: 'Done. [[act {"type":"done","summary":"typed the greeting"}]]' },
+    { match: 'Step 4 of', reply: 'Checked. [[act {"type":"done","summary":"typed the greeting"}]]' },
   ]));
   await send('/do type a greeting into the box');
   await dock.waitForSelector('#agent-card:not([hidden])', { timeout: 20000 });
@@ -313,6 +341,151 @@ test('desktop agent: /do clicks and types into another window, with step approva
   assert.strictEqual(value, 'hello from the agent');
   await app.evaluate(() => { global.__agentTarget.destroy(); });
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+});
+
+test('emergency stop: the global hotkey halts a running agent task at once', { skip: process.platform !== 'linux' || !require('fs').existsSync('/usr/bin/xdotool') }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([...baseRules, { match: 'Step 1 of', reply: 'Waiting. [[act {"type":"click","x":5,"y":5,"why":"test"}]]' }]));
+  await send('/do something long');
+  await dock.waitForSelector('#agent-card:not([hidden])', { timeout: 20000 });
+  require('child_process').execFileSync('xdotool', ['key', 'ctrl+alt+shift+x']);
+  await dock.waitForFunction(() => /Emergency stop/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  await dock.waitForFunction(() => /Agent stopped/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'the approval card is gone');
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('desktop agent: tools write a file and run a command (always asked), results come back, /do undo restores', { skip: process.platform !== 'linux' }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: 'reply done again', reply: 'Looks right. [[act {"type":"done","summary":"notes written and checked"}]]' },
+    { match: '<<untrusted command output>>', reply: 'The command printed 42. [[act {"type":"done","summary":"notes written"}]]' },
+    { match: 'Step 2 of', reply: 'Checking with node. [[act {"type":"run","cmd":"node -e \\"console.log(6*7)\\"","why":"compute"}]]' },
+    { match: 'Step 1 of', reply: 'Writing. [[act {"type":"write","path":"notes.txt","text":"agent notes","why":"save notes"}]]' },
+  ]));
+  await send('/do write my notes');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write notes\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  assert.ok(!(await dock.evaluate(() => document.getElementById('agent-all').hidden)), 'file steps can be allowed for the whole task');
+  await dock.click('#agent-all');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Run/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-all').hidden), 'a command is approved on its own, even after allow-all');
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => /Agent finished: notes written and checked/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  assert.strictEqual(fs.readFileSync(path.join(project, 'notes.txt'), 'utf8'), 'agent notes');
+  await dock.waitForFunction(() => /\/do undo/.test(document.getElementById('log').innerText), null, { timeout: 5000 });
+  await send('/do undo');
+  await dock.waitForFunction(() => /Undone: 1 file/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(!fs.existsSync(path.join(project, 'notes.txt')));
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('files: picked files become cards, are read, and go with the message as untrusted data', async () => {
+  const fdir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-files-'));
+  const csv = path.join(fdir, 'budget.csv');
+  fs.writeFileSync(csv, 'item,qty,price\nbrick,1200,0.45\ncement,30,7.5\n');
+  const ifc = path.join(fdir, 'house.ifc');
+  fs.writeFileSync(ifc, "ISO-10303-21;HEADER;FILE_SCHEMA(('IFC4'));ENDSEC;DATA;\n#1=IFCPROJECT('a',$,'Rumah',$,$,$,$,$,$);\n#2=IFCBUILDINGSTOREY('b',$,'Ground',$,$,$,$,$,.ELEMENT.,0.);\n#3=IFCWALL('c',$,'W',$,$,$,$,$,$);\nENDSEC;END-ISO-10303-21;");
+  const wav = path.join(fdir, 'tone.wav');
+  { const n = 16000; const b = Buffer.alloc(44 + n * 2); b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(16000, 24); b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40); for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(8000 * Math.sin(i / 8)), 44 + i * 2); fs.writeFileSync(wav, b); }
+  fs.writeFileSync(script, JSON.stringify([...baseRules, { match: '<<untrusted file budget.csv>>', reply: 'Your budget has 2 items; the IFC model is Rumah with 1 storey.' }]));
+  await (await dock.$('#file-input')).setInputFiles([csv, ifc, wav]);
+  await dock.waitForFunction(() => document.querySelectorAll('#file-cards .fcard').length === 3, null, { timeout: 10000 });
+  await dock.waitForFunction(() => [...document.querySelectorAll('#file-cards .fcard .info')].some((e) => /3 rows/.test(e.textContent)), null, { timeout: 10000 });
+  const ifcInfo = await dock.evaluate(() => [...document.querySelectorAll('#file-cards .fcard.k-bim .info')].map((e) => e.textContent)[0]);
+  assert.match(ifcInfo, /1 storey/);
+  // Audio is decoded in the dock and never stays stuck on "Decoding…".
+  await dock.waitForFunction(() => { const a = document.querySelector('#file-cards .fcard.k-audio'); return a && !a.classList.contains('media') && !a.classList.contains('reading'); }, null, { timeout: 60000 });
+  // (Without the speech model, as here, the card shows why; with it, a transcript.)
+  if (await dock.evaluate(() => document.querySelector('#file-cards .fcard.k-audio').classList.contains('ready'))) await dock.click('#file-cards .fcard.k-audio');
+  else assert.ok(!(await dock.evaluate(() => document.querySelector('#file-cards .fcard.k-audio').classList.contains('sel'))), 'a card that failed is not attached');
+  assert.match(await dock.textContent('#files-hint'), /2 attached/);
+  if (process.env.E2E_SHOTS) await dock.screenshot({ path: path.join(process.env.E2E_SHOTS, 'files-panel.png') });
+  await send('what is in these?');
+  await dock.waitForFunction(() => /Your budget has 2 items; the IFC model is Rumah/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  const chips = await dock.evaluate(() => [...document.querySelectorAll('#log .file-chip')].map((c) => c.textContent));
+  assert.deepStrictEqual(chips.slice(-2).sort(), ['budget.csv', 'house.ifc']);
+  // Remove the cards again.
+  for (let i = 0; i < 3; i++) await dock.evaluate(() => document.querySelector('#file-cards .fcard .x').click());
+  await dock.waitForFunction(() => document.getElementById('files').hidden, null, { timeout: 5000 });
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('playbooks: bundled examples are listed, fit requests, run on a core, and new ones are learned from the chat', async () => {
+  await send('/skills');
+  await dock.waitForFunction(() => /Playbooks \(\d+\), run with \/skill NAME/.test(document.getElementById('log').innerText) && /meeting-notes → Archivist/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  fs.writeFileSync(script, JSON.stringify([
+    { match: 'Playbook "code-review"', reply: 'Reviewed with the playbook.\n\nOne critical issue. Verdict: fix first' },
+    { match: 'Playbook "meeting-notes"', reply: 'Using your meeting notes playbook: decisions first.' },
+    { match: '\\[playbook\\] Turn the procedure', reply: '---\nname: tea-timer\ndescription: Brew green tea with a timer.\ntriggers: brew tea, tea timer\n---\n1. Boil water to 80 C\n2. Set a 3 minute timer' },
+    ...baseRules,
+  ]));
+  // A request that fits a playbook gets its instructions.
+  await send('write the meeting notes for today please');
+  await dock.waitForFunction(() => /Using your meeting notes playbook/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  // /skill NAME runs it on the playbook's core.
+  await send('/skill code-review function add(a,b){return a-b}');
+  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-sentinel .msg')].some((m) => /Verdict: fix first/.test(m.innerText)), null, { timeout: 20000 });
+  // Learn a new playbook from the conversation.
+  await send('/skill save tea-timer');
+  await dock.waitForFunction(() => /Saved playbook "tea-timer"/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  assert.match(fs.readFileSync(path.join(userData, 'skills', 'tea-timer', 'SKILL.md'), 'utf8'), /Set a 3 minute timer/);
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('command center: shows cores, tasks, playbooks, memory, devices and the activity log; its emergency stop works', async () => {
+  await send('/center');
+  let cc = null;
+  for (let i = 0; i < 40 && !cc; i++) { cc = app.windows().find((p) => p.url().includes('/command/')); if (!cc) await wait(250); }
+  assert.ok(cc, 'the command center opened');
+  await cc.waitForFunction(() => window.__centerReady && document.querySelectorAll('#cores li').length === 6, null, { timeout: 10000 });
+  const names = await cc.$$eval('#cores li .grow > div:first-child', (n) => n.map((x) => x.textContent));
+  assert.deepStrictEqual(names, ['COre', 'Scout', 'Forge', 'Sentinel', 'Archivist', 'Navigator']);
+  assert.match(await cc.textContent('#tasks'), /compare SQLite and LevelDB/);
+  assert.match(await cc.textContent('#brains'), /Claude \(haiku\)[\s\S]*ready/, 'the brain router shows each brain and its state');
+  assert.match(await cc.textContent('#route-mode'), /automatic/);
+  assert.match(await cc.textContent('#playbooks'), /code-review → Sentinel/);
+  assert.match(await cc.textContent('#playbooks'), /weekdays 08:45 \(off\)/);
+  assert.match(await cc.textContent('#agent'), /Step \d+/, 'the last agent task is shown');
+  assert.match(await cc.textContent('#files'), /No files yet|ready/);
+  assert.match(await cc.textContent('#memory'), /\d+memories\d+pinned\d+replaced/, 'memory numbers are shown');
+  await cc.waitForFunction(() => document.querySelectorAll('#audit li time').length > 3, null, { timeout: 5000 });
+  if (process.env.E2E_SHOTS) await cc.screenshot({ path: path.join(process.env.E2E_SHOTS, 'command-center.png') });
+  await cc.fill('#filter', 'workflow-that-never-ran');
+  assert.match(await cc.textContent('#audit'), /Nothing matches/);
+  await cc.fill('#filter', '');
+  await cc.click('#stop-all');
+  await dock.waitForFunction(() => /Emergency stop/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  await cc.waitForFunction(() => [...document.querySelectorAll('#audit .what')].some((e) => /emergency-stop/.test(e.textContent)), null, { timeout: 6000 });
+  await cc.press('body', 'Escape').catch(() => {}); // the window closes under the key press
+  for (let i = 0; i < 20 && app.windows().some((p) => p.url().includes('/command/')); i++) await wait(150);
+  assert.ok(!app.windows().some((p) => p.url().includes('/command/')), 'Esc closes it');
+});
+
+test('board: COre crumbles to ash, spreads into a board a third of the screen wide, then reforms', async () => {
+  fs.writeFileSync(script, JSON.stringify([{ match: 'explain the release steps', reply: '[[board Release in three steps; Freeze the branch; Run every test; Tag and publish]] First we freeze the branch. Then we run every test. Then we tag it and publish.' }, ...baseRules]));
+  await send('explain the release steps');
+  await overlay.waitForFunction(() => window.__coreBoard().ashW > 0.5, null, { timeout: 15000 });
+  const shots = process.env.E2E_SHOTS;
+  if (shots) await overlay.screenshot({ path: path.join(shots, 'board-1-ash.png') });
+  await overlay.waitForFunction(() => { const b = window.__coreBoard(); return b.shown && b.boardW > 0.9; }, null, { timeout: 10000 });
+  const b = await overlay.evaluate(() => window.__coreBoard());
+  assert.strictEqual(b.title, 'Release in three steps');
+  assert.deepStrictEqual(b.points, ['Freeze the branch', 'Run every test', 'Tag and publish']);
+  const screenW = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().size.width);
+  assert.ok(b.rect.w >= screenW / 3 - 2 || b.rect.w === 680, `about a third of the screen (${b.rect.w} of ${screenW})`);
+  const text = await overlay.evaluate(() => document.getElementById('board').innerText);
+  assert.match(text, /Release in three steps[\s\S]*Freeze the branch[\s\S]*Tag and publish/);
+  if (shots) { await wait(1400); await overlay.screenshot({ path: path.join(shots, 'board-2-spread.png') }); }
+  // The words are not spoken as tags, and the chat shows the plain reply.
+  await dock.waitForFunction(() => /First we freeze the branch/.test(document.getElementById('log').innerText) && !/\[\[board/.test(document.getElementById('log').innerText), null, { timeout: 10000 });
+  // It pulls back together on its own.
+  await overlay.waitForFunction(() => { const s = window.__coreBoard(); return !s.title && s.boardW < 0.02; }, null, { timeout: 40000 });
+  if (shots) { await wait(600); await overlay.screenshot({ path: path.join(shots, 'board-3-reformed.png') }); }
+  assert.ok(await overlay.evaluate(() => document.getElementById('board').hidden));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
 test('desktop agent: off by default and refused from the phone', async () => {

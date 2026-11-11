@@ -130,6 +130,11 @@ let floor = null;
 let lastReaction = 0;
 let notes = null;
 let plugins = [];
+const PB = require('./playbooks');
+let playbooks = [];
+let playbookScheduler = null;
+const playbookDir = () => path.join(app.getPath('userData'), 'skills');
+const playbooksOn = () => config.data.skills.playbooks !== false;
 let turnSkills = null;
 let turnVia = 'chat'; // where the current turn came from (memory provenance) // skill lookups started during the current turn
 let followUpPending = false; // conversation mode: listen again when this spoken reply ends
@@ -177,7 +182,7 @@ function addTranscript(role, text, meta = {}) {
   toPanel('transcript:add', entry);
   // Prime's own replies reach the dock as a live stream instead.
   if (role !== 'core' || (meta.author && meta.author !== 'prime')) {
-    toDock('dock:message', { role: role === 'notice' ? 'system' : role, text, author: meta.author, kind: meta.kind, to: meta.to });
+    toDock('dock:message', { role: role === 'notice' ? 'system' : role, text, author: meta.author, kind: meta.kind, to: meta.to, files: meta.files });
   }
 }
 
@@ -243,10 +248,18 @@ function setSecret(id, value) {
   else if (safeStorage.isEncryptionAvailable()) config.data.brain.secrets[id] = `enc:${safeStorage.encryptString(key).toString('base64')}`;
   else config.data.brain.secrets[id] = `plain:${key}`;
   config.save();
+  try { brainRouter.clear(id); } catch {} // a new key: try that brain again right away
 }
+
+// One router for every brain (Prime, the agent, the specialists): a provider
+// that is rate limited or down is skipped by all of them at once.
+const { Router: BrainRouter } = require('./brain/router');
+const brainRouter = new BrainRouter();
 
 function makeBrain() {
   return new Brain({
+    router: brainRouter,
+    profile: 'chat',
     config: config.data,
     workDir,
     state,
@@ -278,6 +291,7 @@ async function brainStatusList() {
       try {
         await p.detect();
         st = 'connected';
+        if ((brainRouter.h['claude-cli'] || {}).kind === 'auth') brainRouter.clear('claude-cli'); // logged in now
       } catch (err) {
         st = err.notLoggedIn ? 'login' : 'missing';
         detail = err.message;
@@ -685,6 +699,86 @@ function openSettings() {
   settingsWin.on('closed', () => { settingsWin = null; });
 }
 
+// ---------------------------------------------------------------- command center
+// One window for everything COre is doing: the agent task, cores, shared tasks,
+// workflows, memory health, playbooks, devices, files and the audit log, with
+// the emergency stop always in reach.
+let centerWin = null;
+function openCommandCenter() {
+  if (centerWin && !centerWin.isDestroyed()) { centerWin.show(); centerWin.focus(); return; }
+  centerWin = new BrowserWindow({
+    width: 960, height: 680, minWidth: 640, minHeight: 460, show: false, frame: false, transparent: true, backgroundColor: '#00000000',
+    title: 'COre command center', icon: path.join(ROOT, 'assets', 'icon.png'),
+    webPreferences: { preload: path.join(PRELOAD, 'command.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  centerWin.loadFile(path.join(RENDERER, 'command', 'index.html'));
+  centerWin.once('ready-to-show', () => { centerWin.center(); centerWin.show(); });
+  centerWin.on('closed', () => { centerWin = null; });
+}
+
+function readAudit(n = 80) {
+  try {
+    const f = path.join(app.getPath('userData'), 'logs', 'tools.log');
+    const st = fs.statSync(f);
+    const len = Math.min(st.size, 96 * 1024);
+    const fd = fs.openSync(f, 'r');
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    fs.closeSync(fd);
+    return buf.toString('utf8').split('\n').filter((l) => l.startsWith('{')).slice(-n).reverse().map((l) => {
+      try {
+        const { at, ...rest } = JSON.parse(l);
+        const what = rest.event || rest.guard || rest.skill || rest.tool || Object.keys(rest)[0] || 'entry';
+        const detail = Object.entries(rest).filter(([k]) => k !== 'event').map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · ');
+        return { at, what: String(what).slice(0, 160), detail: detail.slice(0, 400) };
+      } catch { return null; }
+    }).filter(Boolean);
+  } catch { return []; }
+}
+
+function centerState() {
+  const t = readAgentTask();
+  let changed = 0;
+  try { if (t && t.taskId) changed = agentFiles().changed(t.taskId).length; } catch {}
+  const shelfItems = shelf || fs.existsSync(path.join(app.getPath('userData'), 'files')) ? fileShelf().list() : [];
+  const phone = config.data.phone || {};
+  return {
+    version: app.getVersion(),
+    brain: brainStatus(),
+    route: brain ? brain.routeStatus() : null,
+    agent: { enabled: !!(config.data.agent || {}).enabled, running: !!(agentRunner && agentRunner.running), task: t ? { goal: String(t.goal || ''), step: t.step, status: t.status, at: t.at, changed } : null },
+    cores: cores.map((c) => { const h = clones.get(c.id); return { id: c.id, name: c.name, role: c.role, color: c.color, active: c.id === 'prime' || !!h, busy: h ? h.busy : 0 }; }),
+    tasks: (state.get('tasks') || []).slice(-8).reverse().map((k) => ({ id: k.id, text: String(k.text || '').slice(0, 200), status: k.status, at: k.createdAt, steps: (k.steps || []).map((x) => ({ core: (coreById(x.core) || { name: x.core }).name, status: x.status })) })),
+    workflows: playbookScheduler ? playbookScheduler.upcoming() : [],
+    playbooks: playbooks.map((p) => ({ name: p.name, description: p.description, core: (coreById(p.core) || { name: 'COre' }).name, schedule: p.schedule, enabled: p.enabled })),
+    playbooksOn: playbooksOn(),
+    memory: memory ? { ...memory.stats(), enabled: config.data.memory.enabled !== false, recent: memory.conflicts.slice(0, 6).map((c) => ({ was: c.was, now: c.now, at: c.at })) } : null,
+    files: { total: shelfItems.length, ready: shelfItems.filter((f) => f.status === 'ready').length, errors: shelfItems.filter((f) => f.status === 'error').length, recent: shelfItems.slice(0, 5).map((f) => ({ name: f.name, kind: f.kind, info: f.info, status: f.status })) },
+    devices: {
+      phone: { enabled: !!phone.enabled, paired: companion ? companion.list().length : (state.get('phoneDevices') || []).length },
+      drive: { connected: !!getSecret('googleRefresh'), syncedAt: state.get('driveSyncedAt') || 0 },
+      backup: { folder: !!(config.data.backup && config.data.backup.folder), last: state.get('lastBackup') || '' },
+    },
+    audit: readAudit(),
+  };
+}
+
+async function centerAction(name, arg) {
+  switch (name) {
+    case 'emergency': emergencyStop('you pressed Emergency stop in the command center'); return { ok: true };
+    case 'agentResume': startAgent('resume'); return { ok: true };
+    case 'agentUndo': undoAgentTask(); return { ok: true };
+    case 'agentStop': stopAgent('you pressed Stop in the command center'); return { ok: true };
+    case 'runWorkflow': { const s = playbooks.find((p) => p.name === String(arg)); if (!s) return { ok: false, error: 'No such playbook.' }; runWorkflow(s); return { ok: true }; }
+    case 'consolidate': { if (!memory) return { ok: false }; const r = memory.consolidate(); toDock('dock:memory', memory.list()); return { ok: true, message: `Merged ${r.merged}, retired ${r.retired}; ${r.total} memories.` }; }
+    case 'openSkills': fs.mkdirSync(playbookDir(), { recursive: true }); shell.openPath(playbookDir()); return { ok: true };
+    case 'openLogs': { const d = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); shell.openPath(d); return { ok: true }; }
+    case 'openSettings': openSettings(); return { ok: true };
+    case 'openChat': setDockVisible(true, true); return { ok: true };
+    default: return { ok: false, error: 'unknown action' };
+  }
+}
+
 // Only the values the window shows: never secrets.
 function settingsValues() {
   const out = {};
@@ -738,6 +832,9 @@ function applyLive(key, value) {
     try {
       if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
       if (brain) brain.reload(config.data); else brain = makeBrain();
+      // The agent and idle specialists pick up the new model on their next turn.
+      if (agentBrainInst && !(agentRunner && agentRunner.running)) { for (const p of agentBrainInst.chain) if (p.dispose) p.dispose(); agentBrainInst = null; }
+      for (const c of clones.values()) if (!c.busy) disposeHelperBrain(c);
     } catch (err) { addTranscript('system', err.message); }
     refreshBrainStatus().then(() => warmClaude());
   }
@@ -863,9 +960,50 @@ function phoneQr(url) {
   return qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
 }
 
+// ---------------------------------------------------------------- memory intelligence
+// Automatic capture from the user's own words, project history, semantic
+// search (optional local model) and a daily consolidation pass.
+let embedder = null;
+
+function currentProject() {
+  const root = config.data.tools && config.data.tools.projectRoot;
+  return root ? path.basename(root).replace(/[^\p{L}\p{N}_.-]/gu, '').slice(0, 40) || null : null;
+}
+
+function autoCapture(text) {
+  const m = config.data.memory || {};
+  if (!memory || m.enabled === false || m.autoCapture === false) return;
+  try {
+    for (const r of memory.capture(text)) {
+      if (r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
+      else if (r.replaced) toDock('dock:message', { role: 'system', text: `Updated: ${r.item.text} (was: ${r.replaced})` });
+    }
+    toDock('dock:memory', memory.list());
+    scheduleDriveSync();
+  } catch {}
+}
+
+function noteEpisode(text) {
+  if (!memory || (config.data.memory || {}).enabled === false) return;
+  try { memory.noteEpisode(text, { project: currentProject() }); } catch {}
+}
+
+function startMemoryEngine() {
+  if (!memory) return;
+  if ((config.data.memory || {}).semantic !== false) {
+    embedder = new Embedder({ cacheDir: path.join(app.getPath('userData'), 'models') });
+    memory.setEmbedder((texts) => embedder.embed(texts));
+  }
+  const pass = () => { try { const r = memory.consolidate(); if (r.merged || r.retired) toDock('dock:memory', memory.list()); } catch {} };
+  setTimeout(pass, 90_000);
+  setInterval(pass, 24 * 3600_000).unref();
+}
+
 // ---------------------------------------------------------------- Google Drive memory (optional)
 // See gdrive.js. Off until you add your OAuth client and connect.
 const GD = require('./gdrive');
+const GUARD = require('./guard');
+const { Embedder } = require('./embed');
 let drive = null;
 let driveSyncTimer = null;
 let driveSyncing = false;
@@ -1146,12 +1284,14 @@ function createTray() {
 function createTrayMenu() {
   const menu = Menu.buildFromTemplate([
     { label: 'Talk to COre', click: () => startListening(false) },
+    { label: 'Command center', click: () => openCommandCenter() },
     { label: 'Hands-free ("Hey COre")', type: 'checkbox', checked: !!config.data.voice.wakeWord, click: (item) => setHandsFree(item.checked) },
     { label: 'Talk about my screen', click: () => startListening(true) },
     { label: 'Show chat under the orb', click: () => setDockVisible(true, true) },
     { label: 'Conversation history', click: () => togglePanel(true) },
     { type: 'separator' },
     { label: 'Hide / show COre', click: toggleOrb },
+    { label: 'Emergency stop (stop everything)', click: () => emergencyStop('tray menu') },
     { label: 'New conversation', click: resetConversation },
     { label: 'Call helpers back', click: mergeAllClones },
     { label: 'Show me around (tour)', click: runTour },
@@ -1604,19 +1744,196 @@ function showGlance(req) {
   }, 6000);
 }
 
+// ---------------------------------------------------------------- emergency stop
+// One hotkey (Ctrl+Alt+Shift+X by default) or the tray: the agent, every
+// running brain turn, helpers' work, speech, media readers, the phone server
+// and all pending approvals stop at once. Logged.
+function emergencyStop(reason = 'emergency stop') {
+  try { stopAgent(reason); } catch {}
+  try { abortCurrent(); } catch {}
+  try { toOverlay('speech:stop'); } catch {}
+  for (const c of clones.values()) { try { if (c.ac) c.ac.abort(); toClone(c, 'speech:stop'); } catch {} }
+  try { stopGlanceReader(); hideGlance(); } catch {}
+  try { if (companion) companion.stop(); } catch {}
+  try { for (const [id, a] of agentApprovals) { a.resolve('no'); agentApprovals.delete(id); } } catch {}
+  toDock('dock:agent-approve', null);
+  toolAudit({ event: 'emergency-stop', reason });
+  addTranscript('system', `Emergency stop: everything COre was doing has been stopped (${reason}). The phone link is off until you restart COre or turn it on again.`, { kind: 'error' });
+  toOverlay('attention', { level: 'urgent', title: 'Stopped' });
+}
+
 // ---------------------------------------------------------------- desktop agent
 // Off by default (Settings, Agent). Started only by you: "/do TASK" in the chat.
 // Every step is shown; actions that change something need your OK (or "Allow
 // all steps" for this task). Esc or the Stop button ends it at once.
 const AG = require('./agent');
+const AT = require('./agentTools');
 let agentRunner = null;
+const agentTaskFile = () => path.join(app.getPath('userData'), 'agent-task.json');
+function readAgentTask() { try { return JSON.parse(fs.readFileSync(agentTaskFile(), 'utf8')); } catch { return null; } }
+function writeAgentTask(s) { try { const f = agentTaskFile(); fs.writeFileSync(`${f}.tmp`, JSON.stringify(s)); fs.renameSync(`${f}.tmp`, f); } catch {} }
+
+function agentFiles() {
+  const root = config.data.tools && config.data.tools.projectRoot;
+  return new AT.FileOps({ roots: root ? [root] : [], backupDir: path.join(app.getPath('userData'), 'agent-backups') });
+}
+
+// Commands, files and web pages for the agent. Every result is untrusted data.
+function agentTools(taskId) {
+  const ag = config.data.agent || {};
+  const files = agentFiles();
+  return {
+    mustAsk: (a) => {
+      if (a.type !== 'run') return false;
+      const c = AT.checkCommand(a.cmd);
+      return !(c.ok && AT.allowed(c.argv, ag.allowCommands || []));
+    },
+    run: async (a, { signal }) => {
+      const c = AT.checkCommand(a.cmd);
+      if (!c.ok) throw new Error(`Command refused: ${c.reason}.`);
+      const cwd = files.resolve(a.cwd || '.', { mustExist: true });
+      toolAudit(`agent command: ${c.argv.join(' ')} (in ${cwd})`);
+      const r = await AT.runCommand(c.argv, { cwd, signal, timeoutMs: Math.max(5, Math.min(600, Number(ag.commandTimeout) || 60)) * 1000 });
+      const head = r.timedOut ? 'timed out' : r.aborted ? 'stopped' : `exit code ${r.code}`;
+      if (r.code !== 0 && !r.out) throw new Error(head);
+      return `${head}\n${r.out}`;
+    },
+    read: async (a) => files.read(a.path),
+    write: async (a) => { const f = files.write(taskId, a.path, a.text); toolAudit(`agent wrote ${f}`); return `wrote ${a.text.length} characters to ${a.path}`; },
+    rename: async (a) => { const f = files.move(taskId, a.from, a.to); toolAudit(`agent moved ${a.from} to ${f}`); return `moved to ${a.to}`; },
+    delete: async (a) => { const f = files.remove(taskId, a.path); toolAudit(`agent deleted ${f} (backup kept)`); return `deleted ${a.path} (backup kept)`; },
+    fetch: async (a) => AT.fetchText(a.url, (u, o) => require('electron').net.fetch(u, o)),
+  };
+}
+
+// ---------------------------------------------------------------- playbooks
+// SKILL.md how-tos in userData/skills: offered by name, joined to requests they
+// fit, run with /skill NAME, and run on their schedule when they have one.
+function reloadPlaybooks() {
+  playbooks = PB.loadSkills(playbookDir());
+  if (!playbookScheduler) playbookScheduler = new PB.Scheduler({ run: runWorkflow, state });
+  playbookScheduler.sync(playbooksOn() ? playbooks : []);
+  return playbooks;
+}
+let playbookWatch = null;
+function watchPlaybooks() {
+  let t = null;
+  try { playbookWatch = fs.watch(playbookDir(), { recursive: process.platform !== 'linux' || Number(process.versions.node.split('.')[0]) >= 20 }, () => { clearTimeout(t); t = setTimeout(reloadPlaybooks, 800); }); } catch {}
+}
+async function runWorkflow(s) {
+  if (!playbooksOn()) return;
+  toolAudit({ event: 'workflow', name: s.name });
+  addTranscript('system', `Workflow: ${s.name} (${s.schedule}).`, { kind: 'progress' });
+  noteEpisode(`Ran workflow ${s.name}`);
+  if (s.core !== 'prime' && coreById(s.core)) await askCore(s.core, PB.skillBlock(s, 'scheduled run'));
+  else { await waitPrimeIdle(); handleUserText(`[workflow ${s.name}] Run the "${s.name}" playbook now.`, { internal: true, typed: true, playbook: s }); }
+}
+function listPlaybooks() {
+  reloadPlaybooks();
+  if (!playbooks.length) return `No playbooks yet. Save one from this conversation with /skill save NAME, or add SKILL.md files to ${playbookDir()}.`;
+  const up = new Map((playbookScheduler ? playbookScheduler.upcoming() : []).map((u) => [u.name, u]));
+  return `Playbooks (${playbooks.length}), run with /skill NAME:\n${playbooks.map((p) => `• ${p.name}${p.enabled ? '' : ' (off)'}${p.core !== 'prime' ? ` → ${coreById(p.core).name}` : ''}: ${p.description}${up.has(p.name) ? ` · next ${new Date(up.get(p.name).at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}`).join('\n')}`;
+}
+// "/skill save NAME": COre writes a playbook from the conversation so far.
+async function savePlaybookFromChat(name) {
+  const recent = transcript.filter((e) => e.role === 'user' || e.role === 'core').slice(-24).map((e) => `${e.role === 'user' ? 'User' : 'COre'}: ${String(e.text).slice(0, 1200)}`).join('\n');
+  if (!recent) { addTranscript('system', 'Nothing to learn from yet: talk it through first, then save it.'); return; }
+  addTranscript('system', `Writing playbook "${PB.slug(name)}" from this conversation…`, { kind: 'progress' });
+  try {
+    const { reply } = await agentBrain().ask({ text: `[playbook] Turn the procedure in this conversation into a reusable playbook (a SKILL.md file) named "${PB.slug(name)}". Output only the file: a frontmatter block between --- lines with name, description (one sentence: what it does and when to use it) and triggers (3-6 short phrases, comma-separated), then numbered plain-language steps someone could follow next time with different inputs. Leave out one-off details (specific names, numbers, dates) unless they are always the same. No [[tags]].\n\nConversation:\n${recent}`, typed: true });
+    const s = PB.saveSkill(playbookDir(), reply, name);
+    reloadPlaybooks();
+    addTranscript('system', `Saved playbook "${s.name}": ${s.description} Run it with /skill ${s.name}. File: ${s.file}`);
+    toolAudit({ event: 'playbook-saved', name: s.name });
+  } catch (err) { addTranscript('system', `Could not save the playbook: ${err.message}`, { kind: 'error' }); }
+}
+// "/skills", "/skill save NAME", "/skill NAME input". Returns true when handled.
+function playbookCommand(text, { files = [] } = {}) {
+  if (/^\/skills\s*$/i.test(text)) { addTranscript('user', text); addTranscript('system', listPlaybooks()); return true; }
+  const save = /^\/skill\s+save\s+(\S+)\s*$/i.exec(text);
+  if (save) { addTranscript('user', text); savePlaybookFromChat(save[1]); return true; }
+  const run = /^\/skill\s+(\S+)\s*([\s\S]*)$/i.exec(text);
+  if (!run) return false;
+  reloadPlaybooks();
+  const s = playbooks.find((p) => p.name === PB.slug(run[1]));
+  if (!s) { addTranscript('user', text); addTranscript('system', `No playbook called ${run[1]}. ${listPlaybooks()}`, { kind: 'error' }); return true; }
+  const input = run[2].trim();
+  if (s.core !== 'prime' && coreById(s.core)) {
+    addTranscript('user', text, { to: [s.core] });
+    askCore(s.core, PB.skillBlock(s, input || 'see the files and context you have'));
+  } else handleUserText(input || `Run the "${s.name}" playbook.`, { typed: true, playbook: s, files });
+  return true;
+}
+
+// ---------------------------------------------------------------- file intelligence
+// Files dropped on the chat become cards; attached cards go with your messages
+// as untrusted text (and one image). Audio and video are decoded in the dock.
+const FI = require('./fileintel');
+let shelf = null;
+function fileShelf() { if (!shelf) shelf = new FI.FileShelf({ dir: path.join(app.getPath('userData'), 'files') }); return shelf; }
+function sendFiles() { toDock('dock:files', fileShelf().list()); }
+function shrinkImage(buf) {
+  const img = nativeImage.createFromBuffer(buf);
+  if (img.isEmpty()) return null;
+  const s = img.getSize();
+  const k = Math.min(1, 1600 / Math.max(s.width, s.height));
+  const out = k < 1 ? img.resize({ width: Math.round(s.width * k), height: Math.round(s.height * k), quality: 'good' }) : img;
+  return { base64: out.toJPEG(85).toString('base64'), mediaType: 'image/jpeg' };
+}
+async function addFiles(paths) {
+  const added = [];
+  for (const p of paths.slice(0, 20)) {
+    try {
+      const it = await fileShelf().add(String(p), { resizeImage: shrinkImage, onChange: sendFiles });
+      added.push(it);
+      if (it.flags) addTranscript('system', `Heads up: ${it.name} contains text that looks like instructions. COre treats it as data only.`, { kind: 'error' });
+    } catch (err) { addTranscript('system', `Could not add ${path.basename(String(p))}: ${err.message}`, { kind: 'error' }); }
+  }
+  sendFiles();
+  return added.map((i) => ({ id: i.id, name: i.name, kind: i.kind, status: i.status }));
+}
+async function fileMedia(id, { pcm, frames, duration, error } = {}) {
+  const it = fileShelf().get(String(id));
+  if (!it) return;
+  it.status = 'reading';
+  sendFiles();
+  let transcript = '';
+  if (pcm && pcm.length > 1600) {
+    try { transcript = String(await stt.transcribe(pcm instanceof Float32Array ? pcm : new Float32Array(pcm)) || '').trim(); } catch (err) { error = error || `transcription failed: ${err.message}`; }
+  }
+  fileShelf().setMedia(it.id, { transcript, frames: (Array.isArray(frames) ? frames : []).slice(0, 6).map(String), duration: Number(duration) || 0, error });
+  sendFiles();
+}
+// An image from an attached file, shaped like a screenshot for the brain.
+function fileImageShot(image, name) {
+  const buf = Buffer.from(image.base64, 'base64');
+  const size = FI.imageSize(buf) || { width: 0, height: 0 };
+  const dir = path.join(workDir, 'shots');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `file-${Date.now()}.${image.mediaType === 'image/png' ? 'png' : 'jpg'}`);
+  fs.writeFileSync(file, buf);
+  for (const f of fs.readdirSync(dir).filter((x) => x.startsWith('file-')).sort().slice(0, -3)) fs.rmSync(path.join(dir, f), { force: true });
+  return { path: file, base64: image.base64, mediaType: image.mediaType, width: size.width, height: size.height, canPoint: false, label: `An image from the attached file "${name}"` };
+}
+
+// "/do undo": put back every file the last task changed.
+function undoAgentTask() {
+  const t = readAgentTask();
+  if (!t || !t.taskId) { addTranscript('system', 'No agent task to undo.'); return; }
+  if (agentRunner && agentRunner.running) { addTranscript('system', 'Stop the agent first.', { kind: 'error' }); return; }
+  try {
+    const n = agentFiles().rollback(t.taskId);
+    toolAudit(`agent undo ${t.taskId}: ${n} files restored`);
+    addTranscript('system', n ? `Undone: ${n} file${n === 1 ? '' : 's'} put back as before "${String(t.goal).slice(0, 80)}".` : 'That task changed no files (or was already undone).');
+  } catch (err) { addTranscript('system', `Could not undo: ${err.message}`, { kind: 'error' }); }
+}
 let agentBrainInst = null;
 const agentApprovals = new Map();
 
 function agentBrain() {
   if (!agentBrainInst) {
     const mem = {};
-    agentBrainInst = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+    agentBrainInst = new Brain({ router: brainRouter, profile: 'strong', config: routedConfig('agent'), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
   }
   return agentBrainInst;
 }
@@ -1628,13 +1945,23 @@ function stopAgent(reason) {
 
 async function startAgent(goal, { remote = false } = {}) {
   const ag = config.data.agent || {};
+  if (/^undo$/i.test(goal.trim())) { addTranscript('user', '/do undo'); undoAgentTask(); return; }
+  let resume = null;
+  let taskId = `${Date.now().toString(36)}-${require('crypto').randomBytes(3).toString('hex')}`;
+  if (/^resume$/i.test(goal.trim())) {
+    const t = readAgentTask();
+    if (!t || !t.goal || t.status === 'done') { addTranscript('system', 'No unfinished agent task to resume.'); return; }
+    resume = t;
+    goal = t.goal;
+    taskId = t.taskId || taskId;
+  }
   if (!ag.enabled) { addTranscript('system', 'The desktop agent is off. Turn it on in Settings, Agent.', { kind: 'error' }); return; }
   if (remote) { addTranscript('system', 'The desktop agent can only be started at the PC.', { kind: 'error' }); return; }
   const driver = AG.driverFor(process.platform);
   if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
   if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
-  addTranscript('user', `/do ${goal}`);
-  addTranscript('system', `Agent: working on "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
+  addTranscript('user', resume ? '/do resume' : `/do ${goal}`);
+  addTranscript('system', `Agent: ${resume ? `resuming at step ${resume.step + 1}:` : 'working on'} "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
   toOverlay('state', 'thinking');
   try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
   // The agent's own Esc presses must not trip the Esc-to-stop shortcut.
@@ -1663,7 +1990,7 @@ async function startAgent(goal, { remote = false } = {}) {
     approve: (action, info) => new Promise((resolve) => {
       const id = require('crypto').randomUUID();
       agentApprovals.set(id, { resolve });
-      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: action.why || '' });
+      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: action.why || '', forced: !!info.forced });
       if (action.type === 'click' || action.type === 'move') {
         // COre points at where it wants to click.
         const d = primaryDisplay();
@@ -1682,17 +2009,28 @@ async function startAgent(goal, { remote = false } = {}) {
       else if (o.ok === false) addTranscript('system', `Agent step ${o.step} failed: ${o.error}`, { kind: 'error' });
     },
     log: toolAudit,
+    tools: ag.tools !== false ? agentTools(taskId) : null,
+    untrusted: (t, src) => {
+      const g = GUARD.untrusted(t, src);
+      if (g.flags.length) { toolAudit({ guard: 'injection-suspected', source: src, flags: g.flags }); addTranscript('system', `Heads up: the ${src} contains text that looks like instructions. The agent treats it as data only.`, { kind: 'error' }); }
+      return g.text;
+    },
+    checkpoint: (st) => writeAgentTask({ ...st, taskId }),
   });
   let r;
-  try { r = await agentRunner.run(goal); } catch (err) { r = { status: 'failed', reason: err.message }; }
+  try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
   try { globalShortcut.unregister('Escape'); } catch {}
+  { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }
   toDock('dock:agent-approve', null);
   toOverlay('state', 'idle');
   const msg = r.status === 'done' ? `Agent finished: ${r.summary || 'done'}`
     : r.status === 'ask' ? `Agent needs you: ${r.question}`
       : `Agent stopped: ${r.reason || r.status}.`;
   addTranscript('core', msg);
+  try { if (agentFiles().changed(taskId).length) addTranscript('system', 'Files were changed. Type /do undo to put them back.'); } catch {}
+  if (r.status !== 'done' && r.status !== 'ask') addTranscript('system', 'Type /do resume to continue this task later.');
   toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
+  noteEpisode(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`);
   if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
   return r;
 }
@@ -1762,7 +2100,8 @@ function toolAudit(entry) {
   try {
     const dir = path.join(app.getPath('userData'), 'logs');
     fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+    const e = typeof entry === 'string' ? { event: entry } : entry; // the agent logs plain lines
+    fs.appendFileSync(path.join(dir, 'tools.log'), `${JSON.stringify({ at: new Date().toISOString(), ...e })}\n`);
   } catch {}
 }
 
@@ -1798,7 +2137,14 @@ function runToolTag(item, coreId) {
   const name = coreById(coreId) ? coreById(coreId).name : 'COre';
   toolAudit({ core: coreId, tool: item.tool, arg: String(item.arg).slice(0, 200), ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
   addTranscript('system', r.ok ? `${name} ${r.summary}` : `${name} couldn't ${item.tool} ${item.arg}: ${r.error}`, { author: coreId, kind: r.ok ? 'progress' : 'error' });
-  return r.ok ? `${item.tool} ${item.arg}:\n${r.text}` : `${item.tool} ${item.arg} failed: ${r.error}`;
+  if (!r.ok) return `${item.tool} ${item.arg} failed: ${r.error}`;
+  // File contents are data, never instructions (prompt-injection guard).
+  const g = GUARD.untrusted(r.text, `project ${item.tool === 'read' ? 'file' : 'listing'} ${String(item.arg).slice(0, 80)}`);
+  if (g.flags.length) {
+    toolAudit({ core: coreId, guard: 'injection-suspected', source: String(item.arg).slice(0, 200), flags: g.flags });
+    addTranscript('system', `Heads up: ${item.arg} contains text that looks like instructions (${g.flags.join(', ')}). ${name} treats it as data only.`, { author: coreId, kind: 'error' });
+  }
+  return `${item.tool} ${item.arg}:\n${g.text}`;
 }
 
 // Runs only when the user clicks the button in the chat.
@@ -2064,10 +2410,21 @@ function ensureHelper(coreId) {
   return c;
 }
 
+// Smart routing: heavy work (the desktop agent, specialists, writing playbooks)
+// runs on the strong model; Prime's conversation stays on the fast one so its
+// warm session is never restarted.
+function routedConfig(kind) {
+  const b = config.data.brain || {};
+  const strong = b.claude && b.claude.strongModel;
+  if (b.routing === 'off' || !strong || strong === b.claude.model) return config.data;
+  if (!['agent', 'playbook', 'forge', 'sentinel', 'navigator', 'archivist', 'scout'].includes(kind)) return config.data;
+  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong, fallbackModel: b.claude.model } } };
+}
+
 function helperBrain(c) {
   if (!c.brain) {
     const mem = {}; // its own session id lives here: isolated from Prime's
-    c.brain = new Brain({ config: config.data, workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
+    c.brain = new Brain({ router: brainRouter, profile: 'strong', config: routedConfig(c.id), workDir, state: { get: (k) => mem[k], set: (k, v) => { mem[k] = v; }, flush() {} }, getKey: getSecret, onModelChange: () => {} });
   }
   return c.brain;
 }
@@ -2079,7 +2436,29 @@ function disposeHelperBrain(c) {
 
 // Send one message to a specialist. Messages to the same core run one at a
 // time (its context is sequential). Resolves { ok, reply?, error? }.
-function askCore(coreId, text, { task } = {}) {
+// Archivist works from memory, past work and the files you dropped in.
+async function archivistContext(text) {
+  const parts = [];
+  if (memory && config.data.memory.enabled !== false) {
+    const mem = await memory.contextForAsync(text, 14);
+    if (mem) parts.push(mem);
+    const st = memory.stats();
+    parts.push(`[Memory stats] ${st.total} memories (${Object.entries(st.byKind).map(([k, n]) => `${k} ${n}`).join(', ')}), ${st.pinned} pinned.`);
+    if (memory.conflicts.length) parts.push(`[Recently replaced memories]\n${memory.conflicts.slice(0, 8).map((c) => `- "${c.was}" was replaced by "${c.now}"`).join('\n')}`);
+  }
+  const ready = fileShelf().list().filter((f) => f.status === 'ready');
+  if (ready.length) {
+    parts.push(`[Files on the shelf] ${ready.map((f) => `${f.name} (${f.kind}${f.info ? `, ${f.info}` : ''})`).join('; ')}`);
+    const low = text.toLowerCase();
+    const named = ready.filter((f) => low.includes(f.name.toLowerCase()) || low.includes(f.name.toLowerCase().replace(/\.[^.]+$/, '')));
+    const pick = named.length ? named : ready.length <= 3 ? ready : [];
+    const fc = pick.length ? fileShelf().contextFor(pick.map((f) => f.id), { budget: 20000 }) : null;
+    if (fc) parts.push(fc.block);
+  }
+  return parts.join('\n\n');
+}
+
+function askCore(coreId, text, { task, review = false } = {}) {
   const c = ensureHelper(coreId);
   if (!c) return Promise.resolve({ ok: false, error: 'not available' });
   clearTimeout(c.mergeTimer);
@@ -2091,7 +2470,8 @@ function askCore(coreId, text, { task } = {}) {
     const ac = new AbortController();
     c.ac = ac;
     try {
-      const context = memory && config.data.memory.enabled !== false ? memory.contextFor(text) || '' : '';
+      const context = c.id === 'archivist' ? await archivistContext(text)
+        : memory && config.data.memory.enabled !== false ? (await memory.contextForAsync(text)) || '' : '';
       // Up to 3 rounds of read-only project tools before the final answer.
       let msg = CL.corePrompt(c.core, text, task);
       let reply = ''; let truncated = false; let error = null;
@@ -2109,6 +2489,18 @@ function askCore(coreId, text, { task } = {}) {
       const details = full.split(/\n\s*\n/).slice(1).join('\n\n').trim();
       addTranscript('core', details || full || '(no answer)', { author: c.id, ...(task ? { task: task.id } : {}) });
       offerProposals(full, c.id);
+      // Navigator hands a plan to the desktop agent: you start it (Enter).
+      const navTask = c.id === 'navigator' && /^\s*Task:\s*(.{4,300})$/im.exec(full);
+      if (navTask) {
+        const goal = navTask[1].trim().replace(/^["']|["']$/g, '');
+        addTranscript('system', `${c.name} can do this on your desktop. Press Enter to start: /do ${goal}`, { author: c.id, kind: 'progress' });
+        toDock('dock:suggest', `/do ${goal}`);
+      }
+      // Forge's file changes get a second pair of eyes before you apply them.
+      if (c.id === 'forge' && !review && (config.data.meiosis || {}).autoReview !== false && extractProposals(full).length) {
+        addTranscript('system', `${coreById('sentinel').name} is reviewing ${c.name}'s changes.`, { author: 'sentinel', kind: 'progress' });
+        askCore('sentinel', `Review the file changes ${c.name} just proposed for this request: "${text.slice(0, 400)}". Check correctness, edge cases, security and anything that breaks existing behaviour. Do not rewrite the files.\n\n${full.slice(0, 12000)}`, { task, review: true });
+      }
       if (truncated) addTranscript('system', `${c.name}'s answer was cut off (${error}).`, { author: c.id, kind: 'error' });
       toClone(c, 'state', 'idle');
       floor.request(c.id, () => speakForClone(c, CL.spokenSummary(full) || 'Done.'));
@@ -2162,9 +2554,24 @@ async function runSharedTask(targets, text) {
   addTranscript('system', `Shared task: ${names} working in parallel. COre will sum up.`, { author: 'prime', kind: 'progress', task: task.id });
   for (const step of task.steps) step.status = 'running';
   glanceTask(task);
+  // Collaboration: when Forge and Sentinel are both on a task, Sentinel reviews
+  // Forge's result instead of working blind in parallel.
+  const forgeStep = task.steps.find((s) => s.core === 'forge');
+  let forgeResolve;
+  const forgeDone = new Promise((res) => { forgeResolve = res; });
+  const chained = (step) => step.core === 'sentinel' && forgeStep;
   await Promise.all(task.steps.map(async (step) => {
     saveTask(task);
-    const r = await askCore(step.core, text, { task });
+    let r;
+    if (chained(step)) {
+      const fr = await forgeDone;
+      r = fr.ok
+        ? await askCore('sentinel', `The user asked: ${text}\n${coreById('forge').name} produced this. Review it: what is wrong or missing, and how to fix it.\n\n${String(fr.reply || '').slice(0, 8000)}`, { task, review: true })
+        : await askCore('sentinel', text, { task });
+    } else if (step.core === 'forge') {
+      r = await askCore('forge', text, { task, review: task.steps.some((s) => s.core === 'sentinel') });
+      forgeResolve(r);
+    } else r = await askCore(step.core, text, { task });
     step.status = r.ok ? 'completed' : r.error === 'cancelled' ? 'cancelled' : 'failed';
     if (r.ok) step.result = r.reply.slice(0, 4000); else step.error = r.error;
     saveTask(task);
@@ -2173,6 +2580,7 @@ async function runSharedTask(targets, text) {
   const done = task.steps.filter((s) => s.status === 'completed');
   task.status = done.length === task.steps.length ? 'completed' : done.length ? 'partial' : task.steps.every((s) => s.status === 'cancelled') ? 'cancelled' : 'failed';
   saveTask(task);
+  if (task.status !== 'cancelled') noteEpisode(`Shared task (${task.steps.map((st) => coreById(st.core).name).join(', ')}, ${task.status}): ${String(text).slice(0, 160)}`);
   if (task.status === 'cancelled') return task;
   // Prime coordinates: wait for any conversation in progress, then sum up.
   await waitPrimeIdle();
@@ -2351,7 +2759,7 @@ function playGame(name) {
 // as something the user said.
 // chain: a follow-up turn right after the previous one (skill results): the
 // previous reply keeps speaking and this one queues after it.
-async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false } = {}) {
+async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false, files = [], playbook = null } = {}) {
   text = String(text || '').trim();
   if (!text) return;
   // Meiosis routing: decide the recipient before touching Prime's turn, so
@@ -2360,6 +2768,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/do\s+\S/i.test(text)) { startAgent(text.replace(/^\/do\s+/i, '').slice(0, 500), { remote }); return; }
     if (agentRunner && agentRunner.running && typed) stopAgent('you sent a message');
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
+    if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
+    if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
     if (ctl) {
@@ -2398,7 +2808,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     }
     if (route.targets.includes('prime')) text = route.text || text; // "@COre explain this"
   }
-  if (!internal && !chain && !withScreen) {
+  if (!internal && !chain && !withScreen && !files.length && !playbook) {
     // Instant answers for short requests (time, music keys, lyrics card).
     const busyBefore = !!current;
     if (quickReply(text, { typed })) { if (!busyBefore) toOverlay('state', 'idle'); return; }
@@ -2415,10 +2825,12 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   turnSkills = mySkills;
   turnVia = internal ? 'COre' : typed ? 'chat' : 'voice';
   if (typed || internal) followUpPending = false;
+  const fileCtx = files.length ? fileShelf().contextFor(files) : null;
   if (!internal) {
-    addTranscript('user', text);
+    addTranscript('user', text, fileCtx ? { files: fileCtx.names } : {});
     if (presence) presence.noteInteraction();
     stopCloneSpeech(); // the user talking to COre interrupts a specialist; COre's own turns don't
+    autoCapture(text);
   }
   if (!brain) {
     addTranscript('system', 'No brain is configured. Open Settings and check brain.provider.');
@@ -2445,9 +2857,20 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   const contextBlocks = [];
   try {
     if (memory && config.data.memory.enabled !== false) {
-      const mem = memory.contextFor(text);
+      const mem = await memory.contextForAsync(text);
       if (mem) contextBlocks.push(mem);
     }
+    if (fileCtx) {
+      contextBlocks.push(fileCtx.block);
+      if (fileCtx.image && !shot) shot = fileImageShot(fileCtx.image, fileCtx.imageName);
+      if (fileCtx.flags.length) toolAudit({ guard: 'injection-suspected', source: `files ${fileCtx.names.join(', ')}`, flags: fileCtx.flags });
+    }
+    if (playbook) contextBlocks.push(PB.skillBlock(playbook));
+    else if (playbooksOn() && playbooks.length && !internal) {
+      for (const s of PB.matchSkills(playbooks, text)) contextBlocks.push(PB.skillBlock(s));
+    }
+    // The playbook list costs tokens every turn: only when the user talks about skills.
+    if (playbooksOn() && playbooks.length && /\b(skills?|playbooks?|how-?tos?|workflows?|routines?)\b/i.test(text)) { const cat = PB.catalog(playbooks); if (cat) contextBlocks.push(cat); }
     if (plugins.length) contextBlocks.push(`[Skills] Extra skills you can use with the do tag (do NAME QUERY): ${plugins.map((p) => `${p.name} (${p.description || 'opens a link'})`).join(', ')}`);
     if (CLIPBOARD_RE.test(text)) {
       // Electron 45+: clipboard.readText() returns a Promise (older: a string).
@@ -2623,6 +3046,7 @@ function registerHotkeys() {
   bind(hk.listenWithScreen, () => { followCursorDisplay(); startListening(true); }, 'talk about screen');
   bind(hk.panel, () => { followCursorDisplay(); toggleDock(); }, 'chat');
   bind(hk.hide, toggleOrb, 'hide orb');
+  bind(hk.emergency, () => emergencyStop('you pressed the emergency hotkey'), 'emergency stop');
 }
 
 // ---------------------------------------------------------------- IPC
@@ -2689,7 +3113,20 @@ function wireIpc() {
       .map((m) => ({ role: m.role === 'notice' ? 'system' : m.role, text: m.text, author: m.author, kind: m.kind, to: m.to })),
     cores: coresForUi(),
   } : null));
-  ipcMain.on('dock:ask', (e, text) => { if (fromDock(e)) handleUserText(text, { typed: true }); });
+  ipcMain.on('dock:ask', (e, payload) => {
+    if (!fromDock(e)) return;
+    const { text, files } = typeof payload === 'string' ? { text: payload } : (payload || {});
+    handleUserText(String(text || ''), { typed: true, files: Array.isArray(files) ? files.slice(0, 10).map(String) : [] });
+  });
+  const fromCenter = (e) => isFrom(centerWin, e);
+  ipcMain.handle('center:state', (e) => (fromCenter(e) ? centerState() : null));
+  ipcMain.handle('center:action', (e, { name, arg } = {}) => (fromCenter(e) ? centerAction(String(name || ''), arg == null ? '' : String(arg)) : null));
+  ipcMain.on('center:close', (e) => { if (fromCenter(e)) centerWin.close(); });
+  ipcMain.on('dock:openCenter', (e) => { if (fromDock(e)) openCommandCenter(); });
+  ipcMain.handle('dock:files', (e) => (fromDock(e) ? fileShelf().list() : []));
+  ipcMain.handle('dock:filesAdd', (e, paths) => (fromDock(e) && Array.isArray(paths) ? addFiles(paths.filter((p) => typeof p === 'string' && path.isAbsolute(p))) : []));
+  ipcMain.on('dock:filesMedia', (e, { id, ...rest } = {}) => { if (fromDock(e)) fileMedia(id, rest); });
+  ipcMain.on('dock:filesRemove', (e, id) => { if (fromDock(e)) { fileShelf().remove(String(id)); sendFiles(); } });
   ipcMain.on('dock:stop', (e) => { if (fromDock(e)) { abortCurrent(); toOverlay('speech:stop'); cancelHelpers(); } });
   ipcMain.on('dock:listen', (e) => { if (fromDock(e)) startListening(false); });
   ipcMain.on('dock:openPanel', (e) => { if (fromDock(e)) togglePanel(true); });
@@ -2746,6 +3183,7 @@ function wireIpc() {
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));
   ipcMain.on('settings:close', (e) => { if (fromSettings(e)) settingsWin.close(); });
   ipcMain.handle('dock:memory', (e) => (fromDock(e) && memory ? memory.list() : []));
+  ipcMain.on('dock:memoryPin', (e, { id, on } = {}) => { if (fromDock(e) && memory) { memory.pin(String(id), !!on); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryEdit', (e, { id, text } = {}) => { if (fromDock(e) && memory) { memory.edit(String(id), String(text || '')); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryForget', (e, id) => { if (fromDock(e) && memory) { const gone = memory.forget(String(id)); if (gone) noteMemoryRemoved(gone.text); toDock('dock:memory', memory.list()); } });
   ipcMain.on('dock:memoryClear', (e) => { if (fromDock(e) && memory) { memory.clear(); toDock('dock:memory', []); addTranscript('system', 'Memory cleared.'); } });
@@ -3120,6 +3558,12 @@ app.whenReady().then(async () => {
   });
   dockVisible = state.get('dockVisible') !== false;
   memory = new Memory(path.join(userData, 'memory.json'));
+  startMemoryEngine();
+  // A task cut off by a crash or quit can pick up where it stopped.
+  setTimeout(() => {
+    const t = readAgentTask();
+    if (t && t.status === 'running' && Date.now() - (t.at || 0) < 7 * 864e5) addTranscript('system', `An agent task was interrupted at step ${t.step}: "${String(t.goal).slice(0, 80)}". Type /do resume to continue it.`);
+  }, 4000);
   notes = new SK.Notes(path.join(userData, 'notes.json'));
   refreshCores();
   // Shared tasks that were running when COre stopped are marked interrupted,
@@ -3148,6 +3592,9 @@ app.whenReady().then(async () => {
     }
   }
   plugins = SK.loadPlugins(path.join(userData, 'skills'));
+  PB.seedExamples(playbookDir(), path.join(__dirname, '..', '..', 'assets', 'skills'));
+  reloadPlaybooks();
+  watchPlaybooks();
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();
@@ -3250,6 +3697,8 @@ app.on('will-quit', () => {
   stopGlanceReader();
   if (companion) companion.stop();
   stopAgent('quitting');
+  try { if (playbookScheduler) playbookScheduler.stop(); if (playbookWatch) playbookWatch.close(); } catch {}
+  if (embedder) embedder.dispose();
   globalShortcut.unregisterAll();
   clearInterval(cursorTimer);
   if (!restarting) {

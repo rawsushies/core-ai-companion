@@ -56,6 +56,9 @@ test('gesture tags parse; the persona lists every gesture without shell metachar
   assert.deepStrictEqual(parseTag('gesture shrug'), { name: 'gesture', gesture: 'shrug' });
   assert.deepStrictEqual(parseTag('gesture count 4'), { name: 'gesture', gesture: 'count', n: 4 });
   assert.strictEqual(parseTag('gesture explode'), null);
+  assert.deepStrictEqual(parseTag('board Ship it; Freeze; Test; Tag; Publish; Extra'), { name: 'board', title: 'Ship it', points: ['Freeze', 'Test', 'Tag', 'Publish'] });
+  assert.deepStrictEqual(parseTag('board Pipes | also | work').points, ['also', 'work']);
+  assert.strictEqual(parseTag('board Only a title'), null, 'a board needs at least one point');
   const p = persona({ canReadFiles: false });
   for (const n of G.NAMES) assert.ok(p.includes(n), n);
   assert.ok(!/["&|<>^%!]/.test(p));

@@ -1,7 +1,7 @@
 'use strict';
 
-// Meiosis Mode identities: four cores total. Prime is COre itself (the main
-// orb and session); Scout, Forge and Sentinel are specialist role profiles
+// Meiosis Mode identities: six cores total. Prime is COre itself (the main
+// orb and session); Scout, Forge, Sentinel, Archivist and Navigator are specialist role profiles
 // that run as helper clones over the SAME Brain provider chain. Roles, names,
 // colours and voices are configurable (config.json → meiosis.cores).
 
@@ -20,7 +20,15 @@ const DEFAULTS = [
   },
   {
     id: 'sentinel', name: 'Sentinel', aliases: ['sentinel', 'qa', 'review', 'reviewer'], role: 'QA', color: '#b475ff', voice: 'am_michael', semitones: 0,
-    prompt: 'You are Sentinel, the reviewer. Find bugs, edge cases, security problems and regressions in what you are given, and challenge unsupported conclusions. Be specific: what fails, how to reproduce it, how to fix it. Say clearly when something looks correct.',
+    prompt: 'You are Sentinel, the reviewer. Find bugs, edge cases, security problems and regressions in what you are given, and challenge unsupported conclusions. Be specific: what fails, how to reproduce it, how to fix it. Say clearly when something looks correct. When you review a proposal, end with one line: "Verdict: ship it", "Verdict: fix first" or "Verdict: reject".',
+  },
+  {
+    id: 'archivist', name: 'Archivist', aliases: ['archivist', 'memory', 'librarian', 'archive'], role: 'Memory', color: '#ffd166', voice: 'bm_lewis', semitones: -3,
+    prompt: 'You are Archivist, the keeper of memory and files. You are given what COre remembers about the user (with how sure it is), the history of past work, and the files the user dropped in. Answer from those first and say which memory or file each point comes from. Point out memories that contradict each other or look out of date, and suggest what to forget or correct. Never invent memories; say plainly when nothing is stored.',
+  },
+  {
+    id: 'navigator', name: 'Navigator', aliases: ['navigator', 'operator', 'nav', 'pilot'], role: 'Operator', color: '#ff5c8a', voice: 'am_eric', semitones: -1,
+    prompt: 'You are Navigator, the desktop and browser operator. Plan how to get things done on this computer: which app or site, which clicks, menus and shortcuts, step by step, and what could go wrong. You do not act yourself. When the plan can be carried out by the desktop agent, end with exactly one line "Task: <one short instruction for the agent>" so the user can start it. Never plan steps that enter passwords or payment details.',
   },
 ];
 
@@ -84,6 +92,8 @@ function parseMentions(cores, input, { spoken = false } = {}) {
 // Prime's [[delegate ROLE TASK]] / the older [[clone TASK]]: which specialist?
 function roleForTask(task) {
   const t = String(task || '').toLowerCase();
+  if (/\b(remember(ed)?|recall|memor(y|ies)|what do you know about me|history|my (notes|files|documents)|last time|archive)\b/.test(t)) return 'archivist';
+  if (/\b(open|click|go to|navigate|browse|website|desktop|operate|fill (in|out)|download|install)\b/.test(t)) return 'navigator';
   if (/\b(review|check|audit|test|verify|qa|security|bug|edge case|critique|proofread)/.test(t)) return 'sentinel';
   if (/\b(research|find out|look up|compare|investigate|what is|which|sources?|evidence|documentation|docs)\b/.test(t)) return 'scout';
   return 'forge';

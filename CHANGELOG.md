@@ -2,6 +2,97 @@
 
 ## Unreleased
 
+### COre 2.0, part 10: Brain router (no longer tied to Claude Code)
+
+- **Automatic brain choice** (Settings, Brain, "Choosing a brain"; default Automatic). For every request COre picks the best healthy brain based on what the request needs: an image (only brains that can see), deep work for the agent and specialists, or a fast reply for chat. Measured speed, success rate, and your preferred brain (a bonus, not a lock) also count. Manual keeps your exact order.
+- **Health and cooldowns**: each failure is classified (no key or login, usage or rate limit, overload, timeout, network, missing model) and that brain rests for a while that grows with repeats and honours the provider's Retry-After. Every brain (Prime, agent, specialists) shares what it learns, so a dead brain costs nothing on the next turn. Adding a key or logging in clears it at once.
+- **Faster failover**: once COre knows how fast a brain usually answers, it waits at most 4× that (minimum 20 s) before moving on, instead of always 90 s.
+- **Claude steps down** from the strong model to the fast one when the strong one hits its usage limit, before switching provider.
+- The command center has a **Brains** card: each brain's state (ready, resting until a time, needs setup, no key), speed and what answered last.
+- Fewer tokens per message: the playbook list is only sent when you talk about skills or playbooks.
+
+### COre 2.0, part 9: Smart model routing
+
+- Conversation stays on the fast Claude model (Haiku by default) and its warm session is never restarted; the **desktop agent, the specialist cores and playbook writing run on the stronger model** (Sonnet by default). Settings, Brain: "Smart routing" and "Stronger Claude model"; choose "Use the model above for everything" to turn it off.
+- Changing brain settings now also refreshes the agent's and idle specialists' brains.
+
+### COre 2.0, part 8: Ash and the board
+
+- **The board**: when an explanation deserves it, COre crumbles into ash, streams its smoke out into a board about **a third of the screen wide** beside itself, writes a title and up to four points in smoke while the crisp text condenses in (blur to sharp, points one by one), holds it while talking them through, then pulls the smoke back and reforms with a shockwave. The brain triggers it with `[[board TITLE; POINT; POINT]]`; demo key **B**.
+- **Ash dispersion**: grey ash with glowing embers that drift out and down through the smoke flow; used for the board transition and available to other effects.
+- After the words appear, the smoke settles into the board's frame so it never doubles the text. Reduced-motion skips the ash and the shockwave.
+- Fixed: the smoke jumped when COre's window grew or moved (for example when pointing); particles now stay put on the desktop.
+
+### COre 2.0, part 7: Command center
+
+- **One window for everything COre is doing** (tray → Command center, the button in quick settings, or `/center`): the desktop agent's task with Stop / Resume / Undo, the six cores and which are working, recent shared tasks, playbooks with their next scheduled run and a Run button, memory health (counts, recently replaced facts, Tidy up now), phone / Google Drive / backup status, recent files, and a filterable activity log with warnings highlighted.
+- A large **Emergency stop** button in the header (same as Ctrl+Alt+Shift+X).
+- Fixed: agent steps were written to the activity log one character per field.
+
+### COre 2.0, part 6: Playbooks and workflows
+
+- **Playbooks**: reusable how-tos as `SKILL.md` files (the Agent Skills format) in COre's data folder, `skills/<name>/SKILL.md`. COre knows each one by name and description, follows a playbook when a request fits it (trigger phrases or matching words), and can hand it to a specific core (`core: sentinel`).
+- **`/skills`** lists them, **`/skill NAME input`** runs one, **`/skill save NAME`** has COre write a new playbook from the current conversation (it never overwrites an existing one).
+- **Workflows**: a playbook with `schedule:` (`daily 08:30`, `weekdays 17:00`, `mon,wed 09:15`, `every 2h`) runs on its own; runs are logged and remembered across restarts.
+- Four examples on first run: meeting-notes (Archivist), code-review (Sentinel), site-report for IFC/DXF (Archivist), and daily-briefing (scheduled, off until you enable it).
+- Fixed: a brain request without an item handler could crash the speech planner.
+
+### COre 2.0, part 5: Collaborating specialists
+
+- Two new cores: **Archivist** (memory and files: answers from what COre remembers, past work and the file shelf, cites its sources, and points out stale or conflicting memories) and **Navigator** (desktop and browser operator: plans the clicks and shortcuts, and leaves a ready `/do …` in the message box for you to start).
+- **Sentinel reviews Forge**: every file change Forge proposes gets an automatic review with a verdict (Settings, Projects; on by default). In a shared task with both, Sentinel reviews Forge's result instead of working blind in parallel.
+- Prime routes `[[delegate]]` work to the new roles by topic.
+
+### COre 2.0, part 4: File intelligence
+
+- **Drop files on the chat** (or use the paperclip) and they become Drive-style cards above the message box. Selected cards go with your messages; **Sum** summarizes one.
+- Read locally, no upload step: **PDF** (Mozilla pdf.js, scripts never run; a built-in reader as fallback), **Word/ODT**, **Excel/CSV/TSV** (every sheet as rows), **PowerPoint**, **images** (sent to a vision model, large ones shrunk), **code and text**, **IFC** (BIM: schema, project, storeys, element counts, spaces, materials) and **DXF** (CAD: version, extents, layers, entity counts, drawing text). DWG asks for a DXF export.
+- **Audio and video** are decoded in the app and transcribed by the local Whisper model (up to 15 minutes); videos also contribute four frames.
+- All file content reaches the brain fenced as untrusted data; files with instruction-like text are flagged.
+- Cards persist across restarts (up to 40, stored in the app's data folder).
+
+### COre 2.0, part 3: Autonomous agent tools
+
+- The desktop agent can now also **run commands, read/write/move/delete files and read web pages** (Settings, Agent; on by default once the agent is enabled).
+  - Commands: no shell (argv only), pipes/redirects/variables refused, destructive programs and git push/reset blocked, working folder jailed to the project, secrets removed from the environment, timeout and capped output. **Every command asks**, even after "Allow all steps", unless it matches `agent.allowCommands` (e.g. `git status`).
+  - Files: only inside the project folder (symlinks resolved), secret files (`.env`, keys, credentials) refused, atomic writes, and a backup before every change. **`/do undo`** puts back every file the last task touched.
+  - Web: https only, no local network addresses, text pages only, size-capped.
+  - Every result goes back to the brain fenced as untrusted data (prompt-injection guard), and suspicious text is flagged.
+- **Verification**: a task that changed something gets one more look (a fresh screenshot) before it counts as done.
+- **Recovery**: after a failed step the brain is told to try another way; four failures in a row end the task.
+- **Persistent tasks**: progress is checkpointed every step. **`/do resume`** continues a stopped, limited or crashed task; COre mentions an interrupted task at startup.
+
+### COre 2.0, part 2: Security core
+- **Emergency stop:** Ctrl+Alt+Shift+X (changeable) or the tray's "Emergency stop" halts everything at once:
+  - the desktop agent
+  - every running reply
+  - helpers' work and speech
+  - song reading
+  - the phone link
+  - pending approvals
+
+  It's logged, and COre shows what it stopped.
+- **Prompt-injection guard:** file contents reach the brain fenced as data, with COre's own action syntax broken, so
+  a document can't trigger an action. Instruction-like text ("ignore previous instructions", "send your API key",
+  "run this command…") is flagged in the chat and in the audit log.
+
+### COre 2.0, part 1: Memory Intelligence Engine
+- Every memory now has a kind (profile, preference, project, history, fact), a confidence score, its sources and
+  its history.
+- **Automatic capture:** clear statements in your messages ("my name is…", "I live in…", "I prefer…",
+  "remember that…", some Bahasa Indonesia) are saved and shown in the chat. Questions and "what if" sentences are
+  ignored. Off switch: Settings → Privacy.
+- **Confidence:** saying something again makes COre surer. Unused facts slowly lose certainty unless pinned, and
+  unsure facts are marked as such to the brain.
+- **Contradictions:** a new fact replaces an opposite one ("likes X" → "hates X") or another value for the same slot
+  (where you live, your name…). The old one is kept in its history.
+- **Project history:** finished shared tasks and desktop-agent tasks are remembered as episodes, tagged with the
+  current project, and recalled when relevant.
+- **Smarter search:** keywords plus fuzzy matching, plus meaning-based search with a small local model (downloads
+  about 23 MB once; falls back gracefully when offline).
+- **Consolidation:** a daily pass merges near-duplicates and retires stale, unused history.
+- **Pin** (★) keeps a fact always in use. The memory list shows confidence and separates facts from history.
+
 ### Fixed
 - The chat stopped following new messages when several arrived quickly (a shared task): it now stays pinned to
   the newest message unless you scroll up yourself.

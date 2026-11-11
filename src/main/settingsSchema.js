@@ -23,6 +23,7 @@ const SECTIONS = [
       { key: 'hotkeys.listenWithScreen', label: 'Talk about my screen', type: 'hotkey' },
       { key: 'hotkeys.panel', label: 'Show / hide chat', type: 'hotkey' },
       { key: 'hotkeys.hide', label: 'Hide / show COre', type: 'hotkey' },
+      { key: 'hotkeys.emergency', label: 'Emergency stop (stops everything at once)', type: 'hotkey' },
     ],
   },
   {
@@ -65,7 +66,10 @@ const SECTIONS = [
     title: 'Brain',
     fields: [
       { key: 'brain.claude.model', label: 'Claude model', type: 'select', options: [['haiku', 'Haiku (fastest)'], ['sonnet', 'Sonnet (smarter)'], ['opus', 'Opus (smartest, slowest)']] },
-      { key: 'brain.provider', label: 'Main brain', type: 'select', options: [['claude-cli', 'Claude (Claude Code login)'], ['gemini', 'Google Gemini'], ['groq', 'Groq'], ['openrouter', 'OpenRouter'], ['ollama', 'Local model (Ollama)']] },
+      { key: 'brain.mode', label: 'Choosing a brain', type: 'select', options: [['auto', 'Automatic: the best healthy brain for each request (recommended)'], ['manual', 'Manual: always try them in my order']] },
+      { key: 'brain.routing', label: 'Smart routing', type: 'select', options: [['auto', 'Chat on the model above; agent and specialists on the stronger one'], ['off', 'Use the model above for everything']] },
+      { key: 'brain.claude.strongModel', label: 'Stronger Claude model (for routing)', type: 'select', options: [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku (same as fast)']] },
+      { key: 'brain.provider', label: 'Preferred brain', type: 'select', options: [['claude-cli', 'Claude (Claude Code login)'], ['gemini', 'Google Gemini'], ['groq', 'Groq'], ['openrouter', 'OpenRouter'], ['ollama', 'Local model (Ollama)']] },
       { key: 'brain.ollama.model', label: 'Local model name', type: 'text', maxLength: 80 },
     ],
   },
@@ -85,12 +89,14 @@ const SECTIONS = [
       { key: 'tools.projectRoot', label: 'Project folder COre may read (never change)', type: 'folder', optional: true },
       { key: 'tools.enabled', label: 'Let COre and its cores read it', type: 'toggle' },
       { key: 'tools.allowWrites', label: 'Let cores propose changes (you review a diff and approve each one)', type: 'toggle' },
+      { key: 'meiosis.autoReview', label: 'Sentinel reviews every change Forge proposes before you apply it', type: 'toggle' },
     ],
   },
   {
     id: 'skills',
     title: 'Skills',
     fields: [
+      { key: 'skills.playbooks', label: 'Playbooks: use my saved SKILL.md how-tos when they fit, and run scheduled ones (/skills lists them)', type: 'toggle' },
       { key: 'skills.weather', label: 'Weather (free Open-Meteo service)', type: 'toggle' },
       { key: 'skills.city', label: 'My city (for weather)', type: 'text', maxLength: 80, optional: true },
       { key: 'skills.music', label: 'Control music (play, pause, next, volume)', type: 'toggle' },
@@ -121,6 +127,7 @@ const SECTIONS = [
       { key: 'agent.enabled', label: 'Let COre operate this PC for tasks I start with /do (it clicks and types; Esc stops it)', type: 'toggle' },
       { key: 'agent.approve', label: 'Approval', type: 'select', options: [['every', 'Ask me before every click, key or typing (recommended)'], ['task-auto', 'Never ask (only for tasks you watch)']] },
       { key: 'agent.maxSteps', label: 'Most steps per task', type: 'range', min: 5, max: 50, step: 5 },
+      { key: 'agent.tools', label: 'Also let it run commands, edit files in the project folder and read web pages (commands always ask; file changes can be undone with /do undo)', type: 'toggle' },
     ],
   },
   {
@@ -149,6 +156,8 @@ const SECTIONS = [
     title: 'Privacy',
     fields: [
       { key: 'memory.enabled', label: 'Remember things about me', type: 'toggle' },
+      { key: 'memory.autoCapture', label: 'Pick up facts I mention ("my name is…", "I prefer…"), shown in the chat', type: 'toggle' },
+      { key: 'memory.semantic', label: 'Smarter memory search with a small local model (downloads about 23 MB once)', type: 'toggle', restart: true },
       { key: 'watch.enabled', label: 'Notice error pop-ups and offer help (reads window titles only)', type: 'toggle' },
       { key: 'watch.speak', label: 'Say it out loud when something pops up', type: 'toggle' },
       { key: 'screen.autoShareOnDeixis', label: 'Look at my screen when I say "look at this"', type: 'toggle' },

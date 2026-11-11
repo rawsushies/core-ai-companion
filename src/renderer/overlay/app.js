@@ -84,6 +84,11 @@
   let shapeAct = null;
   let shapeW = 0;
   const shapeCache = new Map();
+  // Board (explain mode): { title, points, rect (display px), t0, holdMs, smoke, gatherAt }
+  let board = null;
+  let boardW = 0;
+  let ashW = 0;
+  let boardLast = null; // the rect, kept while the smoke flows back
   const vis = { tint: MODES.idle.tint.slice(), glow: 0.14, think: 0, halo: 0, listen: 0, aura: 0.78 };
   let auraC = null; // display coordinates; trails the body like the smoke does
   let mood = null; // { name, since }
@@ -428,7 +433,98 @@
     return key;
   }
 
+  // ------------------------------------------------------------ board
+  // COre crumbles into ash, streams out into a board about a third of the
+  // screen wide beside itself, shows a title and points while it talks them
+  // through, then pulls the smoke back and reforms.
+  const boardEl = document.getElementById('board');
+  window.__coreBoard = () => (board ? { title: board.title, points: board.points.slice(), rect: { ...board.rect }, shown: boardEl.classList.contains('show'), boardW, ashW } : { boardW, ashW }); // test hook
+
+  function boardRect(pos) {
+    const r = body.r;
+    const w = Math.round(Math.min(680, Math.max(340, view.w / 3)));
+    const h = Math.round(Math.min(view.h * 0.6, Math.max(210, w * 0.56)));
+    const gap = r * 1.8;
+    const rightRoom = view.w - pos.x - gap - 12;
+    const leftRoom = pos.x - gap - 12;
+    const right = rightRoom >= w || rightRoom >= leftRoom;
+    const x = Math.min(Math.max(12, right ? pos.x + gap : pos.x - gap - w), view.w - w - 12);
+    const y = Math.min(Math.max(12, pos.y - h / 2), view.h - h - 12);
+    return { x, y, w, h };
+  }
+
+  function present(item) {
+    const b = SH.boardText(item.title, item.points);
+    if (!b.title || !b.points.length) return;
+    const rect = boardRect(body.pos);
+    const words = `${b.title} ${b.points.join(' ')}`.split(/\s+/).length;
+    board = { ...b, rect, t0: performance.now(), holdMs: Math.min(16000, Math.max(5000, 2200 + words * 380)), smoke: false, gatherAt: 0 };
+    boardLast = rect;
+    shapeAct = null;
+    act = null;
+    boardEl.textContent = '';
+    const h = document.createElement('h3');
+    h.textContent = b.title;
+    const ul = document.createElement('ul');
+    for (const p of b.points) { const li = document.createElement('li'); li.textContent = p; ul.append(li); }
+    boardEl.append(h, ul);
+    boardEl.style.width = `${rect.w}px`;
+    boardEl.style.height = `${rect.h}px`;
+    boardEl.style.setProperty('--board-tint', `rgb(${vis.tint.map((v) => Math.round(Math.min(1, v * 0.6 + 0.4) * 255)).join(',')})`);
+    boardEl.classList.remove('show');
+    boardEl.hidden = false;
+    if (renderer && renderer.setShape) {
+      try { renderer.setShape(SH.boardPoints(b, rect.w / rect.h)); board.smoke = true; } catch (e) { console.error('board failed', e); }
+    }
+  }
+
+  function endBoard(now = performance.now()) {
+    if (!board) return;
+    if (!board.gatherAt) board.gatherAt = now;
+  }
+
+  function updateBoard(now, dt) {
+    let ashT = 0;
+    let boardT = 0;
+    if (board) {
+      const el = now - board.t0;
+      const reduce = reduceMotion();
+      const ashEnd = reduce ? 0 : 650;
+      if (!board.gatherAt) {
+        // Hold while COre is still talking it through (up to 8 s extra).
+        const due = board.t0 + ashEnd + board.holdMs;
+        if (now > due && !(voice.speaking && now < due + 8000)) board.gatherAt = now;
+      }
+      if (board.gatherAt) {
+        const g = now - board.gatherAt;
+        boardEl.classList.remove('show');
+        ashT = !reduce && g < 380 ? 0.4 : 0;
+        boardT = 0;
+        if (g > 450 && boardW < 0.04) {
+          board = null;
+          boardEl.hidden = true;
+          if (!reduce) { pulseAt(body.pos.x, body.pos.y, 0.7); anim.inhale = Math.max(anim.inhale, 0.6); }
+        }
+      } else if (el < ashEnd) {
+        ashT = 1;
+      } else {
+        boardT = board.smoke ? 1 : 0;
+        if (el > ashEnd + (board.smoke ? 650 : 0)) boardEl.classList.add('show');
+        // The smoke wrote the words; once the crisp text is in, it settles into the frame.
+        if (board.smoke && !board.framed && el > ashEnd + 1900) {
+          board.framed = true;
+          try { renderer.setShape(SH.boardPoints(board, board.rect.w / board.rect.h, null, { frameOnly: true })); } catch {}
+        }
+      }
+    }
+    ashW += (ashT - ashW) * Math.min(1, dt * (ashT > ashW ? 7 : 3.5));
+    boardW += (boardT - boardW) * Math.min(1, dt * (boardT > boardW ? 2.2 : 2.8));
+    if (!board && boardW < 0.01) boardLast = null;
+  }
+
   function gesture(item) {
+    if (item.name === 'board') { lastModelGesture = performance.now(); present(item); return; }
+    if (board && item.name === 'form') return; // the board owns the smoke for now
     // A real point wins over a pointing gesture (the model sometimes sends both).
     if (item.name === 'point') { if (act && /^point|beckon/.test(act.name)) act = null; point(item.x, item.y); }
     else if (item.name === 'explain') explain();
@@ -455,6 +551,7 @@
     explainUntil = 0;
     act = null;
     shapeAct = null;
+    endBoard();
     body.arms.forEach((a) => { a.goal = 0; });
     if (mode === 'speaking' || mode === 'thinking') setMode('idle');
   }
@@ -577,7 +674,7 @@
 
   // Is anything happening that needs full frame rate?
   function isActive() {
-    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || !!act || !!shapeAct || shapeW > 0.01 || body.dragging || !!attention || !!mood || noticeKick > 0.05
+    return mode !== 'idle' || voice.speaking || !!pointing || !!explainUntil || !!act || !!shapeAct || shapeW > 0.01 || !!board || boardW > 0.01 || ashW > 0.01 || body.dragging || !!attention || !!mood || noticeKick > 0.05
       || anim.form < 0.995 || !!anim.pulse || anim.spin > 0.05 || anim.inhale > 0.02
       || Math.hypot(body.vel.x, body.vel.y) > 30 || body.arms.some((a) => a.extend > 0.02);
   }
@@ -649,6 +746,7 @@
     updateGesture(now, t);
     if (shapeAct && shapeAct.dur !== Infinity && now - shapeAct.start > shapeAct.dur) shapeAct = null;
     shapeW += ((shapeAct ? 1 : 0) - shapeW) * Math.min(1, dt * (shapeAct ? 3.2 : 2.2));
+    updateBoard(now, dt);
     M.step(body, dt);
     const md0 = mood ? MOODS[mood.name] : null;
     const amp = Math.min(1, voice.update(dt, t) * (1 + (md0 ? Math.max(0, md0.energy) * moodW : 0)));
@@ -705,13 +803,17 @@
       form: Math.min(1, anim.form),
       pulse: anim.pulse ? { ...local(anim.pulse), age: (now - anim.pulse.t0) / 1000, strength: anim.pulse.strength } : null,
       spin: anim.spin + actBody.spin,
-      shape: shapeW,
+      shape: Math.max(shapeW, boardW),
+      board: boardW > 0.005 && boardLast ? { x: boardLast.x + boardLast.w / 2 - ox, y: boardLast.y + boardLast.h / 2 - oy, hw: boardLast.w / 2 - 6, hh: boardLast.h / 2 - 6 } : null,
+      ash: ashW,
+      origin: { x: ox, y: oy },
       inhale: Math.min(1, anim.inhale + Math.max(0, actBody.squash) * 4),
     });
 
     placeCaption(local(pos));
     const gr = glanceRect(pos);
     if (gr) glanceEl.style.transform = `translate(${Math.round(gr.x - ox)}px, ${Math.round(gr.y - oy)}px)`;
+    if (board) boardEl.style.transform = `translate(${Math.round(board.rect.x - ox)}px, ${Math.round(board.rect.y - oy)}px)`;
 
     if (bridge && now - lastBoundsSent > 100) {
       bridge.orbBounds({ x: body.pos.x, y: body.pos.y, r: body.r });
@@ -737,9 +839,9 @@
       arms,
       point: pointing ? { x: pointing.x, y: pointing.y } : null,
       caption: capShown ? { w: caption.offsetWidth, h: caption.offsetHeight, above: dockVisible } : null,
-      extra: [glanceRect(pos)],
+      extra: [glanceRect(pos), boardLast ? { x: boardLast.x - 16, y: boardLast.y - 16, w: boardLast.w + 32, h: boardLast.h + 32 } : null],
     });
-    const settled = !pointing && !explainUntil && !body.dragging && Math.hypot(body.vel.x, body.vel.y) < 20
+    const settled = !board && boardW < 0.02 && !pointing && !explainUntil && !body.dragging && Math.hypot(body.vel.x, body.vel.y) < 20
       && body.arms.every((a) => a.extend < 0.02);
     const next = S.decideSteady({ stage, need, view, r: body.r, now, settled, dragging: body.dragging, state: stageState });
     if (next) {
@@ -1008,6 +1110,7 @@
       const k = e.key.toLowerCase();
       if (k === 'p') { voice.action(() => point(mouse.x, mouse.y)); voice.say('That spot, right there.'); voice.end(); }
       if (k === 'e') { voice.action(explain); voice.say('Here is the idea, in two parts.'); voice.end(); }
+      if (k === 'b') { voice.action(() => present({ title: 'How COre answers', points: ['Listens and reads the screen', 'Thinks with the best brain online', 'Speaks, points and shows'] })); voice.say('Three things happen when you ask me something.'); voice.end(); }
       if (k === 't') { voice.say("Hi, I'm COre. I live on your screen and I'm happy to help."); voice.end(); }
       if (k === 'l') setMode(mode === 'listening' ? 'idle' : 'listening');
       if (k === 'k') setMode(mode === 'thinking' ? 'idle' : 'thinking');

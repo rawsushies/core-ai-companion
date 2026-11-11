@@ -6,6 +6,7 @@ const path = require('path');
 const { ClaudeCliBrain } = require('./claudeCli');
 const { OllamaBrain, OpenAICompatBrain } = require('./httpModels');
 const { SpeechPlanner } = require('./speech');
+const { Router } = require('./router');
 
 const NAMES = {
   gemini: 'Google Gemini',
@@ -51,27 +52,38 @@ function screenContext(shot) {
 
 function buildPrompt(provider, text, shot) {
   if (!shot) return text;
-  const ctx = screenContext(shot);
+  // shot.label: an image from a file the user attached, not their screen.
+  const what = shot.label || 'A screenshot of my screen';
+  const ctx = shot.label ? '' : screenContext(shot);
   if (provider.id === 'claude-cli') {
     // Persistent Claude sessions get the image inline (no file-reading step).
-    if (provider.persistent) return `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.${ctx})`;
+    if (provider.persistent) return `${text}\n\n(${what} is attached, ${shot.width}x${shot.height} pixels.${ctx})`;
     const rel = path.relative(provider.workDir, shot.path).split(path.sep).join('/');
-    return `${text}\n\n(A screenshot of my screen is saved at ./${rel}, ${shot.width}x${shot.height} pixels. Read it before answering.${ctx})`;
+    return `${text}\n\n(${what} is saved at ./${rel}, ${shot.width}x${shot.height} pixels. Read it before answering.${ctx})`;
   }
   const canSee = (provider.id === 'ollama' && provider.cfg.visionModel) || (provider.id !== 'ollama' && provider.cfg.vision);
+  if (!canSee && shot.label) return `${text}\n\n(${what} was attached, but the model you are running on cannot see images. Say so briefly if it matters.)`;
   return canSee
-    ? `${text}\n\n(A screenshot of my screen is attached, ${shot.width}x${shot.height} pixels.${ctx})`
+    ? `${text}\n\n(${what} is attached, ${shot.width}x${shot.height} pixels.${ctx})`
     : `${text}\n\n(I shared my screen, but the model you are running on cannot see images. Say so briefly if it matters.${ctx})`;
 }
 
 class Brain {
   // getKey(id) returns a stored API key; onModelChange(id, model) persists an
   // automatically chosen model.
-  constructor({ config, workDir, state, getKey, onModelChange }) {
+  // profile: 'chat' (fast answers first) or 'strong' (deep work: the agent,
+  // specialists). router: share one Router so all brains learn provider health.
+  constructor({ config, workDir, state, getKey, onModelChange, profile = 'chat', router = null }) {
     this.ctx = { config, workDir, state, getKey, onModelChange };
     this.stats = {}; // provider id -> health counters (see health())
+    this.profile = profile;
+    this.router = router || new Router();
+    this.lastRoute = null;
     this.reload(config);
   }
+
+  routeStatus() { return { mode: this.mode, last: this.lastRoute, providers: this.router.status(this.chain) }; }
+  get mode() { return (this.ctx.config.brain && this.ctx.config.brain.mode) === 'manual' ? 'manual' : 'auto'; }
 
   reload(config) {
     this.ctx.config = config;
@@ -129,9 +141,12 @@ class Brain {
   // context: extra blocks for the model ([Memory], [Clipboard]), appended to the message.
   // Returns { reply, provider, truncated?, error? }: when a provider fails
   // after it already started answering, the partial reply is kept (truncated).
-  async ask({ text, shot, typed = false, context = '', signal, onItem, onText, onStatus = () => {} }) {
+  async ask({ text, shot, typed = false, context = '', signal, onItem = () => {}, onText, onStatus = () => {} }) {
     // Providers without a key are skipped quietly instead of failing loudly.
-    const providers = this.chain.filter((p) => !p.available || p.available());
+    const usable = this.chain.filter((p) => !p.available || p.available());
+    const need = { vision: !!(shot && shot.base64), depth: this.profile === 'strong' ? 'strong' : 'fast' };
+    const providers = this.router.order(usable, need, { mode: this.mode, preferred: this.ctx.config.brain.provider });
+    if (providers[0]) this.lastRoute = { provider: providers[0].name || providers[0].label, need, at: Date.now() };
     const failures = [];
     const pc = this.ctx.config.personality || {};
     const tone = toneKey(pc.tone || 'sarcastic', pc.language);
@@ -151,7 +166,8 @@ class Brain {
       if (signal) { if (signal.aborted) wd.abort(); else signal.addEventListener('abort', onOuterAbort, { once: true }); }
       let timer = null;
       const arm = (ms, why) => { clearTimeout(timer); timer = setTimeout(() => { stalled = why; wd.abort(); }, ms); };
-      arm(limits.firstTokenMs, `no answer within ${Math.round(limits.firstTokenMs / 1000)} s`);
+      const firstLimit = this.router.firstTokenLimit(p.id, limits.firstTokenMs, i < providers.length - 1);
+      arm(firstLimit, `no answer within ${Math.round(firstLimit / 1000)} s`);
       onStatus({ kind: 'provider', label: p.label });
       try {
         if (p.detect && shot) await p.detect().catch(() => {}); // know whether images can go inline
@@ -172,6 +188,8 @@ class Brain {
         if (stalled) throw new Error(stalled); // provider ignored the abort but we already gave up on it
         const reply = planner.finish();
         this._record(p, true, { firstTokenMs });
+        this.router.success(p.id, { firstTokenMs });
+        this.lastRoute = { ...(this.lastRoute || {}), provider: p.name || p.label, model: p.cfg && p.cfg.model, at: Date.now() };
         return { reply, provider: p.label };
       } catch (err0) {
         clearTimeout(timer);
@@ -180,6 +198,7 @@ class Brain {
         if (err.aborted && !stalled) throw err;
         lastErr = err;
         this._record(p, false, { error: err.message });
+        this.router.failure(p.id, err, { retryAfterMs: err.retryAfterMs || 0 });
         failures.push(`${p.name || p.label}: ${err.message}`);
         if (streamed) {
           // Keep what was already said instead of throwing it away.

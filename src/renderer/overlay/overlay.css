@@ -107,3 +107,24 @@ body.demo {
 .g-list li.step.failed em { color: #ff8f99; }
 @keyframes g-pulse { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .g-list li.step.running em { animation: none; } }
+
+/* Board: COre spreads into a panel about a third of the screen wide. The
+   smoke traces the frame and the words; this crisp text condenses in on top
+   (blur to sharp) so it stays readable over any wallpaper. */
+.board {
+  position: fixed; left: 0; top: 0; box-sizing: border-box; padding: 20px 26px; border-radius: 18px; pointer-events: none;
+  background: rgba(5, 7, 10, 0.62); color: #e8fff1; overflow: hidden;
+  opacity: 0; filter: blur(8px); transform-origin: center;
+  transition: opacity 700ms ease, filter 900ms ease, background 700ms ease;
+  text-shadow: 0 0 2px #05070a, 0 0 8px rgba(5, 7, 10, 0.9);
+}
+.board.show { opacity: 1; filter: blur(0); }
+.board h3 { margin: 0 0 12px; font: 600 clamp(18px, 2.2vw, 26px)/1.2 "COre Display", "COre Sans", sans-serif; letter-spacing: -0.02em; color: var(--board-tint, #7dffb0); }
+.board ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.board li { position: relative; padding-left: 20px; font: 400 clamp(14px, 1.5vw, 17px)/1.4 "COre Sans", "Segoe UI", sans-serif; opacity: 0; transform: translateY(6px); transition: opacity 500ms ease, transform 500ms ease; }
+.board li::before { content: ""; position: absolute; left: 2px; top: 0.55em; width: 7px; height: 7px; border-radius: 50%; background: var(--board-tint, #3dff85); box-shadow: 0 0 8px var(--board-tint, #3dff85); }
+.board.show li { opacity: 1; transform: none; }
+.board.show li:nth-child(2) { transition-delay: 350ms; }
+.board.show li:nth-child(3) { transition-delay: 700ms; }
+.board.show li:nth-child(4) { transition-delay: 1050ms; }
+@media (prefers-reduced-motion: reduce) { .board, .board li { transition: opacity 200ms linear; filter: none; transform: none; } }

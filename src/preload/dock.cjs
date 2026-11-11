@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const on = (channel) => (fn) => {
   const h = (_e, payload) => fn(payload);
@@ -10,10 +10,19 @@ const on = (channel) => (fn) => {
 
 contextBridge.exposeInMainWorld('dock', {
   init: () => ipcRenderer.invoke('dock:init'),
-  ask: (text) => ipcRenderer.send('dock:ask', text),
+  ask: (text, files) => ipcRenderer.send('dock:ask', files && files.length ? { text: String(text), files: files.map(String) } : text),
+  // Files: dropped or picked File objects -> their paths (Electron 32+), then main reads them.
+  pathFor: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
+  files: () => ipcRenderer.invoke('dock:files'),
+  filesAdd: (paths) => ipcRenderer.invoke('dock:filesAdd', paths.map(String)),
+  filesMedia: (id, data) => ipcRenderer.send('dock:filesMedia', { id: String(id), ...data }),
+  filesRemove: (id) => ipcRenderer.send('dock:filesRemove', String(id)),
+  onFiles: on('dock:files'),
+  onSuggest: on('dock:suggest'),
   stop: () => ipcRenderer.send('dock:stop'),
   listen: () => ipcRenderer.send('dock:listen'),
   openPanel: () => ipcRenderer.send('dock:openPanel'),
+  openCenter: () => ipcRenderer.send('dock:openCenter'),
   hide: () => ipcRenderer.send('dock:hide'),
   resize: (h) => ipcRenderer.send('dock:resize', h),
   setSetting: (key, value) => ipcRenderer.send('dock:setting', { key, value }),
@@ -30,6 +39,7 @@ contextBridge.exposeInMainWorld('dock', {
   openLink: (id) => ipcRenderer.send('dock:openLink', id),
   onBrain: on('dock:brain'),
   memory: () => ipcRenderer.invoke('dock:memory'),
+  memoryPin: (id, on) => ipcRenderer.send('dock:memoryPin', { id: String(id), on: !!on }),
   memoryForget: (id) => ipcRenderer.send('dock:memoryForget', id),
   memoryEdit: (id, text) => ipcRenderer.send('dock:memoryEdit', { id, text }),
   memoryClear: () => ipcRenderer.send('dock:memoryClear'),

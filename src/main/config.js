@@ -17,9 +17,16 @@ const DEFAULTS = {
     //   'openrouter'    OpenRouter (free ":free" models), key from openrouter.ai/keys
     //   'ollama'        free local model (https://ollama.com)
     //   'openai-compat' any OpenAI-style endpoint (DeepSeek, LM Studio...)
-    provider: 'claude-cli',
+    provider: 'claude-cli', // the preferred brain
+    // 'auto': COre picks the brain per request (what it needs, which brains are
+    // healthy and fast) and skips any that are down or rate limited.
+    // 'manual': always the exact order above, skipping only brains cooling down.
+    mode: 'auto',
     fallbacks: ['gemini', 'groq', 'openrouter', 'openai-compat', 'ollama'],
-    claude: { command: 'claude', model: 'haiku', effort: '' },
+    claude: { command: 'claude', model: 'haiku', effort: '', strongModel: 'sonnet' },
+    // Smart routing: conversation stays on the fast model; the desktop agent,
+    // specialist cores and playbook writing use the strong model ('off' = all fast).
+    routing: 'auto',
     gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', prefer: 'flash', vision: true },
     groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', prefer: 'versatile|70b|llama', vision: false },
     openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', prefer: ':free$', vision: false },
@@ -47,6 +54,8 @@ const DEFAULTS = {
   },
   memory: {
     enabled: true, // COre remembers facts about you across conversations (⚙ → Memory)
+    autoCapture: true, // save clear statements like "my name is…" / "I prefer…" from your messages (shown in the chat)
+    semantic: true, // semantic search with a small local model (downloads ~23 MB once)
   },
   voice: {
     tts: true, // speak replies
@@ -88,6 +97,7 @@ const DEFAULTS = {
     allowWrites: false, // let cores PROPOSE file changes; each one is applied only when you click Apply
   },
   skills: {
+    playbooks: true, // use saved SKILL.md playbooks (userData/skills) when they fit, and run scheduled ones
     weather: true,
     city: '', // used when you ask for the weather without a place
     music: true,
@@ -104,10 +114,16 @@ const DEFAULTS = {
     googleClientSecret: '', // stored as an encrypted secret instead
     autoSync: true, // sync memory with your Google Drive's private app folder after changes and hourly
   },
+  meiosis: {
+    autoReview: true, // Sentinel checks Forge's proposed file changes
+  },
   agent: {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
     maxSteps: 25,
+    tools: true, // commands, files and web pages (inside the project folder), on top of mouse and keyboard
+    allowCommands: [], // commands that never ask, matched by their start, e.g. "git status", "npm test"
+    commandTimeout: 60, // seconds
   },
   phone: {
     enabled: false, // the phone companion: chat with COre from your phone's browser on the same Wi-Fi
@@ -132,6 +148,7 @@ const DEFAULTS = {
     listenWithScreen: 'CommandOrControl+Alt+S',
     panel: 'CommandOrControl+Alt+C',
     hide: 'CommandOrControl+Alt+H',
+    emergency: 'CommandOrControl+Alt+Shift+X', // stop everything COre is doing (agent, replies, helpers, phone link)
   },
   update: {
     enabled: true,

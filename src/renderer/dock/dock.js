@@ -101,6 +101,12 @@
           if (m.author) { el.style.setProperty('--core', coreOf(m.author).color); el.classList.add('has-core'); }
           el.textContent = text;
         } else el.textContent = text;
+        if (role === 'user' && m.files && m.files.length) {
+          const fl = document.createElement('div');
+          fl.className = 'file-line';
+          for (const n of m.files) { const c = document.createElement('span'); c.className = 'file-chip'; c.textContent = n; fl.append(c); }
+          el.prepend(fl);
+        }
         log.appendChild(el);
       }
       trim();
@@ -390,7 +396,7 @@
     if (!text) return;
     // The picker addresses the message unless it already starts with @mentions.
     if (recipient !== 'prime' && !text.startsWith('@')) text = `@${coreOf(recipient).name} ${text}`;
-    api.ask(text);
+    api.ask(text, recipient === 'prime' ? attachedFiles() : []);
     input.value = '';
     autosize();
   });
@@ -546,6 +552,14 @@
   function memoryRow(m) {
     const row = document.createElement('div');
     row.className = 'item memory';
+    row.dataset.kind = m.kind || 'fact';
+    // Confidence as a small dot: solid = sure, hollow = unsure.
+    const dot = document.createElement('i');
+    dot.className = 'conf';
+    const c = typeof m.confidence === 'number' ? m.confidence : 0.85;
+    dot.style.opacity = String(0.35 + 0.65 * c);
+    dot.title = `${m.kind || 'fact'} · ${Math.round(c * 100)}% sure`;
+    row.append(dot);
     if (m.project) { const p = document.createElement('span'); p.className = 'when tag'; p.textContent = m.project; row.append(p); }
     const t = document.createElement('span');
     t.textContent = m.text;
@@ -553,6 +567,10 @@
     const when = new Date(m.updatedAt || m.ts).toLocaleDateString();
     const was = m.history && m.history.length ? ` · was: ${m.history.map((h) => h.text).join(' → ')}` : '';
     t.title = `${when}${via ? ` · ${via}` : ''}${was}`;
+    const pin = button(m.pinned ? '★' : '☆', 'x', () => api.memoryPin(m.id, !m.pinned));
+    pin.setAttribute('aria-label', `${m.pinned ? 'Unpin' : 'Pin'}: ${m.text}`);
+    pin.title = m.pinned ? 'Pinned: always kept and used' : 'Pin: always keep and use this';
+    row.append(pin);
     const edit = button('✎', 'x', () => {
       const input = document.createElement('input');
       input.type = 'text';
@@ -604,7 +622,9 @@
 
   function renderMemory(list) {
     memoryList.textContent = '';
-    memoryCount.textContent = list && list.length ? `${list.length} saved` : '';
+    const facts = (list || []).filter((m) => m.kind !== 'episode');
+    memoryCount.textContent = list && list.length ? `${facts.length} facts · ${list.length - facts.length} history` : '';
+    list = facts.concat((list || []).filter((m) => m.kind === 'episode').slice(0, 5));
     if (!list || !list.length) { memoryList.append(empty('Nothing yet. Tell me about yourself and I will remember.')); return reportSize(); }
     for (const m of list) memoryList.append(memoryRow(m));
     reportSize();
@@ -630,9 +650,9 @@
     reportSize();
   });
 
-  api.onMessage(({ role, text, author, kind, to }) => {
+  api.onMessage(({ role, text, author, kind, to, files }) => {
     if (role === 'core-start') { startStream(); return; }
-    add(role, text, { author, kind, to });
+    add(role, text, { author, kind, to, files });
   });
   api.onDelta((d) => {
     if (!streaming) startStream();
@@ -694,6 +714,7 @@
       document.getElementById('agent-step-no').textContent = `Step ${a.step}`;
       document.getElementById('agent-label').textContent = a.label;
       document.getElementById('agent-why').textContent = a.why || '';
+      document.getElementById('agent-all').hidden = !!a.forced; // commands are approved one by one
       document.getElementById('agent-yes').focus();
     }
     reportSize();
@@ -702,6 +723,142 @@
   document.getElementById('agent-yes').addEventListener('click', () => answer('yes'));
   document.getElementById('agent-all').addEventListener('click', () => answer('all'));
   document.getElementById('agent-stop').addEventListener('click', () => answer('stop'));
+
+  // ---------------------------------------------------------- files
+  // Drop files (or use the paperclip) to add cards. Selected cards go with your
+  // messages to COre. Audio and video are decoded here (Chromium has the codecs)
+  // and sent as 16 kHz speech for transcription plus a few video frames.
+  const filesBox = document.getElementById('files');
+  const cardsEl = document.getElementById('file-cards');
+  const filesHint = document.getElementById('files-hint');
+  const filesToggle = document.getElementById('files-toggle');
+  const dropEl = document.getElementById('drop');
+  const fileInput = document.getElementById('file-input');
+  const BADGE = { pdf: 'PDF', doc: 'DOC', sheet: 'XLS', slides: 'PPT', image: 'IMG', audio: 'AUD', video: 'VID', cad: 'CAD', bim: 'IFC', code: 'CODE', text: 'TXT', other: 'FILE' };
+  let fileItems = [];
+  const selected = new Set();
+  const attachedFiles = () => fileItems.filter((f) => selected.has(f.id) && f.status === 'ready').map((f) => f.id);
+
+  function renderFiles(items) {
+    fileItems = items || [];
+    filesBox.hidden = !fileItems.length;
+    cardsEl.textContent = '';
+    for (const f of fileItems) {
+      const card = document.createElement('div');
+      if (f.status === 'error') selected.delete(f.id);
+      card.className = `fcard k-${f.kind} ${f.status}${selected.has(f.id) ? ' sel' : ''}`;
+      card.setAttribute('role', 'listitem');
+      card.tabIndex = 0;
+      card.title = `${f.name}${f.error ? `\n${f.error}` : f.note ? `\n${f.note}` : ''}\nClick to ${selected.has(f.id) ? 'stop sending it' : 'send it with your messages'}`;
+      const tile = document.createElement('div'); tile.className = 'tile';
+      const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = BADGE[f.kind] || 'FILE';
+      tile.append(badge);
+      const meta = document.createElement('div'); meta.className = 'meta';
+      const name = document.createElement('div'); name.className = 'name'; name.textContent = f.name;
+      const info = document.createElement('div'); info.className = 'info';
+      info.textContent = f.status === 'reading' ? 'Reading…' : f.status === 'media' ? 'Decoding…' : f.status === 'error' ? (f.error || 'Could not read') : (f.info || 'Ready');
+      meta.append(name, info);
+      const check = document.createElement('span'); check.className = 'check'; check.setAttribute('aria-hidden', 'true');
+      const x = document.createElement('button'); x.type = 'button'; x.className = 'x'; x.textContent = '✕'; x.title = 'Remove'; x.setAttribute('aria-label', `Remove ${f.name}`);
+      x.addEventListener('click', (e) => { e.stopPropagation(); selected.delete(f.id); api.filesRemove(f.id); });
+      card.append(tile, meta, check, x);
+      if (f.status === 'ready') {
+        const sum = document.createElement('button'); sum.type = 'button'; sum.className = 'sum'; sum.textContent = 'Sum'; sum.title = 'Summarize this file'; sum.setAttribute('aria-label', `Summarize ${f.name}`);
+        sum.addEventListener('click', (e) => { e.stopPropagation(); api.ask(`Summarize ${f.name}: the key points, numbers and anything I should act on.`, [f.id]); });
+        card.append(sum);
+      }
+      const toggle = () => { if (f.status !== 'ready') return; if (selected.has(f.id)) selected.delete(f.id); else selected.add(f.id); renderFiles(fileItems); };
+      card.addEventListener('click', toggle);
+      card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } if (e.key === 'Delete') { selected.delete(f.id); api.filesRemove(f.id); } });
+      cardsEl.append(card);
+    }
+    const n = attachedFiles().length;
+    filesHint.textContent = n ? `${n} attached · sent with your messages` : 'Click a card to attach it';
+    input.placeholder = n ? `Ask about ${n === 1 ? 'the file' : `${n} files`}…` : 'Message…';
+    reportSize();
+  }
+
+  async function decodeMedia(file, kind) {
+    const out = { frames: [], duration: 0 };
+    try {
+      const buf = await file.arrayBuffer();
+      const probe = new OfflineAudioContext(1, 1, 16000);
+      const audio = await probe.decodeAudioData(buf);
+      out.duration = audio.duration;
+      const secs = Math.min(audio.duration, 15 * 60); // 15 minutes of speech at most
+      const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(secs * 16000)), 16000);
+      const src = off.createBufferSource();
+      src.buffer = audio;
+      src.connect(off.destination);
+      src.start();
+      out.pcm = (await off.startRendering()).getChannelData(0);
+    } catch { if (kind === 'audio') out.error = 'This audio could not be decoded.'; }
+    if (kind === 'video') {
+      const url = URL.createObjectURL(file);
+      try {
+        const v = document.createElement('video');
+        v.muted = true; v.preload = 'auto'; v.src = url;
+        await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('video')); setTimeout(() => rej(new Error('timeout')), 15000); });
+        out.duration = out.duration || v.duration;
+        const c = document.createElement('canvas');
+        const k = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight || 1));
+        c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+        for (const t of [0.08, 0.35, 0.62, 0.9]) {
+          v.currentTime = Math.max(0, (v.duration || 0) * t);
+          await new Promise((res) => { v.onseeked = res; setTimeout(res, 4000); });
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          out.frames.push(c.toDataURL('image/jpeg', 0.78).split(',')[1]);
+        }
+      } catch { if (!out.pcm) out.error = 'This video could not be decoded.'; } finally { URL.revokeObjectURL(url); }
+    }
+    return out;
+  }
+
+  async function addFileObjects(list) {
+    const files = [...list].slice(0, 20);
+    const byPath = new Map();
+    for (const f of files) { const p = api.pathFor(f); if (p) byPath.set(p, f); }
+    if (!byPath.size) return;
+    const added = await api.filesAdd([...byPath.keys()]);
+    const objs = [...byPath.values()];
+    for (const a of added) {
+      if (a.status === 'ready') selected.add(a.id);
+      if (a.status !== 'media') continue;
+      const f = objs.find((o) => o.name === a.name);
+      if (!f) continue;
+      selected.add(a.id);
+      decodeMedia(f, a.kind).then((m) => api.filesMedia(a.id, m));
+    }
+    renderFiles(fileItems);
+    input.focus();
+  }
+
+  if (api.onFiles) {
+    api.onFiles((items) => {
+      // Cards that just finished reading join the selection if they were dropped together.
+      renderFiles(items);
+    });
+    api.files().then(renderFiles).catch(() => {});
+  }
+  filesToggle.addEventListener('click', () => {
+    const c = filesBox.classList.toggle('collapsed');
+    filesToggle.textContent = c ? 'Show' : 'Hide';
+    filesToggle.setAttribute('aria-expanded', String(!c));
+    reportSize();
+  });
+  document.getElementById('attach').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => { addFileObjects(fileInput.files); fileInput.value = ''; });
+  let dragDepth = 0;
+  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  window.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; dropEl.hidden = false; });
+  window.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dropEl.hidden = true; });
+  window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; dropEl.hidden = true; if (e.dataTransfer && e.dataTransfer.files.length) addFileObjects(e.dataTransfer.files); });
+
+  // A core suggests a command (Navigator's "/do ..."): it waits in the box for your Enter.
+  if (api.onSuggest) api.onSuggest((t) => { if (!input.value.trim() && typeof t === 'string') { input.value = t.slice(0, 500); autosize(); input.focus(); } });
+
+  document.getElementById('open-center').addEventListener('click', () => api.openCenter());
 
   api.onReset(() => { log.textContent = ''; streaming = null; reportSize(); });
   api.onFocus(() => input.focus());
