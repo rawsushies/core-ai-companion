@@ -45,6 +45,7 @@ function createGrant(o, key, { now = Date.now() } = {}) {
     apps: uniq(o.apps).map((a) => a.toLowerCase()),
     hosts: uniq(o.hosts).map((h) => h.toLowerCase()),
     categories,
+    commands: o.commands !== false, // sandboxed commands in scope run without asking (false = each command asks, as in 12.x)
     budget: { steps: Math.max(1, Math.min(500, Number(o.budget && o.budget.steps) || 60)), minutes: Math.max(1, Math.min(24 * 60, Number(o.budget && o.budget.minutes) || 30)) },
     issuedAt: now,
     expiresAt: Number(o.expiresAt) || now + 24 * 3600e3,

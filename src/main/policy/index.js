@@ -26,7 +26,10 @@ const OUTWARD = new Set(['send', 'network', 'outside-scope', 'install', 'command
 
 class Policy {
   // grant: signed grant or null (manual); key: grant key; taint: Taint; audit(entry)
-  constructor({ grant = null, key = null, taint = null, audit = () => {}, safeguardPaths = [], sandbox = true, now = () => Date.now() } = {}) {
+  constructor({ grant = null, key = null, taint = null, audit = () => {}, safeguardPaths = [], sandbox = true, allowCommands = [], folders = [], killFile = '', now = () => Date.now() } = {}) {
+    this.killFile = killFile; // a file whose presence halts every action (an out-of-process emergency stop)
+    this.folders = folders.map((f) => require('path').resolve(f)); // manual mode: the shared folders (relative paths start in the first)
+    this.allowCommands = allowCommands; // manual mode: commands the user allowlisted never ask (12.x behaviour)
     this.grant = grant;
     this.key = key;
     this.taint = taint || new Taint({ trusted: grant ? [grant.goal, ...grant.folders, ...grant.hosts, ...grant.apps] : [] });
@@ -41,18 +44,28 @@ class Policy {
   // Dead-man: executors call alive() before acting; a policy that stopped beating
   // (crashed, replaced, stopped) refuses everything.
   beat() { this.heartbeat = this.now(); }
-  alive(maxMs = 30000) { return !this.stopped && this.now() - this.heartbeat < maxMs; }
+
+  // The user approved a grant mid-task (e.g. "Allow all for this task"). Only a valid,
+  // signed grant is accepted; nothing else can change what the policy allows.
+  upgrade(grant) {
+    const v = verifyGrant(grant, this.key, { now: this.now() });
+    if (!v.ok) throw new Error(v.reason);
+    this.grant = grant;
+    this.taint.trust([grant.goal, ...grant.folders, ...grant.hosts, ...grant.apps].join('\n'));
+  }
+  alive(maxMs = 30000) { return !this.stopped && !this.killed() && this.now() - this.heartbeat < maxMs; }
+  killed() { try { return !!this.killFile && require('fs').existsSync(this.killFile); } catch { return true; } }
   stop() { this.stopped = true; }
 
   decide(action, ctx = {}) {
     const g = this.grant;
     const record = (r) => { try { this.audit({ at: this.now(), grant: g ? g.id : null, action: action.type, ...r }); } catch {} return r; };
-    if (this.stopped) return record({ decision: 'deny', cls: 3, category: 'safeguards', reasons: ['all actions are stopped'], tainted: [] });
+    if (this.stopped || this.killed()) return record({ decision: 'deny', cls: 3, category: 'safeguards', reasons: ['all actions are stopped'], tainted: [] });
     if (g) {
       const v = verifyGrant(g, this.key, { now: this.now() });
       if (!v.ok) return record({ decision: 'deny', cls: 3, category: 'safeguards', reasons: [v.reason], tainted: [] });
     }
-    const c = classify(action, { ...ctx, grant: g || { folders: ctx.folders || [], apps: [], hosts: [], categories: [] }, safeguardPaths: this.safeguardPaths, sandbox: this.sandbox });
+    const c = classify(action, { ...ctx, grant: g || { folders: ctx.folders || this.folders, apps: [], hosts: [], categories: [] }, safeguardPaths: this.safeguardPaths, sandbox: this.sandbox });
     // Targets that leave the machine or the scope must not come from untrusted content.
     // (Paths inside the granted folders are bounded by the grant and backed up, so a file
     // name read from a listing may be used there.)
@@ -61,9 +74,24 @@ class Policy {
     const base = { cls: c.cls, category: c.category, reasons: [...c.reasons], tainted };
     if (ALWAYS_DENY.has(c.category)) return record({ decision: 'deny', ...base });
     if (c.cls === 0) return record({ decision: 'allow', ...base });
-    if (!g) return record({ decision: 'escalate', ...base, reasons: [...base.reasons, 'manual mode: every change asks'] });
+    if (!g) {
+      // In manual mode a routine step may be turned into a grant for the rest of the task
+      // ("Allow all for this task"): offerGrant tells the UI it may offer that.
+      if (c.cls === 1 && action.type !== 'run') base.offerGrant = true;
+      if (action.type === 'run' && c.cls === 1 && !tainted.length) {
+        const AT = require('../agentTools');
+        const cc = AT.checkCommand(action.cmd);
+        if (cc.ok && AT.allowed(cc.argv, this.allowCommands)) return record({ decision: 'journal', ...base, reasons: [...base.reasons, 'on your list of commands that never ask'] });
+      }
+      return record({ decision: 'escalate', ...base, reasons: [...base.reasons, 'manual mode: every change asks'] });
+    }
     if (tainted.length) return record({ decision: 'escalate', ...base, reasons: [...base.reasons, `${tainted.map((t) => t.target).join(', ')} came from ${[...new Set(tainted.flatMap((t) => t.from))].join(', ')}, not from you`] });
     if (c.cls === 3) return record({ decision: 'escalate', ...base });
+    if (action.type === 'run' && c.cls === 1 && g.commands === false) {
+      const AT = require('../agentTools');
+      const cc = AT.checkCommand(action.cmd);
+      if (!(cc.ok && AT.allowed(cc.argv, this.allowCommands))) return record({ decision: 'escalate', ...base, reasons: [...base.reasons, 'commands ask one by one in this task'] });
+    }
     if (c.cls === 2) {
       if (c.category === 'delete') this.counts.delete++;
       if (c.category === 'delete' && this.counts.delete > 20 && !g.categories.includes('bulk')) return record({ decision: 'escalate', ...base, reasons: [...base.reasons, 'more than 20 deletions in this mission'] });

@@ -382,10 +382,14 @@ class AgentRunner {
     try {
       for (let step = first; step <= this.d.maxSteps; step++) {
         if (signal.aborted) return stopped();
+        // Dead-man rule: a policy that was stopped or stopped beating ends the task.
+        if (this.d.policy && !this.d.policy.alive()) { save(step, 'stopped'); return { status: 'stopped', reason: 'the safety check was stopped, so nothing more is done', steps: history }; }
         const shot = await this.d.screenshot();
         if (signal.aborted) return stopped();
         let ui = null;
         if (this.d.uia) { try { ui = await this.d.uia.snapshot(); } catch { ui = null; } }
+        // Text on screen (control names and values) comes from apps, not from the user.
+        if (this.d.policy && ui) this.d.policy.taint.add((ui.elements || []).map((e) => `${e.name || ''} ${e.value || ''}`).join('\n'), 'screen');
         const note = verifying ? `You said the task is done. Look at this fresh screenshot (and the last results) and confirm${plan && plan.doneWhen ? ` against: ${plan.doneWhen}` : ''}: reply done again if it really is finished, otherwise keep going.` : advice;
         advice = '';
         const reply = await this.d.think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '', controls: ui ? UIA.outline(ui) : '', plan }), shot, signal });
@@ -413,12 +417,40 @@ class AgentRunner {
           report({ step, error: `${label}: tool actions are off` });
           continue;
         }
-        const forced = TOOL.has(a.type) && this.d.tools.mustAsk && this.d.tools.mustAsk(a);
-        if ((!allowAll && !SAFE.has(a.type)) || forced) {
-          const answer = await this.d.approve(a, { step, label, shot, forced });
-          if (signal.aborted) return stopped();
-          if (answer === 'no') { save(step, 'stopped'); return { status: 'stopped', reason: 'you declined a step', steps: history }; }
-          if (answer === 'all' && !forced) allowAll = true;
+        let decision = null;
+        if (this.d.policy) {
+          // 13.0: one deterministic gate (src/main/policy). The model proposes; the policy decides.
+          const P = this.d.policy;
+          P.beat();
+          const focused = ui && (ui.elements || []).find((e) => e.focused);
+          decision = P.decide(a, { ui, window: shot && shot.window ? shot.window : null, focused: focused ? String(focused.name || '') : '' });
+          if (decision.decision === 'deny') {
+            history.push({ label, ok: false, error: `refused by COre's safety rules: ${decision.reasons.join('; ')}`, refused: true });
+            report({ step, action: a, label, error: `Refused: ${decision.reasons.join('; ')}`, policy: decision });
+            if (history.slice(-3).length === 3 && history.slice(-3).every((h) => h.refused)) { save(step, 'failed'); return { status: 'failed', reason: 'the safety rules refused the last three steps', steps: history }; }
+            continue;
+          }
+          if (decision.decision === 'escalate') {
+            const answer = await this.d.approve(a, { step, label, shot, forced: !decision.offerGrant, policy: decision });
+            if (signal.aborted) return stopped();
+            if (answer === 'all' && decision.offerGrant && this.d.onAllowAll) { try { await this.d.onAllowAll(); } catch {} }
+            if (answer === 'no') {
+              history.push({ label, ok: true, result: `The user declined this (${decision.reasons.join('; ')}). Do not try it again; finish what is allowed or ask.`, declined: true });
+              report({ step, action: a, label, declined: true, policy: decision });
+              save(step);
+              if (history.slice(-2).length === 2 && history.slice(-2).every((h) => h.declined)) { save(step, 'stopped'); return { status: 'stopped', reason: 'you declined two steps in a row', steps: history }; }
+              continue;
+            }
+          }
+          if (this.d.journal) this.d.journal({ phase: 'intent', step, action: a, decision });
+        } else {
+          const forced = TOOL.has(a.type) && this.d.tools.mustAsk && this.d.tools.mustAsk(a);
+          if ((!allowAll && !SAFE.has(a.type)) || forced) {
+            const answer = await this.d.approve(a, { step, label, shot, forced });
+            if (signal.aborted) return stopped();
+            if (answer === 'no') { save(step, 'stopped'); return { status: 'stopped', reason: 'you declined a step', steps: history }; }
+            if (answer === 'all' && !forced) allowAll = true;
+          }
         }
         report({ step, action: a, label, running: true, shot });
         let ok = true;
@@ -430,6 +462,7 @@ class AgentRunner {
           else if (UI.has(a.type)) result = await this._ui(a);
           else if (TOOL.has(a.type)) {
             const out = await this.d.tools[a.type](a, { signal });
+            if (this.d.policy && ['read', 'fetch', 'run'].includes(a.type)) this.d.policy.taint.add(String(out == null ? '' : out), a.type === 'fetch' ? `web page ${a.url}` : a.type === 'run' ? 'command output' : `file ${a.path}`);
             result = this.d.untrusted(String(out == null ? '' : out).slice(0, 6000), a.type === 'fetch' ? `web page ${a.url}` : a.type === 'run' ? 'command output' : `file ${a.path || a.to}`);
           } else {
             const p = ['click', 'move'].includes(a.type) || (a.type === 'scroll' && a.x != null) ? toScreen(a, shot) : null;
@@ -439,6 +472,7 @@ class AgentRunner {
         const did = ok && !['wait', 'read', 'fetch', 'move', 'scroll', 'focus', 'expand'].includes(a.type);
         if (did) changed = true;
         history.push({ label, ok, error, ...(result ? { result } : {}), ...(did ? { changed: true } : {}) });
+        if (this.d.journal && decision) this.d.journal({ phase: 'result', step, action: a, ok, error });
         if (this.d.log) this.d.log(`agent step ${step}: ${label}${ok ? '' : ` failed: ${error}`}`);
         report({ step, action: a, label, ok, error, result });
         save(step);

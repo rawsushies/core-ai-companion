@@ -157,3 +157,14 @@ test('every decision is audited once with the grant id', () => {
   assert.strictEqual(log.length, 2);
   assert.deepStrictEqual(log.map((e) => [e.grant, e.action, e.decision]), [[g.id, 'write', 'journal'], [g.id, 'delete', 'escalate']]);
 });
+
+test('a STOP file halts every action from outside the process', () => {
+  const kill = path.join(tmp, 'STOP');
+  const p = new Policy({ grant: grantFor(), key, killFile: kill, safeguardPaths: [SAFE] });
+  assert.strictEqual(p.decide({ type: 'write', path: path.join(W, 'a'), text: '' }).decision, 'journal');
+  fs.writeFileSync(kill, '');
+  assert.ok(!p.alive());
+  assert.strictEqual(p.decide({ type: 'wait', ms: 300 }).decision, 'deny');
+  fs.rmSync(kill);
+  assert.ok(p.alive());
+});

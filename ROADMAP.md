@@ -25,9 +25,9 @@ against the 100-task suite beyond the sample below.
 | P0 | 100-task suite (planned mix) + 20 injected variants; every reference solution passes, doing nothing fails | **Verified** | T1 | `test/eval.test.js`, `eval/autonomy/` |
 | P0 | Injection corpus v1, 64 fresh cases (file, web, email, screen, phone), not used for tuning | **Done**; advisory guard flags **8/64 (12.5%)** | T1 | `eval/results/security-detection-v1.md` |
 | P0 | Baseline of the 12.x agent on the suite | Sample only (free-tier model limits); full run needs the evaluation budget (decision 1 in the plan) | T2 | `eval/results/T2-baseline-12x-sample.md` |
-| P1 | One policy engine (grant, risk class, taint) replaces the scattered gates | Not started | — | — |
-| P1 | Write-ahead mission journal; replay after kill; compensation and undo | Not started | — | — |
-| P1 | Emergency stop < 1 s from every source; dead-man | Not started | — | — |
+| P1 | One policy engine (grant, risk class, taint) replaces the scattered gates | **Verified** for the app's /do path: decision table, taint, 0/64 corpus attacks allowed, 3000-action property test; the real app's agent e2e tests run through it. The 12.x path stays only for the baseline evaluation | T1 + T2 (real app, Linux) | `test/policy.test.js`, `test/autonomy.test.js`, e2e "desktop agent" |
+| P1 | Write-ahead mission journal; replay after kill; compensation and undo | **Verified** in-process (crash between intent and result replays to the in-flight step; torn line dropped; tampering detected; undo restores every file). A real `kill -9` of the app is still to do | T1 | `test/autonomy.test.js` |
+| P1 | Emergency stop < 1 s from every source; dead-man | Dead-man and STOP file **verified** (policy refuses after stop, kill-file or lost heartbeat); timing from each source not measured yet | T1 | `test/policy.test.js`, `test/autonomy.test.js` |
 | P2 | Mission engine, planner, Sentinel verification, recovery, learning | Not started | — | — |
 | P3 | Phone: mission feed, biometric-bound approvals, voice, tainted files, capabilities | Not started | — | — |
 | P4 | Presence: briefing, meeting prep, narration, heads-ups, continuity | Not started | — | — |

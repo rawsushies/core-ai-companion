@@ -122,6 +122,9 @@ let memory = null;
 const latency = new (require('./latency').Latency)(); // turn timings (src/main/latency.js)
 const { Tutorial, fill: fillTutorial } = require('./tutorial'); // lessons COre teaches (src/main/tutorial.js)
 let tutorial = null; // created once state is loaded (tutorialHost())
+let agentPolicy = null; // the policy gate of the running desktop task (src/main/policy)
+const policyStats = { allow: 0, journal: 0, escalate: 0, deny: 0, last: [] }; // for /diagnostics
+const stopFile = () => path.join(app.getPath('userData'), 'STOP'); // present = every agent action is refused
 // Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
 const { CortexClient } = require('./cortex');
 const { MemoryGateway, isDecision } = require('./memgate');
@@ -1167,6 +1170,7 @@ async function diagnosticsReport() {
     rs.last ? `  last turn: ${rs.last.provider || ''} ${rs.last.model || ''}${rs.last.reason ? ` because ${String(rs.last.reason).slice(0, 80)}` : ''}` : '',
     `• Memory: ${st ? `${st.total} entries (${Object.entries(st.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}), ${st.conflicts} conflicts kept` : 'off'}`,
     `• Response times: ${require('./latency').Latency.format(latency.stats()).replace(/\n/g, '\n  ')}`,
+    `• Safety policy: ${policyStats.journal + policyStats.allow} steps ran on their own, ${policyStats.escalate} asked you, ${policyStats.deny} refused${policyStats.last.length ? `; last: ${policyStats.last.join(' | ')}` : ''}${fs.existsSync(stopFile()) ? '; HALTED by the STOP file' : ''}`,
     `• Cortex: ${gs.cortex}${gs.pending ? `, ${gs.pending} waiting` : ''}`,
     `• Vault: ${(await vaultReport().catch((e) => `error: ${e.message}`)).split('\n').slice(0, 4).join('; ')}`,
     `• Desktop agent: ${ag.enabled ? 'on' : 'off'}, approvals ${ag.approve || 'every'}, UI Automation ${agentUia() ? 'available' : 'not available'}`,
@@ -1989,6 +1993,7 @@ function showGlance(req) {
 // running brain turn, helpers' work, speech, media readers, the phone server
 // and all pending approvals stop at once. Logged.
 function emergencyStop(reason = 'emergency stop') {
+  try { if (agentPolicy) agentPolicy.stop(); } catch {} // dead-man: nothing passes the gate any more
   try { stopAgent(reason); } catch {}
   try { abortCurrent(); } catch {}
   try { toOverlay('speech:stop'); } catch {}
@@ -2040,11 +2045,6 @@ function agentTools(taskId) {
   const ag = config.data.agent || {};
   const files = agentFiles();
   return {
-    mustAsk: (a) => {
-      if (a.type !== 'run') return false;
-      const c = AT.checkCommand(a.cmd);
-      return !(c.ok && AT.allowed(c.argv, ag.allowCommands || []));
-    },
     run: async (a, { signal }) => {
       const c = AT.checkCommand(a.cmd);
       if (!c.ok) throw new Error(`Command refused: ${c.reason}.`);
@@ -2385,6 +2385,7 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
   const driver = AG.driverFor(process.platform);
   if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
   if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
+  if (fs.existsSync(stopFile())) { addTranscript('system', `Agent actions are halted: a STOP file is in COre's data folder (${stopFile()}). Delete it to allow tasks again.`, { kind: 'error' }); return; }
   addTranscript('user', resume ? '/do resume' : `/do ${goal}`);
   Object.assign(monitor, { goal, status: 'running', steps: resume ? monitor.steps : [], plan: resume ? monitor.plan : null, startedAt: Date.now() });
   if ((config.data.agent || {}).monitor !== false) openMonitor(); else sendMonitor();
@@ -2416,7 +2417,25 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
       }
     },
   };
+  // 13.0: one deterministic policy gate per task (src/main/policy) and a write-ahead journal
+  // (src/main/missions/journal.js). "Approve every step" is manual mode (no grant); "approve
+  // the plan" and "no questions" run under a grant limited to the shared project folder, so
+  // deleting, sending, installing and anything outside it still ask.
+  const POL = require('./policy');
+  const userData = app.getPath('userData');
+  const polKey = POL.loadKey(userData);
+  const roots = agentFiles().roots;
+  const grant = ag.approve === 'every' || !roots.length ? null : POL.createGrant({ goal, folders: roots, categories: (ag.grantCategories || []).filter((c) => POL.GRANTABLE.includes(c)), budget: { steps: Math.max(3, Math.min(50, Number(ag.maxSteps) || 25)) } }, polKey);
+  agentPolicy = new POL.Policy({ grant, key: polKey, safeguardPaths: [userData], sandbox: ag.sandbox === 'off' ? false : require('./sandbox').detect().ok, allowCommands: ag.allowCommands || [], folders: roots, killFile: stopFile(), audit: (e) => { policyStats[e.decision] = (policyStats[e.decision] || 0) + 1; if (e.decision === 'deny' || e.decision === 'escalate') { policyStats.last.push(`${e.decision} ${e.action}: ${(e.reasons || []).join('; ')}`.slice(0, 160)); policyStats.last = policyStats.last.slice(-3); } toolAudit({ event: 'policy', ...e }); } });
+  const { Journal } = require('./missions/journal');
+  const journal = new Journal(path.join(userData, 'missions', taskId, 'journal.jsonl'));
+  if (resume) journal.append('resume', { step: resume.step || 0 }); else journal.append('start', { id: taskId, goal, grant: grant ? { id: grant.id, folders: grant.folders, categories: grant.categories } : null });
   agentRunner = new AG.AgentRunner({
+    policy: agentPolicy,
+    // "Allow all for this task" in manual mode: a grant for the project folder, for this task
+    // only; deleting, sending, installing and commands still ask (12.x behaviour, now as policy).
+    onAllowAll: () => { if (agentPolicy.grant || !roots.length) return; const g = POL.createGrant({ goal, folders: roots, commands: false, approvedBy: 'user (allow all for this task)', expiresAt: Date.now() + 6 * 3600e3 }, polKey); agentPolicy.upgrade(g); journal.append('grant', { id: g.id, folders: g.folders, commands: false }); },
+    journal: (e) => { try { journal.append(e.phase, { step: e.step, action: { type: e.action.type, path: e.action.path, from: e.action.from, to: e.action.to, cmd: e.action.cmd, url: e.action.url, app: e.action.app, label: e.action.label }, ...(e.decision ? { decision: { decision: e.decision.decision, category: e.decision.category } } : {}), ...(e.phase === 'result' ? { ok: e.ok, error: e.error } : {}) }); } catch (err) { console.warn('[core] journal:', err.message); } },
     driver: guarded,
     maxSteps: Math.max(3, Math.min(50, Number(ag.maxSteps) || 25)),
     autoApprove: ag.approve === 'task-auto', // only if the user chose it in Settings
@@ -2432,7 +2451,7 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
     approve: (action, info) => new Promise((resolve) => {
       const id = require('crypto').randomUUID();
       agentApprovals.set(id, { resolve });
-      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: action.why || '', forced: !!info.forced });
+      toDock('dock:agent-approve', { id, step: info.step, label: info.label, why: info.policy ? `${info.policy.reasons.join('; ')}${action.why ? ` (COre: ${action.why})` : ''}` : action.why || '', forced: !!info.forced });
       if (action.type === 'click' || action.type === 'move') {
         // COre points at where it wants to click.
         const d = primaryDisplay();
@@ -2471,6 +2490,7 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
   });
   let r;
   try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
+  try { journal.append('end', { status: r.status, reason: r.reason || '' }); } catch {}
   try { globalShortcut.unregister('Escape'); } catch {}
   { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }
   monitor.status = r.status;
