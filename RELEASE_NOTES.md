@@ -1,35 +1,31 @@
-# COre 12.0.0
+# COre 12.1.0
 
-COre 12.0.0 introduces desktop automation, a local long-term knowledge layer and proactive assistance.
-All new capabilities are opt-in or require explicit approval before acting.
+COre 12.1.0 makes conversation substantially faster, applies one interface design throughout the application,
+and verifies the complete installer, from first launch to multi-device synchronisation, on Windows.
 
 ## Highlights
 
-- **Desktop automation.** The agent reads applications through Windows UI Automation, plans each task,
-  performs one approved step at a time and verifies the result. Commands run in a Windows AppContainer
-  sandbox restricted to user-approved folders.
-- **Long-term knowledge layer.** Decisions, lessons and research are stored as plain Markdown in a local
-  vault, indexed by the bundled Cortex engine. The vault is compatible with Obsidian and can be synchronised
-  between devices with Syncthing. Sync conflicts are preserved and reported, never resolved silently.
-- **Situation awareness.** COre can describe the active desktop (windows, dialogs, current project) with a
-  source for every statement, and rejects answers that reference items it cannot observe.
-- **Proactive suggestions.** Interrupted tasks, overdue items and failed automations are surfaced on request
-  (`/suggest`). No action is taken without confirmation.
-- **Provider resilience.** Models are selected from each provider's live catalogue and replaced automatically
-  when retired or unavailable. Verified against Groq and Gemini.
-- **Diagnostics.** `/diagnostics` reports provider health and latency, routing, memory, sandbox and automation
-  status without exposing secrets.
+- **Faster voice responses.** COre reacts within 200 ms of the end of speech (previously 600 ms). Speech
+  recognition starts during natural pauses, English uses a faster on-device recogniser, and a completed sentence
+  ends the turn sooner. COre's own processing before the model responds fell from about 1.2 s to 350 ms.
+- **Faster everyday interaction.** Simple questions bypass specialist routing, context is gathered in parallel,
+  and the settings and command center windows open instantly.
+- **Consistent interface.** Chat, settings, command center, monitor and overlays share one transparent design,
+  validated for legibility on light, dark and busy wallpapers.
+- **Synchronisation visibility.** `/vault` reports Syncthing status, connected devices and conflict copies.
+  Conflicts are flagged in answers and offered for review; COre never resolves them automatically.
+- **Response-time diagnostics.** `/diagnostics` reports measured response times by turn type.
 
 ## Installation
 
 | Platform | Asset |
 |---|---|
-| Windows 10/11 (x64) | `COre-Setup-12.0.0.exe` |
-| Android | `COre-android-12.0.0.apk` (pair from Settings → Phone) |
+| Windows 10/11 (x64) | `COre-Setup-12.1.0.exe` |
+| Android | `COre-android-12.1.0.apk` (pair from Settings → Phone) |
 
 The Windows installer includes the Cortex knowledge engine and all local models (speech recognition, speech
-synthesis, embeddings). No additional downloads are required, and the application works offline after
-installation. Existing installations update automatically once this release is published.
+synthesis, embeddings). No additional downloads are required. Existing installations update automatically once
+this release is published.
 
 Verify downloads against `SHA256SUMS.txt`.
 
@@ -39,23 +35,19 @@ Verify downloads against `SHA256SUMS.txt`.
   local Ollama model.
 - Obsidian and Syncthing are optional.
 
-## Security
-
-- Every desktop action requires approval; commands execute in an OS sandbox.
-- Retrieved content (files, web pages, notes) is treated as data, never as instructions.
-- Conversation history is never imported automatically; the knowledge index remains on the local machine.
-
 ## Known limitations
 
 - The installer is not code-signed. Windows SmartScreen or antivirus software may show a warning.
-- Some applications expose few controls to UI Automation; COre then uses keyboard input and verifies results
-  from saved files.
-- Prompt-injection detection is advisory; enforcement relies on approvals and sandboxing.
+- Time to the first spoken word depends on the model provider's response time; free tiers may be slower under
+  rate limits.
+- The faster recogniser is used for English; other languages use Whisper.
 
 ## Verification
 
-Built and released through the gated release workflow: unit and end-to-end tests on Windows and Linux,
-packaged-application self-test, silent install/uninstall, and an installed-files check including a functional
-test of the bundled Cortex engine.
+Released through the gated release workflow. In addition to unit and end-to-end tests on Windows and Linux,
+this release was verified on Windows with the real installer: silent installation, first launch, bundled
+Cortex, vault creation and registration in Obsidian, remember and recall, and two installations synchronising
+knowledge through Syncthing in both directions. Obsidian opening the COre vault and the bundled Cortex reporting
+synchronisation conflicts are also verified.
 
 Full change history: [CHANGELOG.md](https://github.com/rawsushies/core-ai-companion/blob/main/CHANGELOG.md)

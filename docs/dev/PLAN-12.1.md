@@ -1,6 +1,6 @@
 # Plan: COre 12.1 — human-speed responses, one design, a tidy repository
 
-Status: draft, 2026-11-12. Follows the 12.0.0 release.
+Status: shipped in 12.1.0 (2026-11-12). Follows the 12.0.0 release.
 
 ## Goal
 
