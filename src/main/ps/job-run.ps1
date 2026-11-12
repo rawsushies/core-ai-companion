@@ -7,11 +7,18 @@
 # cap per process; no clipboard, desktop switching, system-setting changes,
 # global atoms or logoff/shutdown. Output is passed through. The launcher only
 # enforces limits; which commands may run is decided in COre (agentTools.js).
+# With -Isolate the command also runs in a Windows AppContainer
+# (appcontainer.cs): it can read only system folders and the folders granted
+# here (Roots read-write, the program's folder read-execute), and has no
+# network. If the container cannot be set up the command is refused, never run
+# with weaker isolation.
 param(
   [string]$Cwd = '.',
   [int]$MemoryMB = 1024,
   [int]$MaxProcs = 32,
-  [string]$Argv = ''
+  [string]$Argv = '',
+  [string]$Roots = '',     # base64 JSON array of folders the command may write (with -Isolate)
+  [switch]$Isolate         # run the command in the COre AppContainer (no profile files, no network)
 )
 $ErrorActionPreference = 'Stop'
 try { $Rest = @((ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Argv)))) | ForEach-Object { [string]$_ }) } catch { $Rest = @() }
@@ -53,11 +60,34 @@ public static class CoreJob {
 try { $script:job = [CoreJob]::Make($MemoryMB, $MaxProcs) } catch { [Console]::Error.WriteLine("job-run: $($_.Exception.Message)"); exit 3 }
 
 # From here every process started (and their children) is inside the job.
+$quoted = foreach ($a in ($Rest | Select-Object -Skip 1)) { if ($a -eq '' -or $a -match '[\s"]') { '"' + ($a -replace '"', '\"') + '"' } else { $a } }
+$workDir = (Resolve-Path -LiteralPath $Cwd).Path
+
+if ($Isolate) {
+  try {
+    Add-Type -TypeDefinition (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'appcontainer.cs'))
+    $sid = [CoreBox]::Sid()
+    $rootList = @()
+    if ($Roots) { $rootList = @((ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Roots)))) | ForEach-Object { [string]$_ }) }
+    # Grant the container exactly these folders (an ACE for the container SID only; nothing else changes).
+    foreach ($r in $rootList) { if (Test-Path -LiteralPath $r) { & icacls.exe $r /grant "*${sid}:(OI)(CI)M" /Q | Out-Null; if ($LASTEXITCODE -ne 0) { throw "could not grant $r" } } }
+    $prog = $Rest[0]
+    if (-not [IO.Path]::IsPathRooted($prog)) { $c = Get-Command $prog -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $prog = $c.Source } }
+    $progDir = Split-Path -Parent $prog
+    $sys = $env:SystemRoot
+    if ($progDir -and (Test-Path -LiteralPath $progDir) -and -not ($sys -and $progDir.StartsWith($sys, [StringComparison]::OrdinalIgnoreCase))) {
+      & icacls.exe $progDir /grant "*${sid}:(OI)(CI)RX" /Q | Out-Null
+    }
+    $line = ((@('"' + $prog + '"') + @($quoted)) -join ' ')
+    $code = [CoreBox]::Run($line, $workDir)
+  } catch { [Console]::Error.WriteLine("job-run: sandbox refused: $($_.Exception.Message)"); exit 4 }
+  exit $code
+}
+
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $Rest[0]
-$quoted = foreach ($a in ($Rest | Select-Object -Skip 1)) { if ($a -eq '' -or $a -match '[\s"]') { '"' + ($a -replace '"', '\"') + '"' } else { $a } }
 $psi.Arguments = ($quoted -join ' ')
-$psi.WorkingDirectory = (Resolve-Path -LiteralPath $Cwd).Path
+$psi.WorkingDirectory = $workDir
 $psi.UseShellExecute = $false
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true

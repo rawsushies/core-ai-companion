@@ -1836,7 +1836,7 @@ function agentTools(taskId) {
       const cwd = files.resolve(a.cwd || '.', { mustExist: true });
       // OS sandbox when available: read-only system, writes only in the project, no network, home hidden.
       const mode = ag.sandbox || 'auto';
-      const w = mode === 'off' ? { file: c.argv[0], args: c.argv.slice(1), sandboxed: false, note: 'sandbox off' } : SBX.wrap(c.argv, { cwd, roots: files.roots });
+      const w = mode === 'off' ? { file: c.argv[0], args: c.argv.slice(1), sandboxed: false, note: 'sandbox off' } : SBX.wrap(c.argv, { cwd, roots: files.roots, isolation: ag.sandboxWindows || 'appcontainer' });
       if (!w.sandboxed && mode === 'required') throw new Error(`Command refused: the sandbox is required but unavailable (${w.note}).`);
       toolAudit({ event: 'agent-command', argv: c.argv, cwd, sandboxed: w.sandboxed });
       const r = await AT.runCommand([w.file, ...w.args], { cwd, signal, timeoutMs: Math.max(5, Math.min(600, Number(ag.commandTimeout) || 60)) * 1000 });

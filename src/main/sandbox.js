@@ -8,11 +8,13 @@
 // COre. Secrets in the home folder (SSH keys, browser profiles, tokens) are
 // simply not there.
 //
-// Windows (Job Object, ps/job-run.ps1): the whole process tree dies with COre,
-// process count and memory are capped, and the command cannot use the
-// clipboard, switch desktops, change system settings or log off. It is not a
-// file-system boundary (the folder jail for the working directory and per-
-// command approval still apply); AppContainer isolation is the next step.
+// Windows (ps/job-run.ps1): a Job Object kills the whole process tree with
+// COre, caps process count and memory, and blocks the clipboard, desktop
+// switching, system settings and logoff. With isolation 'appcontainer' (the
+// default) the command also runs in the COre AppContainer (ps/appcontainer.cs):
+// it reads only system folders plus the project folders (read-write) and its
+// own program folder, cannot see the user's profile, and has no network. If
+// the container cannot be set up the command is refused, not run weaker.
 //
 // macOS: no backend yet. Commands still run argv-only with a scrubbed
 // environment, a folder jail, a timeout and per-command approval; with
@@ -44,16 +46,22 @@ function detect(platform = process.platform) {
 }
 
 // argv -> { file, args, sandboxed, note }. roots: folders the command may write.
-function wrap(argv, { cwd, roots = [], network = false, platform = process.platform, home = os.homedir(), memoryMB = 1024, maxProcs = 32 } = {}) {
+function wrap(argv, { cwd, roots = [], network = false, platform = process.platform, home = os.homedir(), memoryMB = 1024, maxProcs = 32, isolation = 'appcontainer' } = {}) {
   const d = detect(platform);
   if (!d.ok) return { file: argv[0], args: argv.slice(1), sandboxed: false, note: d.reason };
   if (d.kind === 'job') {
+    const b64 = (v) => Buffer.from(JSON.stringify(v), 'utf8').toString('base64');
+    const box = isolation === 'appcontainer';
+    const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', JOB_RUN, '-Cwd', cwd || '.', '-MemoryMB', String(memoryMB), '-MaxProcs', String(maxProcs), '-Argv', b64(argv)];
+    if (box) args.push('-Isolate', '-Roots', b64(roots.filter(Boolean)));
     return {
       file: 'powershell.exe',
-      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', JOB_RUN, '-Cwd', cwd || '.', '-MemoryMB', String(memoryMB), '-MaxProcs', String(maxProcs), '-Argv', Buffer.from(JSON.stringify(argv), 'utf8').toString('base64')],
+      args,
       sandboxed: true,
-      level: 'process',
-      note: `sandboxed (Windows Job Object: process tree, ${memoryMB} MB and ${maxProcs}-process limits, no clipboard or system changes; file access is not restricted)`,
+      level: box ? 'container' : 'process',
+      note: box
+        ? `sandboxed (Windows AppContainer: writes only in ${roots.map((r) => path.basename(r)).join(', ') || 'nothing'}, profile hidden, no network; Job Object ${memoryMB} MB / ${maxProcs}-process limits)`
+        : `sandboxed (Windows Job Object: process tree, ${memoryMB} MB and ${maxProcs}-process limits, no clipboard or system changes; file access is not restricted)`,
     };
   }
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp'];

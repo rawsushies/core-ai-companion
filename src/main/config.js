@@ -133,7 +133,8 @@ const DEFAULTS = {
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
     maxSteps: 25,
     background: false, // let scheduled desktop playbooks (agent: true) start the agent on their own; approvals still apply
-    sandbox: 'auto', // commands in an OS sandbox when available (Linux: bubblewrap); 'required' refuses them otherwise; 'off'
+    sandbox: 'auto', // commands in an OS sandbox when available (Linux: bubblewrap; Windows: AppContainer + Job Object); 'required' refuses them otherwise; 'off'
+    sandboxWindows: 'appcontainer', // 'appcontainer' (no profile files, no network) or 'job' (limits only)
     uia: true, // Windows: read and operate controls by their real properties (UI Automation)
     tools: true, // commands, files and web pages (inside the project folder), on top of mouse and keyboard
     allowCommands: [], // commands that never ask, matched by their start, e.g. "git status", "npm test"
