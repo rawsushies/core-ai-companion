@@ -137,6 +137,7 @@ const DEFAULTS = {
   agent: {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'plan' = OK the plan once; 'task-auto' = no questions. Under 'plan' and 'task-auto' the task runs under a grant (src/main/policy): routine work in the project folder runs, deleting/sending/installing/outside it still ask
+    waitForUser: true, // missions pause mouse/keyboard steps while you use the PC (tool steps continue)
     grantCategories: [], // high-impact kinds a task may do without asking: send, delete, install, network, commands-unsandboxed, bulk (passwords, payments and security settings always ask)
     maxSteps: 25,
     background: false, // let scheduled desktop playbooks (agent: true) start the agent on their own; approvals still apply

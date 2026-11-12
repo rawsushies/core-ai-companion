@@ -144,3 +144,24 @@ test('the dead-man rule: a stopped policy halts the agent before the next action
   assert.ok(!fs.existsSync(path.join(w.W, 'b.md')), 'nothing after the stop');
   assert.notStrictEqual(res.status, 'done');
 });
+
+test('hands lease: mouse and keyboard steps wait while the user is busy; tool steps do not', async () => {
+  const w = world();
+  const grant = createGrant({ goal: 'g', folders: [w.W] }, w.key);
+  const files = new AT.FileOps({ roots: [w.W], backupDir: path.join(w.SAFE, 'b') });
+  const order = [];
+  let userBusy = true;
+  setTimeout(() => { userBusy = false; }, 300);
+  const script = [{ type: 'write', path: path.join(w.W, 'a.md'), text: '1' }, { type: 'key', combo: 'ctrl+s' }, { type: 'done', summary: 'x' }];
+  let i = 0;
+  const r = await new AG.AgentRunner({
+    plan: false, verify: false, settleMs: 0, maxSteps: 5, policy: new Policy({ grant, key: w.key, safeguardPaths: [w.SAFE] }),
+    think: async () => `[[act ${JSON.stringify(script[Math.min(i++, script.length - 1)])}]]`,
+    screenshot: async () => ({ width: 800, height: 600, displayWidth: 800, displayHeight: 600, scaleFactor: 1 }),
+    driver: { perform: async (a) => { order.push(`${a.type}@${userBusy ? 'busy' : 'idle'}`); } }, openApp: async () => {}, onStep: () => {}, approve: async () => 'no',
+    tools: { write: async (a) => { order.push(`write@${userBusy ? 'busy' : 'idle'}`); files.write('t', a.path, a.text); return 'ok'; } },
+    waitHands: async () => { while (userBusy) await new Promise((res) => setTimeout(res, 20)); },
+  }).run('g');
+  assert.strictEqual(r.status, 'done');
+  assert.deepStrictEqual(order, ['write@busy', 'key@idle'], 'the file step ran while the user was busy; the key waited');
+});

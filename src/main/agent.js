@@ -20,6 +20,7 @@ const KEY_RE = /^((ctrl|control|alt|shift|super|win|cmd|meta)\+){0,3}([a-z0-9]|f
 const BLOCKED_KEYS = new Set(['ctrl+alt+delete', 'ctrl+alt+del', 'super+l', 'win+l', 'ctrl+shift+escape', 'ctrl+shift+esc', 'alt+f4']);
 
 const SAFE = new Set(['wait', 'scroll', 'move', 'done', 'ask', 'read', 'focus', 'expand']); // nothing changes beyond viewing
+const HANDS = new Set(['click', 'type', 'key', 'scroll', 'move', 'open', 'press', 'fill', 'focus', 'expand']); // take the mouse, keyboard or focus
 // Control actions (Windows UI Automation): target a control by its id from the
 // latest control list instead of by pixels.
 const UI = new Set(['press', 'fill', 'expand', 'focus']);
@@ -456,6 +457,12 @@ class AgentRunner {
         let ok = true;
         let error = '';
         let result = '';
+        // Hands lease: steps that use the mouse or keyboard wait while the user is using
+        // the PC (missions run alongside you); tool steps carry on.
+        if (this.d.waitHands && HANDS.has(a.type)) {
+          try { await this.d.waitHands({ signal, step, label }); } catch {}
+          if (signal.aborted) return stopped();
+        }
         try {
           if (a.type === 'wait') await new Promise((r) => setTimeout(r, a.ms));
           else if (a.type === 'open') await this.d.openApp(a.app);

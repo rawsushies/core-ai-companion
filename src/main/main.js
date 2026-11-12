@@ -2418,7 +2418,9 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
           }
         }
       }
+      lastAgentInput = Date.now();
       try { return await driver.perform(a, p); } finally {
+        lastAgentInput = Date.now();
         if (mon && !mon.isDestroyed()) mon.setIgnoreMouseEvents(false);
         if (esc) try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
       }
@@ -2440,6 +2442,7 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
   else if (resume) journal.append('resume', { step: resume.step || 0 }); else journal.append('start', { id: taskId, goal, grant: grant ? { id: grant.id, folders: grant.folders, categories: grant.categories } : null });
   agentRunner = new AG.AgentRunner({
     policy: agentPolicy,
+    waitHands: mission && (config.data.agent || {}).waitForUser !== false ? waitForUserIdle : null,
     // "Allow all for this task" in manual mode: a grant for the project folder, for this task
     // only; deleting, sending, installing and commands still ask (12.x behaviour, now as policy).
     onAllowAll: () => { if (agentPolicy.grant || !roots.length) return; const g = POL.createGrant({ goal, folders: roots, commands: false, approvedBy: 'user (allow all for this task)', expiresAt: Date.now() + 6 * 3600e3 }, polKey); agentPolicy.upgrade(g); journal.append('grant', { id: g.id, folders: g.folders, commands: false }); },
@@ -2550,7 +2553,17 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
 // policy as /do, verifies them from disk (or has Sentinel judge when nothing on disk shows
 // it), retries once, and asks you only at the policy's boundaries or when it is stuck.
 let missionEngine = null;
-let missionLive = null; // what the command center (and the phone) show: { id, goal, status, subgoals, steps, startedAt }
+let missionLive = null;
+let lastAgentInput = 0; // when the agent last moved the mouse or typed (its own input resets the idle clock)
+// Hands lease for missions: wait while the user is using the PC (input more recent than the
+// agent's own), so a mission never fights you for the mouse. Tool steps are not held.
+async function waitForUserIdle({ signal, label } = {}) {
+  const busy = () => { let idle = 0; try { idle = powerMonitor.getSystemIdleTime(); } catch { return false; } return idle < 2 && Date.now() - lastAgentInput > 2500; };
+  if (!busy()) return;
+  addTranscript('system', `Mission paused while you use the computer (next: ${String(label || '').slice(0, 80)}). It continues when you stop for a moment.`, { kind: 'progress' });
+  const t0 = Date.now();
+  while (busy() && !(signal && signal.aborted) && Date.now() - t0 < 10 * 60000) await new Promise((r) => setTimeout(r, 500));
+} // what the command center (and the phone) show: { id, goal, status, subgoals, steps, startedAt }
 async function startMission(goal) {
   const ag = config.data.agent || {};
   addTranscript('user', `/autopilot ${goal}`);
