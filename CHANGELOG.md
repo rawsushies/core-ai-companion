@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## 12.1.0 — Faster responses, one interface design, verified installer
+
+### Responsiveness
+
+- **Reacts in 200 ms** after you stop speaking (12.0: 600 ms): the orb shows it is thinking while recognition runs.
+- **Speech recognition starts before you finish**: a speculative transcript runs on the first pause and is reused when nothing new was said.
+- **Faster English recognition**: Moonshine base (about 220 ms for a short question, against about 620 ms for Whisper), with Whisper as the fallback and for other languages.
+- **Earlier end of turn**: a finished sentence ends the turn after 350 ms of silence instead of 600 ms; a trailing "and", "so" or a resumed sentence keeps listening.
+- **Pre-rendered spoken openers** play while the answer is prepared.
+- **Fast path for plain conversation**: simple questions skip specialist routing; memory and desktop context are fetched in parallel.
+- Settings and the command center open instantly (prepared in the background after start).
+- COre's own share of a voice turn before the model answers: 350 ms (12.0: 1204 ms). Measured by `npm run benchmark:latency`; `/diagnostics` shows response times per turn type.
+
+### Design
+
+- **One interface design** (`brand.css`) across chat, settings, command center, monitor, panel and overlay: transparent surfaces with legible outlined text, checked on three wallpapers by an automated readability test.
+
+### Knowledge layer
+
+- The vault status (`/vault`) reports Syncthing state, connected devices and conflict copies; conflicts appear in the knowledge context with a warning, and `/suggest` offers to open them. Read-only access to Syncthing over loopback.
+- First start creates Obsidian's configuration when Obsidian was installed but never opened, so the vault is registered.
+
+### Installer and verification
+
+- **Reproducible Cortex.exe build**: pinned Cortex revision and PyInstaller version, with retries and caching.
+- The installer bundles the Moonshine model alongside Whisper, Kokoro and MiniLM.
+- **Installed-application acceptance on Windows CI**: silent install, first launch, bundled Cortex, vault creation, registration in Obsidian, remember and recall, and two installations synchronising through Syncthing in both directions.
+- The install check verifies that the bundled Cortex reports Syncthing conflict copies.
+- One version across the repository is enforced by `npm run check`.
+
+### Repository
+
+- New README in the brand style; documentation consolidated (`docs/`), older audits archived.
+
 ## 12.0.0 — Desktop operator, environmental and proactive intelligence
 
 ### COre 2.2 / 2.3 / 3.0: sees your desktop, notices what needs you, one experience
