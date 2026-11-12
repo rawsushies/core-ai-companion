@@ -1773,6 +1773,13 @@ function emergencyStop(reason = 'emergency stop') {
 // all steps" for this task). Esc or the Stop button ends it at once.
 const AG = require('./agent');
 const AT = require('./agentTools');
+const { UiaClient } = require('./uia');
+let uiaClient = null;
+function agentUia() {
+  if (!UiaClient.supported() || (config.data.agent || {}).uia === false) return null;
+  if (!uiaClient) uiaClient = new UiaClient();
+  return uiaClient;
+}
 let agentRunner = null;
 const agentTaskFile = () => path.join(app.getPath('userData'), 'agent-task.json');
 function readAgentTask() { try { return JSON.parse(fs.readFileSync(agentTaskFile(), 'utf8')); } catch { return null; } }
@@ -2032,6 +2039,7 @@ async function startAgent(goal, { remote = false } = {}) {
     },
     checkpoint: (st) => writeAgentTask({ ...st, taskId }),
     advise: (info) => decider.adviseFailure(info),
+    uia: agentUia(),
     experience: await agentExperience(goal),
   });
   let r;
@@ -3771,6 +3779,7 @@ app.on('will-quit', () => {
   stopGlanceReader();
   if (companion) companion.stop();
   stopAgent('quitting');
+  try { if (uiaClient) uiaClient.dispose(); } catch {}
   try { if (playbookScheduler) playbookScheduler.stop(); if (playbookWatch) playbookWatch.close(); } catch {}
   if (embedder) embedder.dispose();
   globalShortcut.unregisterAll();
