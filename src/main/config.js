@@ -36,7 +36,7 @@ const DEFAULTS = {
     jevKey: '', // TypeSafe key for Jev: stored as an encrypted secret instead
     gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', prefer: 'flash', vision: true, reasoningEffort: true },
     groq: { baseUrl: 'https://api.groq.com/openai/v1', model: '', prefer: 'gpt-oss-120b|versatile|70b|qwen|gpt-oss|llama', vision: false, reasoningEffort: true }, // model picked from the live list (names change)
-    openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', prefer: ':free$', vision: false },
+    openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', prefer: 'nemotron-3-ultra.*:free$|gemma-4-31b.*:free$|gpt-oss-120b.*:free$|deepseek.*:free$|llama.*70b.*:free$|qwen.*:free$|gemma.*:free$|:free$', vision: false }, // strongest free chat models first; tiny ones only as a last resort
     ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:3b', visionModel: '' },
     openaiCompat: { baseUrl: '', model: '', apiKey: '', vision: false },
     secrets: {}, // API keys, encrypted with your OS account (set them in the chat's ⚙ → Brain)

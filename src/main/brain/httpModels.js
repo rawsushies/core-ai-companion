@@ -158,6 +158,7 @@ class OpenAICompatBrain extends HistoryMixin {
     let pick = null;
     for (const re of prefs) { pick = ids.find((m) => re.test(m) && !avoid.test(m)); if (pick) break; }
     pick = pick || ids.find((m) => !avoid.test(m));
+    // Gemini's OpenAI endpoint lists "models/…" ids; strip the prefix (done above) and keep going.
     if (pick && pick !== this.cfg.model) {
       this.cfg.model = pick;
       this.onModelChange(this.id, pick);
