@@ -371,6 +371,14 @@ class AgentRunner {
       } catch (err) { if (signal.aborted) return stopped(); plan = null; }
       if (plan) report({ plan });
     }
+    // Approval policy 'plan': you approve the plan once; then the task runs on
+    // its own (commands still ask unless allowlisted; Esc / emergency stop work).
+    if (plan && this.d.approvePlan && !allowAll) {
+      const ans = await this.d.approvePlan(plan);
+      if (signal.aborted) return stopped();
+      if (ans === 'no') return { status: 'stopped', reason: 'you declined the plan', steps: history };
+      if (ans === 'yes' || ans === 'all') allowAll = true;
+    }
     try {
       for (let step = first; step <= this.d.maxSteps; step++) {
         if (signal.aborted) return stopped();

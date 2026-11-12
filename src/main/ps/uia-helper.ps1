@@ -20,6 +20,12 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+# Win32 controls (Edit, Button, CheckBox...) need the client-side providers;
+# without them they show up as plain "Pane" with no patterns.
+try {
+  Add-Type -AssemblyName UIAutomationClientsideProviders
+  [System.Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly([UIAutomationClientsideProviders.UIAutomationClientSideProviders].Assembly.GetName())
+} catch {}
 Add-Type -Namespace CoreUia -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);

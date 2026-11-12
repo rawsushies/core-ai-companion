@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### COre 2.1, part 2: Desktop intelligence, planning, sandbox, monitor
+
+- **Windows UI Automation**: the agent reads the foreground window's controls by their real properties (type, name, automation id, value, checked/expanded state, enabled, bounds) and acts on them by id: `press`, `fill` (with the value read back to verify), `expand`, `focus`. Controls without a press action are clicked at their centre; fields that ignore programmatic text are focused and typed into. Coordinates remain for anything not in the list. Off by `agent.uia: false`.
+- **Planning**: before acting, the agent writes a short numbered plan and a "Done when" check; the plan guides every step, is checkpointed for `/do resume`, and the final verification checks against it.
+- **Reasoning effort to providers**: Claude Code gets `--effort high` for deep turns (one-shot; light turns keep the warm session; specialists start at high effort). OpenAI-compatible providers get `reasoning_effort` where enabled (Gemini by default) and stop sending it if an endpoint rejects it.
+- **OS sandbox for commands** (Linux, bubblewrap): read-only system, empty home, private /tmp, no network, writes only in the project folder, dies with COre. `agent.sandbox`: `auto` (default), `required` (refuse without a sandbox), `off`. Process trees are killed on timeout (Windows: `taskkill /T`).
+- **Agent monitor**: a small always-on-top window follows each task (goal, plan, live steps with results, Stop). Click a step to outline on screen what it worked on (a click point or a control's real bounds); each action flashes its target first. It stays out of the agent's way: hidden from its screenshots, click-through during actions, and it moves aside if a target is under it. `/monitor` reopens it.
+- **Learning**: successful desktop tasks are remembered as "workflows that worked" and shown to similar tasks; `/skill save NAME` right after one saves it as a desktop playbook (`agent: true`) built from the real steps. Scheduled desktop playbooks start on their own only with `agent.background` on; approvals still apply.
+
 ### COre 2.1, part 1: Cores that read each other, helpers you can move
 
 - **Cores read each other's work.** Prime now sees what a specialist produced (new results automatically, and the latest from any core you name), so "what did Scout find?" works. Specialists also see the other specialists' recent results.

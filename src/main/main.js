@@ -2156,6 +2156,11 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
     },
     checkpoint: (st) => writeAgentTask({ ...st, taskId }),
     advise: (info) => decider.adviseFailure(info),
+    approvePlan: ag.approve === 'plan' ? (plan) => new Promise((resolve) => {
+      const id = require('crypto').randomUUID();
+      agentApprovals.set(id, { resolve });
+      toDock('dock:agent-approve', { id, step: 'Plan', label: `${plan.steps.length} steps: ${plan.steps.map((x, i) => `${i + 1}. ${x}`).join('  ')}`.slice(0, 400), why: plan.doneWhen ? `Done when: ${plan.doneWhen}` : 'Approve to let COre carry it out without asking each step.', forced: true });
+    }) : null,
     uia: agentUia(),
     experience: [instructions ? `Saved workflow to follow:\n${String(instructions).slice(0, 3000)}` : '', await agentExperience(goal)].filter(Boolean).join('\n'),
   });

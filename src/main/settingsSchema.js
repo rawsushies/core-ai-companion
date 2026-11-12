@@ -127,7 +127,7 @@ const SECTIONS = [
     title: 'Agent',
     fields: [
       { key: 'agent.enabled', label: 'Let COre operate this PC for tasks I start with /do (it clicks and types; Esc stops it)', type: 'toggle' },
-      { key: 'agent.approve', label: 'Approval', type: 'select', options: [['every', 'Ask me before every click, key or typing (recommended)'], ['task-auto', 'Never ask (only for tasks you watch)']] },
+      { key: 'agent.approve', label: 'Approval', type: 'select', options: [['every', 'Ask me before every click, key or typing (recommended)'], ['plan', 'Show me the plan once; if I approve, carry it out (commands still ask)'], ['task-auto', 'Never ask (only for tasks you watch)']] },
       { key: 'agent.maxSteps', label: 'Most steps per task', type: 'range', min: 5, max: 50, step: 5 },
       { key: 'agent.background', label: 'Let scheduled desktop playbooks start the agent on their own (approvals still apply)', type: 'toggle' },
       { key: 'agent.tools', label: 'Also let it run commands, edit files in the project folder and read web pages (commands always ask; file changes can be undone with /do undo)', type: 'toggle' },
