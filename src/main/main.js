@@ -885,6 +885,7 @@ function changeSetting(key, value) {
   SCHEMA.setPath(config.data, key, v);
   config.save();
   applyLive(key, v);
+  if (key.startsWith('events.')) startEventMonitor();
   return { ok: true, values: settingsValues(), secrets: settingsSecrets() };
 }
 
@@ -1883,7 +1884,7 @@ function startEventMonitor() {
   eventMonitor = new EventMonitor({
     getRules: () => ((config.data.events || {}).rules || []).map((r, i) => ({ id: r.id || `rule-${i + 1}`, name: r.name || r.playbook || `Rule ${i + 1}`, workflow: r.playbook, ...r })),
     permitted: (src) => !!(config.data.events || {})[src],
-    roots: () => files.roots,
+    roots: () => { try { return agentFiles().roots; } catch { return []; } },
     listTitles: async () => { try { return (await openWindowTitles()) || []; } catch { return []; } },
     context: async (q) => { try { return (await gateway().context(q, { budget: 900, k: 4 })).text; } catch { return ''; } },
     history: (id) => automationHistory()[id] || [],
@@ -3914,7 +3915,17 @@ app.whenReady().then(async () => {
   // A task cut off by a crash or quit can pick up where it stopped.
   setTimeout(() => {
     const t = readAgentTask();
-    if (t && t.status === 'running' && Date.now() - (t.at || 0) < 7 * 864e5) addTranscript('system', `An agent task was interrupted at step ${t.step}: "${String(t.goal).slice(0, 80)}". Type /do resume to continue it.`);
+    if (!(t && t.status === 'running' && Date.now() - (t.at || 0) < 7 * 864e5)) return;
+    const ag = config.data.agent || {};
+    // Resume on its own only if you allowed it (agent.autoResume plus background
+    // desktop tasks), and only recent tasks; approvals still apply to every step.
+    if (ag.enabled && ag.autoResume === true && ag.background === true && Date.now() - (t.at || 0) < 2 * 3600e3) {
+      addTranscript('system', `Resuming the interrupted agent task at step ${t.step}: "${String(t.goal).slice(0, 80)}". Press Esc to stop it.`, { kind: 'progress' });
+      toolAudit({ event: 'agent-auto-resume', step: t.step });
+      startAgent('resume');
+      return;
+    }
+    addTranscript('system', `An agent task was interrupted at step ${t.step}: "${String(t.goal).slice(0, 80)}". Type /do resume to continue it.`);
   }, 4000);
   notes = new SK.Notes(path.join(userData, 'notes.json'));
   refreshCores();
@@ -3947,7 +3958,7 @@ app.whenReady().then(async () => {
   PB.seedExamples(playbookDir(), path.join(__dirname, '..', '..', 'assets', 'skills'));
   reloadPlaybooks();
   watchPlaybooks();
-  startEventMonitor();
+  try { startEventMonitor(); } catch (err) { console.error("[core] automations failed to start:", err.message); }
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();

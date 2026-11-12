@@ -96,6 +96,7 @@ test.before(async () => {
     phone: { host: '127.0.0.1', port: 0 },
     tools: { projectRoot: project, enabled: true, allowWrites: true },
     skills: { lyrics: false }, // no network in tests
+    events: { files: true, rules: [{ name: 'CSV intake', source: 'files', match: 'intake-*.csv', on: 'created', playbook: 'csv-intake', mode: 'auto', cooldownMin: 0 }] },
   }));
   fs.writeFileSync(path.join(userData, 'state.json'), JSON.stringify({ onboarded: true }));
   app = await electron.launch({
@@ -704,6 +705,27 @@ test('memory gateway with the real Cortex: a decision goes to the vault, comes b
   assert.match(fs.readFileSync(path.join(cortexVault, 'Projects', 'Tower.md'), 'utf8'), /we decided the client wants a glass facade/);
   await send('what facade does the tower client want?');
   await dock.waitForFunction(() => /From your notes in Cortex \(Projects\/Tower\.md\)/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('automations: a new file in the project folder starts the matching playbook and the outcome is reported', async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: '\\[automation CSV intake\\][\\s\\S]*intake-april\\.csv', full: true, reply: 'Intake summary: intake-april.csv has 2 rows.' },
+    ...baseRules,
+  ]));
+  fs.mkdirSync(path.join(userData, 'skills', 'csv-intake'), { recursive: true });
+  fs.writeFileSync(path.join(userData, 'skills', 'csv-intake', 'SKILL.md'), '---\nname: csv-intake\ndescription: Summarize a new intake CSV.\nenabled: true\n---\n1. Count the rows\n2. Report the total\n');
+  await send('/automations');
+  await dock.waitForFunction(() => /Automations: files on/.test(document.getElementById('log').innerText) && /CSV intake: files "intake-\*\.csv" -> csv-intake \(auto\)/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  await wait(500);
+  fs.writeFileSync(path.join(project, 'not-an-intake.csv'), 'a,b\n1,2\n'); // does not match the rule
+  fs.writeFileSync(path.join(project, 'intake-april.csv'), 'item,amount\nsteel,9000\nglass,4200\n');
+  await dock.waitForFunction(() => /Intake summary: intake-april\.csv has 2 rows/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  await dock.waitForFunction(() => /CSV intake: File created: intake-april\.csv\. Done \(not verified\)/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  const hist = JSON.parse(fs.readFileSync(path.join(userData, 'automation-history.json'), 'utf8'));
+  const runs = Object.values(hist).flat();
+  assert.strictEqual(runs.length, 1, JSON.stringify(hist));
+  assert.match(runs[0].what, /intake-april\.csv/);
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
