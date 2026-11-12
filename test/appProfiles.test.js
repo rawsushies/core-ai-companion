@@ -27,3 +27,9 @@ test('the agent gets built-in tips plus what worked before in that app', () => {
   assert.doesNotMatch(b, /rename photos/);
   assert.strictEqual(appBlock({ process: 'mystery', name: 'x' }, m), '');
 });
+
+test('LibreOffice Calc gets its keyboard-first profile (UI Automation often sees no controls)', () => {
+  assert.strictEqual(profileFor({ name: 'budget.csv — LibreOffice Calc', process: 'soffice.bin' }).id, 'calc');
+  assert.strictEqual(profileFor({ name: 'Untitled 1 - LibreOffice Calc', process: '' }).id, 'calc');
+  assert.match(appBlock({ name: 'x — LibreOffice Calc', process: 'soffice.bin' }), /Ctrl\+Shift\+F5/);
+});
