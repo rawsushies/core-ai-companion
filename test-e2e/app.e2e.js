@@ -850,3 +850,26 @@ test('invisible design: settings, command center, monitor and chat stay readable
   }
   assert.deepStrictEqual(problems, [], `text without a solid backing or halo:\n${problems.join('\n')}`);
 });
+
+test('tutorials: COre teaches a lesson in the chat, waits for the task, and stops on request', async () => {
+  const has = (re, ms = 15000) => dock.waitForFunction((src) => new RegExp(src).test(document.getElementById('log').innerText), re.source, { timeout: ms });
+  await send('/tutorial vault');
+  await has(/Try it:[\s\S]*Type \/vault[\s\S]*Your knowledge vault · step 1 of 5/);
+  await wait(1500);
+  assert.doesNotMatch(await logText(), /step 2 of 5/, 'a step with a task waits for the user');
+  await send('/vault');
+  await has(/Knowledge vault|vault/i);
+  await has(/Your knowledge vault · step 2 of 5/, 20000);
+  await send('next');
+  await has(/Your knowledge vault · step 3 of 5/);
+  await send('stop');
+  await has(/Tutorial paused\. Type \/tutorial to pick up where you left off\./);
+  const ud = await app.evaluate(({ app: a }) => a.getPath('userData'));
+  const progress = () => { try { return JSON.parse(fs.readFileSync(path.join(ud, 'state.json'), 'utf8')).tutorial || {}; } catch { return {}; } };
+  for (let i = 0; i < 20 && !(progress().active === null); i++) await wait(250);
+  assert.strictEqual(progress().active, null, 'progress is saved');
+  await send('/tutorial');
+  await has(/Tutorials \(I teach them here in the chat/);
+  await has(/Talking with COre · step 1 of 5/);
+  await send('stop');
+});
