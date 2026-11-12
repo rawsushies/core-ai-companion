@@ -57,7 +57,7 @@ test('outline: actionable and named controls only, with state, in a compact form
   assert.match(o, /\[4\] Document "Text Editor" #15 value="hi" \(focused\)/);
   assert.match(o, /\[5\] Button "Save" \(disabled\)/);
   assert.doesNotMatch(o, /\[2\]/, 'unnamed layout panes are skipped');
-  assert.doesNotMatch(o, /Offscreen/, 'controls without bounds are skipped');
+  assert.match(o, /\[6\] Button "Offscreen" \(no position\)/, 'controls without a position are kept and marked');
 });
 
 test('control actions are validated against the current list', () => {

@@ -108,7 +108,7 @@ function outline(snap, { maxLines = 90 } = {}) {
   const w = snap.window || {};
   const lines = [];
   for (const e of snap.elements || []) {
-    if (!interesting(e) || !e.bounds || (e.offscreen && e.depth > 0 && !e.bounds.w)) continue;
+    if (!interesting(e)) continue; // controls without a position still work with control actions
     const q = (s, n = 60) => JSON.stringify(String(s).length > n ? `${String(s).slice(0, n)}…` : String(s));
     const bits = [`[${e.id}]`, e.type, e.name ? q(e.name) : ''];
     if (e.aid && e.aid !== e.name && e.aid.length <= 40) bits.push(`#${e.aid}`);
@@ -117,6 +117,7 @@ function outline(snap, { maxLines = 90 } = {}) {
     if (e.expanded && e.expanded !== 'LeafNode') bits.push(`(${e.expanded.toLowerCase()})`);
     if (e.enabled === false) bits.push('(disabled)');
     if (e.focused) bits.push('(focused)');
+    if (!e.bounds) bits.push('(no position)');
     lines.push(`${'  '.repeat(Math.min(6, Math.max(0, (e.depth || 0) - 1)))}${bits.filter(Boolean).join(' ')}`);
     if (lines.length >= maxLines) { lines.push('…(more controls not shown)'); break; }
   }
