@@ -119,6 +119,7 @@ let dockVisible = true;
 let dockHeight = 60;
 let currentPipeline = null;
 let memory = null;
+const latency = new (require('./latency').Latency)(); // turn timings (src/main/latency.js)
 // Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
 const { CortexClient } = require('./cortex');
 const { MemoryGateway, isDecision } = require('./memgate');
@@ -1144,6 +1145,7 @@ async function diagnosticsReport() {
     `• Brain (${rs.mode || 'auto'}): ${(rs.providers || []).map((p) => `${p.name || p.id} ${p.state}${p.firstTokenMs != null ? ` ~${Math.round(p.firstTokenMs / 100) / 10}s` : ''}${p.ok + p.fail ? ` ${p.ok}/${p.ok + p.fail} ok` : ''}${p.reason ? ` (${String(p.reason).slice(0, 60)})` : ''}`).join('; ') || 'none'}`,
     rs.last ? `  last turn: ${rs.last.provider || ''} ${rs.last.model || ''}${rs.last.reason ? ` because ${String(rs.last.reason).slice(0, 80)}` : ''}` : '',
     `• Memory: ${st ? `${st.total} entries (${Object.entries(st.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}), ${st.conflicts} conflicts kept` : 'off'}`,
+    `• Response times: ${require('./latency').Latency.format(latency.stats()).replace(/\n/g, '\n  ')}`,
     `• Cortex: ${gs.cortex}${gs.pending ? `, ${gs.pending} waiting` : ''}`,
     `• Vault: ${(await vaultReport().catch((e) => `error: ${e.message}`)).split('\n').slice(0, 4).join('; ')}`,
     `• Desktop agent: ${ag.enabled ? 'on' : 'off'}, approvals ${ag.approve || 'every'}, UI Automation ${agentUia() ? 'available' : 'not available'}`,
@@ -3247,6 +3249,7 @@ function playGame(name) {
 // chain: a follow-up turn right after the previous one (skill results): the
 // previous reply keeps speaking and this one queues after it.
 async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false, files = [], playbook = null } = {}) {
+  if (typed && !internal && !remote && chain === 0 && !/^\//.test(String(text || ''))) latency.begin('typed');
   text = String(text || '').trim();
   if (!text) return;
   // Meiosis routing: decide the recipient before touching Prime's turn, so
@@ -3333,7 +3336,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   if (!internal && !chain && !withScreen && !files.length && !playbook) {
     // Instant answers for short requests (time, music keys, lyrics card).
     const busyBefore = !!current;
-    if (quickReply(text, { typed })) { if (!busyBefore) toOverlay('state', 'idle'); return; }
+    if (quickReply(text, { typed })) { latency.reclassify('instant'); latency.mark('firstToken'); if (!busyBefore) toOverlay('state', 'idle'); return; }
   }
   if (chain) {
     if (syncTurn && syncTurn.finished) toDock('dock:done', { text: syncTurn.reply });
@@ -3436,7 +3439,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       context: contextBlocks.join('\n\n'),
       signal: ac.signal,
       onText: (t) => {
-        if (!firstTextAt) { firstTextAt = Date.now(); if (process.env.CORE_DEBUG) console.log(`[core] timing first-text ${firstTextAt - turnStart}ms`); }
+        if (!firstTextAt) { firstTextAt = Date.now(); latency.mark('firstToken', firstTextAt); if (process.env.CORE_DEBUG) console.log(`[core] timing first-text ${firstTextAt - turnStart}ms`); }
         if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t);
       },
       onItem: (item) => {
@@ -3508,6 +3511,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       current = null;
       toDock('dock:busy', false);
     }
+    if (!synced && latency.turn) latency.finish(); // no voice to wait for
   }
 }
 
@@ -3772,13 +3776,18 @@ function wireIpc() {
     config.data.orb.home = { x: Math.round(home.x), y: Math.round(home.y) };
     config.save();
   });
-  ipcMain.on('listen:audio', async (e, { audio, withScreen }) => {
+  ipcMain.on('listen:audio', async (e, { audio, withScreen, speechEndAt }) => {
     if (!fromOverlay(e)) return;
     listening = null;
+    const end = Number(speechEndAt);
+    latency.begin('voice', end > 0 && end <= Date.now() && Date.now() - end < 60000 ? end : Date.now());
+    latency.mark('heard');
     toOverlay('state', 'thinking');
+    latency.mark('react');
     try {
       const pcm = audio instanceof Float32Array ? audio : new Float32Array(audio);
       const text = await stt.transcribe(pcm);
+      latency.mark('transcript');
       if (!text) {
         toOverlay('state', 'idle');
         return;
@@ -3833,6 +3842,7 @@ function wireIpc() {
   });
   ipcMain.on('overlay:log', (e, msg) => { if (fromOverlay(e)) console.log('[overlay]', msg); });
   ipcMain.on('voice:spoken', (e, { text, ms } = {}) => {
+    if (fromOverlay(e) && text) latency.mark('firstAudio');
     if (process.env.CORE_DEBUG) console.log(`[core] spoken ${Date.now()} ms=${Math.round(ms)} ${String(text).slice(0, 50)}`);
     if (!fromOverlay(e) || !syncTurn || !text) return;
     // The chat reveals this sentence word by word over its real audio length.
@@ -3841,6 +3851,7 @@ function wireIpc() {
   });
   ipcMain.on('voice:idle', (e) => {
     if (fromOverlay(e)) mainSpeaking = false;
+    if (fromOverlay(e) && latency.turn && latency.turn.marks.firstAudio != null) latency.finish();
     if (fromOverlay(e) && process.env.CORE_DEBUG) console.log(`[core] voice prime end ${Date.now()}`);
     if (fromOverlay(e) && followUpPending && !current && !listening) {
       followUpPending = false;

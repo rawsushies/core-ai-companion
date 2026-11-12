@@ -85,6 +85,7 @@
       }
       this.chunks.push(block);
       this.quiet = e < stopThr ? this.quiet + 1 : 0;
+      if (e >= stopThr) this.lastVoiceAt = Date.now(); // your last word, for latency measurement
       // Hold-to-talk and toggle mode end only when you let go / press again.
       if ((!this.meta.hold && this.quiet >= SILENCE_CHUNKS) || elapsed > (this.meta.hold ? 60000 : MAX_MS)) this.stop();
     }
@@ -100,7 +101,7 @@
       this.active = false;
       this._close();
       this.hooks.onLevel(0);
-      this.hooks.onAudio(audio, this.meta);
+      this.hooks.onAudio(audio, { ...this.meta, speechEndAt: this.lastVoiceAt || Date.now() });
     }
 
     cancel(reason) {

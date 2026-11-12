@@ -146,7 +146,7 @@
       if (wake) wake.pause(false);
       setMode('thinking');
       if (body) pulseAt(body.pos.x, body.pos.y, 0.5); // "got it" the moment you stop talking
-      if (bridge) bridge.sendAudio(audio, !!meta.withScreen);
+      if (bridge) bridge.sendAudio(audio, !!meta.withScreen, meta.speechEndAt);
     },
     onCancel: (reason) => {
       if (wake) wake.pause(false);
