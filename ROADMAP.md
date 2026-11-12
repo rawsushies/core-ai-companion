@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 64%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 70%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -34,8 +34,8 @@ vault files directly.
 | 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
 | 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; real-provider validation open | ~90% |
 | 2 COre 2.2 environmental intelligence | Acceptance test passes on real Windows + real Cortex | ~70% |
-| 3 COre 2.3 proactive intelligence | Permissioned event monitoring + acceptance test (real files, real Cortex) | ~50% |
-| 4 COre 3.0 unified experience | Partly present (voice, routing, command center) | ~30% |
+| 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e in the real app); approved maintenance; opt-in auto-resume | ~70% |
+| 4 COre 3.0 unified experience | Benchmarks in place; voice, routing, effort, command center, backups present | ~40% |
 
 ### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
 
@@ -89,10 +89,26 @@ vault files directly.
 | 2 | Background and scheduled workflows | Present (scheduled playbooks, background desktop tasks opt-in) | |
 | 5, 8 | Bounded proactive assistance, respects permissions | Implemented | ask-first by default, per-rule cooldown, hourly budget, one run at a time; workflows use the normal tools and approvals |
 | 9, 10, 11 | Verified lessons to Cortex; past outcomes before repeating; history not treated as correct | Implemented | rule history (marked "may be outdated") + gateway recall given to each run; outcomes logged to the Cortex logbook |
-| Acceptance | Permitted event -> relevance -> history -> authorized workflow -> verified outcome | **Pass (Linux CI, real Cortex)** | real file created in a watched folder, unrelated file ignored, Cortex decision recalled with its path, workflow writes a summary that is read back from disk |
-| 3, 4, 6, 7, 12 | Skills, opportunity detection, restart resume, specialist collaboration, scheduled maintenance | Partly | |
+| Acceptance | Permitted event -> relevance -> history -> authorized workflow -> verified outcome | **Pass (Linux CI, real Cortex; e2e in the real app)** | real file created in a watched folder, unrelated file ignored, Cortex decision recalled with its path, workflow writes a summary that is read back from disk |
+| 6 | Automatic resumption after restart | Implemented (opt-in) | `agent.autoResume` + background tasks; otherwise offered |
+| 12 | User-approved scheduled maintenance | Implemented | `/memory maintain` dry-run report, `apply [all]`; optional weekly report; daily pass merges only (retiring waits for approval); `test/memgate.test.js` #12 |
+| 3, 4, 7 | Skills, opportunity detection, specialist collaboration | Partly (playbooks, watch mode, specialists) | |
+
+### Phase 4: COre 3.0 unified experience
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 1 | Voice, speech recognition, interruption | Present from 2.0 (local STT/TTS, barge-in) | e2e voice tests with stand-ins |
+| 2, 10 | Unified memory through the gateway, reliable across restarts | **Measured** | [docs/BENCHMARKS.md](docs/BENCHMARKS.md): recall after 5/5 full restarts, offline queue delivered 5/5 |
+| 3, 4 | Jev routing, effort passed to providers, failover | Implemented, verified with stand-ins | router/effort unit tests; e2e failover. Real providers unverified |
+| 6 | Monitoring, diagnostics, transparency | Present | command center, monitor panel, audit log |
+| 7, 11 | Updates, recovery, backups, rollback | Present from 2.0 | backup e2e, updater, `/do undo` |
+| 9 | Real-world benchmarks | **Implemented** | `npm run benchmark`: memory hit rate and source correctness against real Cortex, restart reliability, injection guard (tuning and held-out sets), OS sandbox blocking, routing accuracy |
+| Acceptance | Complex instruction end to end | Not yet | needs a combined scenario; real providers unavailable |
 
 ## Blocked or limited
+
+- Injection guard on held-out examples: 4/6 flagged, 1/4 benign flagged (see benchmarks); every retrieved text is fenced as data regardless.
 
 - Real provider validation (Gemini, Groq, OpenRouter, Jev): no network access from the build environment.
 - Node package managers cannot run inside the Windows AppContainer (libuv named pipes are denied); they run with Job limits only.
@@ -100,6 +116,6 @@ vault files directly.
 
 ## Next execution target
 
-1. Phase 3: automatic task resumption after app restart; automations e2e in the real app; rule editor in Settings.
-2. Phase 3: user-approved scheduled memory maintenance (Cortex health and consolidation).
-3. Phase 4: voice-first loop with interruption, unified memory surfaces.
+1. Phase 4 acceptance: one combined scenario (instruction -> context -> knowledge -> plan -> routing -> specialists -> tools -> failure recovery -> verification -> Cortex), e2e with stand-in providers.
+2. Phase 3: opportunity detection (unfinished tasks, stale decisions) as bounded suggestions.
+3. Real-provider validation once network access to provider APIs is available.
