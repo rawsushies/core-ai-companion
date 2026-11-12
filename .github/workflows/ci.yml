@@ -30,6 +30,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip # GPU (CUDA) binaries from nuget.org are not needed; the CPU ones ship in the package
       - run: npm run check
       - name: Cortex knowledge vault for the memory gateway tests
         shell: bash
@@ -59,6 +61,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip # GPU (CUDA) binaries from nuget.org are not needed; the CPU ones ship in the package
       - name: Build installer (not published)
         run: npx electron-builder --win nsis --x64 --publish never
       - name: Self-test the packaged app

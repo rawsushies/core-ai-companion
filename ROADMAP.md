@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 55%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 64%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -32,9 +32,9 @@ vault files directly.
 | Phase | Status | Estimate |
 |---|---|---|
 | 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
-| 1 COre 2.1 desktop operator | Acceptance passing on real Windows CI; real-provider validation open | ~85% |
-| 2 COre 2.2 environmental intelligence | Situation awareness + sourced explanation in place; acceptance test on real Windows | ~45% |
-| 3 COre 2.3 proactive intelligence | Partly present (scheduled playbooks, learned workflows) | ~20% |
+| 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; real-provider validation open | ~90% |
+| 2 COre 2.2 environmental intelligence | Acceptance test passes on real Windows + real Cortex | ~70% |
+| 3 COre 2.3 proactive intelligence | Permissioned event monitoring + acceptance test (real files, real Cortex) | ~50% |
 | 4 COre 3.0 unified experience | Partly present (voice, routing, command center) | ~30% |
 
 ### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
@@ -61,7 +61,7 @@ vault files directly.
 | Planner (plan + done-when) | Verified | `test/agent.win.test.js` plan checkpointed and resumed |
 | Multi-step task, interruption, resume, verified outcome | **Pass on real Windows** | `test/agent.win.test.js`: fill + press, Esc mid-task, resume from checkpoint, tick; result read back from the app (reasoning scripted: no provider in CI) |
 | Windows process isolation | **Pass on real Windows** | Job Object (`test/sandbox.win.test.js`): tree kill on timeout incl. grandchildren, process cap, memory cap, no clipboard |
-| Windows file-system + network isolation | Implemented (AppContainer); CI confirming | `COre.AgentSandbox` AppContainer: home folder read/write/list denied, other folders denied, loopback network denied, each compared with the same operation outside the box (passed on CI run 74ef60f). npm/npx/pnpm/yarn run under the Job only (Node child processes cannot start inside an AppContainer); the command note says so |
+| Windows file-system + network isolation | **Pass on real Windows** | `COre.AgentSandbox` AppContainer: home folder read/write/list denied, other folders denied, loopback network denied, each compared with the same operation outside the box (CI windows-latest, 4da09ae). npm/npx/pnpm/yarn run under the Job only (Node child processes cannot start inside an AppContainer); the command note says so |
 | Least privilege, approvals, e-stop, audit, rollback | Implemented | e2e emergency stop, tools + undo, plan approval |
 | Timeouts, process-tree kill, retries | Verified | taskkill /T; Job kill-on-close; failure advisor |
 | Memory gateway in planning and execution | Implemented | agent experience reads Cortex; lessons and outcomes written back |
@@ -73,13 +73,24 @@ vault files directly.
 | # | Requirement | Status | Evidence |
 |---|---|---|---|
 | 1 | Screenshot perception + accessibility | Implemented | agent prompt carries both the screenshot and the UIA control list |
-| 2 | Active apps, window states, dialogs, changes | Implemented; Windows CI confirming | `src/main/situation.js` (UIA windows, visual state, modal/#32770 dialogs, focused controls, opened/closed/retitled/switched); `test/situation.test.js` |
+| 2 | Active apps, window states, dialogs, changes | **Verified on real Windows** | `src/main/situation.js` (UIA windows, visual state, modal/#32770 dialogs, focused controls, opened/closed/retitled/switched); `test/situation.test.js` |
 | 3 | File intelligence (PDF, Office, images, audio, video, code, IFC, DXF) | Present from 2.0 | `src/main/fileintel.js` |
 | 4, 8 | Project context from both memory systems | Implemented | situation recall through the gateway; project matched from window titles against COre projects and Cortex `Projects/` notes |
 | 5 | Understand ongoing work without repeating | Partly | "what am I working on" / "where was I" attach the situation; agent resumes from checkpoints |
 | 9 | Source verification, confirmed vs inferred | Implemented | every fact tagged observed / inferred / memory / cortex; `groundCheck` flags names in the reply that no source backs (shown to the user) |
 | 6, 7, 10 | App-specific workflows, context sync, knowledge updates after verified tasks | Partly (learned workflows, outcomes to Cortex) | |
-| Acceptance | Desktop + project + both memories, explained without fabrication | Test written on real Windows + real Cortex (`test/situation.win.test.js`); awaiting CI | |
+| Acceptance | Desktop + project + both memories, explained without fabrication | **Pass** | `test/situation.win.test.js` on windows-latest: real project window and its message box observed, project Lakeside inferred from the title, COre memory and `Projects/Lakeside.md` from real Cortex recalled, every fact sourced; invented window flagged by `groundCheck`. The brain's own wording needs a real provider (unverified) |
+
+### Phase 3: COre 2.3 proactive intelligence
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 1 | Permissioned event monitoring | Implemented | `src/main/events.js`: file and window sources, each off until allowed; `test/events.test.js` |
+| 2 | Background and scheduled workflows | Present (scheduled playbooks, background desktop tasks opt-in) | |
+| 5, 8 | Bounded proactive assistance, respects permissions | Implemented | ask-first by default, per-rule cooldown, hourly budget, one run at a time; workflows use the normal tools and approvals |
+| 9, 10, 11 | Verified lessons to Cortex; past outcomes before repeating; history not treated as correct | Implemented | rule history (marked "may be outdated") + gateway recall given to each run; outcomes logged to the Cortex logbook |
+| Acceptance | Permitted event -> relevance -> history -> authorized workflow -> verified outcome | **Pass (Linux CI, real Cortex)** | real file created in a watched folder, unrelated file ignored, Cortex decision recalled with its path, workflow writes a summary that is read back from disk |
+| 3, 4, 6, 7, 12 | Skills, opportunity detection, restart resume, specialist collaboration, scheduled maintenance | Partly | |
 
 ## Blocked or limited
 
@@ -89,6 +100,6 @@ vault files directly.
 
 ## Next execution target
 
-1. Confirm the AppContainer boundary and the Phase 2 acceptance test on Windows CI.
-2. Phase 2: context synchronization across brain, specialists, gateway and agent (one shared situation per task); knowledge updates after verified task completion.
-3. Phase 3: permissioned event monitoring feeding bounded proactive workflows.
+1. Phase 3: automatic task resumption after app restart; automations e2e in the real app; rule editor in Settings.
+2. Phase 3: user-approved scheduled memory maintenance (Cortex health and consolidation).
+3. Phase 4: voice-first loop with interruption, unified memory surfaces.
