@@ -43,7 +43,18 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
   const key = (combo) => keys.perform({ type: 'key', combo });
   try {
     let w = null;
-    for (let i = 0; i < 120 && !w; i++) { await wait(1000); w = (await uia.windows()).find((x) => /budget\.csv/i.test(x.name) && /LibreOffice/i.test(x.name)); }
+    let all = [];
+    for (let i = 0; i < 120 && !w; i++) {
+      await wait(1000);
+      all = await uia.windows();
+      w = all.find((x) => /budget\.csv/i.test(x.name) && /LibreOffice|Calc/i.test(x.name));
+      // LibreOffice 26 can open a first-start or import question before the sheet: answer it.
+      if (!w && i % 5 === 4) {
+        const q = all.find((x) => x.process && /soffice/i.test(x.process) && !/budget\.csv/i.test(x.name));
+        if (q) { console.log('LibreOffice asks first:', q.name); try { await uia.activate(q.id); await key('enter'); } catch {} }
+      }
+    }
+    if (!w) { shot('calc-0-missing.png'); console.log('windows:', JSON.stringify(all.map((x) => ({ name: x.name, process: x.process, cls: x.cls })))); }
     assert.ok(w, 'the Calc window with budget.csv is on the desktop');
     console.log('window:', JSON.stringify({ name: w.name, cls: w.cls, process: w.process }));
     const prof = profileFor(w);
