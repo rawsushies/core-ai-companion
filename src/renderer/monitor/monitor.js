@@ -15,6 +15,15 @@
     $('status').textContent = `${STATUS[m.status] || m.status}${m.status === 'running' && last ? ` · step ${last.step}` : ''}`;
     $('goal').textContent = m.goal || 'No task yet. Start one with /do in the chat.';
     $('stop').hidden = m.status !== 'running';
+    const pl = $('plan');
+    pl.hidden = !m.plan;
+    if (m.plan) {
+      if (!pl.dataset.shown) { pl.open = true; pl.dataset.shown = '1'; }
+      const ps = $('plan-steps');
+      ps.textContent = '';
+      for (const x of m.plan.steps) ps.append(el('li', '', x));
+      $('plan-done').textContent = m.plan.doneWhen ? `Done when: ${m.plan.doneWhen}` : '';
+    }
     const ol = $('steps');
     const atBottom = ol.scrollTop + ol.clientHeight >= ol.scrollHeight - 8;
     ol.textContent = '';

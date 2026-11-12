@@ -58,7 +58,7 @@ function runner(replies, extra = {}) {
   const performed = [];
   const asked = [];
   let i = 0;
-  const r = new AG.AgentRunner({
+  const r = new AG.AgentRunner({ plan: false,
     settleMs: 0,
     screenshot: async () => shot,
     think: async () => replies[Math.min(i++, replies.length - 1)],
@@ -108,7 +108,7 @@ test('invalid actions are retried a little, then the task fails; the step limit 
 test('stop ends the task before the next action', async () => {
   let r;
   const performed = [];
-  r = new AG.AgentRunner({
+  r = new AG.AgentRunner({ plan: false,
     settleMs: 0,
     screenshot: async () => shot,
     think: async () => { r.stop('you pressed Esc'); return '[[act {"type":"click","x":1,"y":1}]]'; },

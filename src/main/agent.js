@@ -254,7 +254,7 @@ function driverFor(platform = process.platform) {
 
 // ------------------------------------------------------------------ the loop
 
-function agentPrompt(goal, history, shot, step, maxSteps, { tools = false, note = '', experience = '', controls = '' } = {}) {
+function agentPrompt(goal, history, shot, step, maxSteps, { tools = false, note = '', experience = '', controls = '', plan = null } = {}) {
   const past = history.length
     ? history.slice(-8).map((h, i) => `${history.length - Math.min(8, history.length) + i + 1}. ${h.label}${h.ok ? '' : ` (failed: ${h.error})`}`).join('\n')
     : 'none yet';
@@ -265,6 +265,7 @@ function agentPrompt(goal, history, shot, step, maxSteps, { tools = false, note 
     `[agent] You are operating this computer to finish one task for the user. Step ${step} of at most ${maxSteps}.`,
     `Task: ${goal}`,
     `The attached screenshot is ${shot.width} x ${shot.height} pixels; give coordinates in those pixels. Open windows: ${(shot.windows || []).slice(0, 12).join('; ') || 'unknown'}.`,
+    ...(plan ? [`Your plan:\n${plan.steps.map((x, i) => `${i + 1}. ${x}`).join('\n')}${plan.doneWhen ? `\nDone when: ${plan.doneWhen}` : ''}\nFollow it, adapt it if the screen shows something different.`] : []),
     ...(experience ? [`What happened on similar tasks before (avoid repeating mistakes):\n${experience}`] : []),
     `Steps so far:\n${past}`,
     ...(result ? [result] : []),
@@ -279,6 +280,26 @@ function agentPrompt(goal, history, shot, step, maxSteps, { tools = false, note 
     'Before done, check the screen or a read/run result shows the task really is finished.',
     'Never enter passwords, payment details or personal data the user did not give you in the task. If the screen asks for them, use ask. No other [[tags]].',
   ].join('\n');
+}
+
+// Planning: a short numbered plan and a check for "done", written once before
+// acting. Parsed defensively; a task without a usable plan still runs.
+function planPrompt(goal, shot, experience = '', controls = '') {
+  return [
+    `[agent-plan] You will operate this computer to finish a task for the user. Before acting, write a short plan.`,
+    `Task: ${goal}`,
+    `Open windows: ${(shot && shot.windows || []).slice(0, 12).join('; ') || 'unknown'}.`,
+    ...(controls ? [controls] : []),
+    ...(experience ? [`What happened on similar tasks before:\n${experience}`] : []),
+    'Reply with 2 to 7 numbered steps (one line each, concrete: which app, which control or shortcut), then one line starting with "Done when:" that says what the screen or a file must show when the task is truly finished. No action tags.',
+  ].join('\n');
+}
+
+function parsePlan(reply) {
+  const text = String(reply || '');
+  const steps = [...text.matchAll(/^\s*(\d+)[.)]\s+(.{3,200})$/gm)].map((m) => m[2].replace(/\[\[[\s\S]*?\]\]/g, '').trim()).filter(Boolean).slice(0, 8);
+  const done = (/^\s*done when:\s*(.{3,300})$/im.exec(text) || [])[1];
+  return steps.length >= 1 ? { steps, doneWhen: done ? done.trim() : '' } : null;
 }
 
 class AgentRunner {
@@ -336,8 +357,20 @@ class AgentRunner {
     let changed = history.some((h) => h.changed);
     let first = resume && resume.step ? resume.step + 1 : 1;
     const report = (o) => { try { this.d.onStep(o); } catch {} };
-    const save = (step, status = 'running') => { if (this.d.checkpoint) try { this.d.checkpoint({ goal, history, step, allowAll, status, at: Date.now() }); } catch {} };
+    const save = (step, status = 'running') => { if (this.d.checkpoint) try { this.d.checkpoint({ goal, history, step, allowAll, status, plan, at: Date.now() }); } catch {} };
     const stopped = () => ({ status: 'stopped', reason: this.reason, steps: history });
+    // Plan once (not when resuming a task that already has one).
+    let plan = resume && resume.plan ? resume.plan : null;
+    if (!plan && this.d.plan !== false) {
+      try {
+        const shot0 = await this.d.screenshot();
+        let ui0 = null;
+        if (this.d.uia) { try { ui0 = await this.d.uia.snapshot(); } catch {} }
+        if (signal.aborted) return stopped();
+        plan = parsePlan(await this.d.think({ text: planPrompt(goal, shot0, this.d.experience || '', ui0 ? UIA.outline(ui0, { maxLines: 40 }) : ''), shot: shot0, signal }));
+      } catch (err) { if (signal.aborted) return stopped(); plan = null; }
+      if (plan) report({ plan });
+    }
     try {
       for (let step = first; step <= this.d.maxSteps; step++) {
         if (signal.aborted) return stopped();
@@ -345,9 +378,9 @@ class AgentRunner {
         if (signal.aborted) return stopped();
         let ui = null;
         if (this.d.uia) { try { ui = await this.d.uia.snapshot(); } catch { ui = null; } }
-        const note = verifying ? 'You said the task is done. Look at this fresh screenshot (and the last results) and confirm: reply done again if it really is finished, otherwise keep going.' : advice;
+        const note = verifying ? `You said the task is done. Look at this fresh screenshot (and the last results) and confirm${plan && plan.doneWhen ? ` against: ${plan.doneWhen}` : ''}: reply done again if it really is finished, otherwise keep going.` : advice;
         advice = '';
-        const reply = await this.d.think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '', controls: ui ? UIA.outline(ui) : '' }), shot, signal });
+        const reply = await this.d.think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '', controls: ui ? UIA.outline(ui) : '', plan }), shot, signal });
         if (signal.aborted) return stopped();
         const ex = extractAction(reply);
         const v = ex.error ? ex : validateAction(ex.raw, shot, ui);
@@ -426,4 +459,4 @@ class AgentRunner {
   }
 }
 
-module.exports = { TOOL, SAFE, UI, validateAction, extractAction, toScreen, describe, LinuxDriver, WindowsDriver, driverFor, vkCodes, agentPrompt, AgentRunner, WIN_HELPER, KEY_RE };
+module.exports = { TOOL, SAFE, UI, parsePlan, planPrompt, validateAction, extractAction, toScreen, describe, LinuxDriver, WindowsDriver, driverFor, vkCodes, agentPrompt, AgentRunner, WIN_HELPER, KEY_RE };

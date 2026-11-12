@@ -1990,6 +1990,7 @@ function highlight(rect, ms = 2400) {
   highlight.timer = setTimeout(() => { if (highlightWin && !highlightWin.isDestroyed()) highlightWin.hide(); }, ms);
 }
 function monitorStep(o) {
+  if (o.plan) { monitor.plan = o.plan; sendMonitor(); return; }
   let s = monitor.steps.find((x) => x.step === o.step && x.label === (o.label || x.label));
   if (o.advice) { monitor.steps.push({ step: o.step, label: `Advice: ${o.advice.replace(/_/g, ' ')}`, status: 'note', at: Date.now() }); sendMonitor(); return; }
   if (o.error && !o.action) { monitor.steps.push({ step: o.step, label: o.error, status: 'invalid', at: Date.now() }); sendMonitor(); return; }
@@ -2060,7 +2061,7 @@ async function startAgent(goal, { remote = false } = {}) {
   if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
   if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
   addTranscript('user', resume ? '/do resume' : `/do ${goal}`);
-  Object.assign(monitor, { goal, status: 'running', steps: resume ? monitor.steps : [], startedAt: Date.now() });
+  Object.assign(monitor, { goal, status: 'running', steps: resume ? monitor.steps : [], plan: resume ? monitor.plan : null, startedAt: Date.now() });
   if ((config.data.agent || {}).monitor !== false) openMonitor(); else sendMonitor();
   addTranscript('system', `Agent: ${resume ? `resuming at step ${resume.step + 1}:` : 'working on'} "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
   toOverlay('state', 'thinking');
