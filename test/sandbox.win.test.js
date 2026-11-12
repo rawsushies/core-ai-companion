@@ -100,13 +100,14 @@ test('Windows AppContainer: no network, not even the host loopback', { skip: !wi
 });
 
 test('Windows AppContainer: child-process diagnostics (logged)', { skip: !win, timeout: 90000 }, async () => {
-  const code = `const cp=require('child_process');const t=(n,f)=>{try{const r=f();console.log(n,'ok',r&&r.status,r&&r.error&&r.error.code)}catch(e){console.log(n,'ERR',e.code,e.message)}};
-t('cmd-pipe',()=>cp.spawnSync('cmd.exe',['/c','echo hi']));
-t('node-pipe',()=>cp.spawnSync(process.execPath,['-e','0']));
-t('node-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{windowsHide:true}));
-t('node-ignore',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore'}));
-t('node-ignore-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore',windowsHide:true}));
+  const code = `const cp=require('child_process');const O={timeout:5000};const L=(...a)=>require('fs').appendFileSync(${JSON.stringify(path.join(dir,'diag.txt'))},a.join(' ')+'\\n');const t=(n,f)=>{L('start',n);try{const r=f();L(n,'ok',r&&r.status,r&&r.error&&r.error.code)}catch(e){L(n,'ERR',e.code,e.message)}};
+t('cmd-pipe',()=>cp.spawnSync('cmd.exe',['/c','echo hi'],O));
+t('node-pipe',()=>cp.spawnSync(process.execPath,['-e','0'],O));
+t('node-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{windowsHide:true,...O}));
+t('node-ignore',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore',...O}));
+t('node-ignore-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore',windowsHide:true,...O}));
 t('node-detached',()=>{const c=cp.spawn(process.execPath,['-e','0'],{stdio:'ignore',detached:true});return {status:c.pid}});`;
-  const r = await run(code);
-  console.log('DIAG', r.code, r.out);
+  const r = await run(code, { timeoutMs: 45000 });
+  let d = ''; try { d = fs.readFileSync(path.join(dir, 'diag.txt'), 'utf8'); } catch {}
+  console.log('DIAG', r.code, r.timedOut, JSON.stringify(d), String(r.out).slice(0, 300));
 });
