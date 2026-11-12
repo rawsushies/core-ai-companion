@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 88%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 93%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -27,6 +27,11 @@ on (Settings, Privacy). History import stays off (`CORTEX_AUTO_IMPORT=off`);
 Cortex's own consent gate (`import_history`) is never touched. COre never writes
 vault files directly.
 
+Obsidian: the vault is plain Markdown that Obsidian opens as-is (Cortex writes
+atomically and re-indexes edits made in Obsidian). `/obsidian [note]` opens the
+vault or a cited note through an `obsidian://` link (paths outside the vault refused;
+`test/obsidian.test.js`). Not yet tried against an installed Obsidian.
+
 ## Phase status
 
 | Phase | Status | Estimate |
@@ -35,7 +40,7 @@ vault files directly.
 | 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; agent loop verified with a real model | ~95% |
 | 2 COre 2.2 environmental intelligence | Acceptance on real Windows + real Cortex; a real model explains the desktop with no invented names | ~95% |
 | 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e); opportunity detection, approved maintenance, opt-in auto-resume | ~80% |
-| 4 COre 3.0 unified experience | Combined acceptance in the real app and on real Windows; real-model validation 7/7 (routing, effort, failover, knowledge, injection, grounding, agent) | ~75% |
+| 4 COre 3.0 unified experience | Combined acceptance in the real app and on real Windows; real-model validation 7/7 on Groq and on Gemini, live Jev 6/6; what remains needs the user's PC (Claude CLI, voice, presence) | ~85% |
 
 ### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
 
@@ -66,7 +71,7 @@ vault files directly.
 | Timeouts, process-tree kill, retries | Verified | taskkill /T; Job kill-on-close; failure advisor |
 | Memory gateway in planning and execution | Implemented | agent experience reads Cortex; lessons and outcomes written back |
 | Model switch keeps context | Verified with stand-in providers | e2e failover with continuity |
-| Real AI providers | **Verified with Groq (7/7)** | [docs/REAL-PROVIDERS.md](docs/REAL-PROVIDERS.md): `npm run validate:providers` runs COre's production brain against the real model: model picked from the live list (`openai/gpt-oss-120b`), `reasoning_effort=high` accepted, answer from real Cortex knowledge citing `Projects/Tower.md`, failover from a dead provider keeping the conversation, injected instructions in a file not obeyed, desktop explained with no unsupported names, and the agent loop reaching a verified result. Gemini, OpenRouter, Claude and Jev not yet run |
+| Real AI providers | **Verified with Groq (7/7), Gemini (7/7) and live Jev routing (6/6)** | [docs/REAL-PROVIDERS.md](docs/REAL-PROVIDERS.md): `npm run validate:providers` runs COre's production brain against the real model: model picked from the live list (`openai/gpt-oss-120b`), `reasoning_effort=high` accepted, answer from real Cortex knowledge citing `Projects/Tower.md`, failover from a dead provider keeping the conversation, injected instructions in a file not obeyed, desktop explained with no unsupported names, and the agent loop reaching a verified result. Gemini (`gemini-3-flash-preview`, picked from the live list after the old default was retired) passes the same 7; Jev via OpenRouter routes 6/6 requests correctly. OpenRouter passed 7/7 earlier the same day but the recorded run hit the free key's daily cap (re-run with `--merge`). Claude CLI needs the user's PC |
 
 ### Phase 2: COre 2.2 environmental intelligence
 
@@ -115,10 +120,12 @@ vault files directly.
 
 - Injection detection is weak on unseen attacks: on a fresh, untuned set the pattern guard flags 2/8 (0/6 false positives); Llama Prompt Guard 2 (Groq) flags 3/8, the two together 4/8. Detection is only a warning: the protection is deterministic (retrieved text is fenced as data, COre's action tags in it are broken, every action needs approval, commands run sandboxed), and the real-model test shows injected instructions not being obeyed.
 
-- Real providers: Groq verified; Gemini, OpenRouter, Claude and Jev not yet run (need their keys). Groq's free tier rate-limits long agent runs (COre waits and retries).
+- Real providers: Groq, Gemini and Jev verified; OpenRouter's recorded run hit the free daily cap (50 requests/day without credit); Claude CLI not run (needs the user's signed-in PC). Free tiers rate-limit long runs (COre waits and retries).
+- Office apps: on a headless CI desktop LibreOffice Calc exposes only its window to UI Automation, so COre uses the keyboard route from its app profile and verifies from the saved file (`test/office.win.test.js`). Microsoft Office itself is not installed on CI.
 - Node package managers cannot run inside the Windows AppContainer (libuv named pipes are denied); they run with Job limits only.
 - Headless CI desktop: some apps (new Notepad's XAML view) expose little to UI Automation there.
 
 ## Next execution target
 
-1. Run the real-provider validation on Gemini and Jev too (keys needed); Office-app desktop scenarios; a fresh unseen injection test set.
+1. Re-run OpenRouter when its daily cap resets (`npm run validate:providers -- --provider openrouter --no-jev --merge --out docs/REAL-PROVIDERS.md`).
+2. On the user's Windows PC: Claude CLI brain, voice and presence, Obsidian `/obsidian` link, Microsoft Office apps.
