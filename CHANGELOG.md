@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### COre 2.0, part 11: Jev decision layer and unified routing
+
+- **Jev as System One**: before each answer, one batched, typed request (Jev, TypeSafe's decision model; through your OpenRouter key or a TypeSafe key) decides the task type, complexity, reasoning effort, the best specialist, whether the request acts on your computer, whether it is too vague, and which eligible model should answer. A decision needs a clear margin over the runner-up to count. Jev is time-limited (2.5 s) and fails open; after errors it rests. Without a key a **local classifier** gives the same typed decision, and trivial chat never pays for a remote call.
+- **Unified routing**: hard limits first (key, health, vision, context size), then capability, measured speed, cost tier and preference; Jev's confident model pick wins among the eligible ones. Plain-language model descriptions are editable (`brain.descriptions`).
+- **Escalation without losing anything**: complex turns run on the strong model for that request (Claude Haiku → Sonnet resumes the same conversation).
+- **Continuity across models**: COre keeps one conversation log; a model that takes over gets the turns it missed, once.
+- **Agent failure advisor**: after two failed steps the agent changes approach, retries once, asks you, or stops safely. The advisor can only make it more careful. **Lessons** from failed steps are remembered and shown to later similar tasks.
+- Command center Brains card shows the decision layer and the last decision; every routed turn is in the activity log.
+- Advice only: permissions, approvals and the command policy are enforced in code and never read Jev's output.
+- Changing brain settings gives every resting brain a fresh chance.
+- `docs/AUDIT.md`: what works (with the tests that prove it), what is limited, and next steps.
+
 ### COre 2.0, part 10: Brain router (no longer tied to Claude Code)
 
 - **Automatic brain choice** (Settings, Brain, "Choosing a brain"; default Automatic). For every request COre picks the best healthy brain based on what the request needs: an image (only brains that can see), deep work for the agent and specialists, or a fast reply for chat. Measured speed, success rate, and your preferred brain (a bonus, not a lock) also count. Manual keeps your exact order.

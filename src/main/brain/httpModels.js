@@ -81,8 +81,8 @@ class OllamaBrain extends HistoryMixin {
     return `${this.cfg.model} via Ollama (local)`;
   }
 
-  async ask({ prompt, image, tone, signal, onDelta }) {
-    const model = image && this.cfg.visionModel ? this.cfg.visionModel : this.cfg.model;
+  async ask({ prompt, image, tone, signal, onDelta, model: modelOverride }) {
+    const model = image && this.cfg.visionModel ? this.cfg.visionModel : (modelOverride || this.cfg.model);
     const user = { role: 'user', content: prompt };
     if (image && this.cfg.visionModel) user.images = [image.base64];
     const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/api/chat`, {
@@ -172,7 +172,7 @@ class OpenAICompatBrain extends HistoryMixin {
     }
   }
 
-  async _ask({ prompt, image, tone, signal, onDelta }) {
+  async _ask({ prompt, image, tone, signal, onDelta, model: modelOverride }) {
     const content = image && this.cfg.vision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:${image.mediaType || 'image/png'};base64,${image.base64}` } }]
       : prompt;
@@ -181,7 +181,7 @@ class OpenAICompatBrain extends HistoryMixin {
       headers: this._headers(),
       signal,
       body: JSON.stringify({
-        model: this.cfg.model,
+        model: modelOverride || this.cfg.model,
         stream: true,
         temperature: 0.7,
         messages: [{ role: 'system', content: persona({ canReadFiles: false, tone }) }, ...this.history, { role: 'user', content }],

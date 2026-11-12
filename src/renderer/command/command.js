@@ -65,7 +65,16 @@
       li.append(g, el('span', `pill ${p.state === 'ready' ? 'ok' : p.state === 'no-key' ? '' : 'error'}`, label));
       ul.append(li);
     }
-    if (r.last) ul.append(el('li', 'muted', `Last answer: ${r.last.provider}${r.last.need && r.last.need.vision ? ' (needed vision)' : ''}`));
+    if (r.last) ul.append(el('li', 'muted', `Last answer: ${r.last.provider}${r.last.model ? ` (${r.last.model})` : ''}${r.last.need && r.last.need.vision ? ' · needed vision' : ''}${r.last.need && r.last.need.depth === 'strong' ? ' · deep work' : ''}`));
+    const j = r.jev;
+    if (j) {
+      const d = j.last;
+      const li = el('li');
+      const g = el('div', 'grow');
+      g.append(el('div', '', `Decision layer: ${j.on ? `Jev (${j.model})` : 'local classifier'}`), el('div', 'muted', d ? `${d.task} · ${d.complexity} · effort ${d.effort}${d.specialist !== 'none' ? ` · ${d.specialist}` : ''} · by ${d.source}${d.ms ? ` in ${d.ms} ms` : ''}` : 'no decision yet'));
+      li.append(g, el('span', `pill ${j.on && !j.backingOff ? 'ok' : ''}`, j.on ? (j.backingOff ? 'resting' : 'on') : 'local'));
+      ul.append(li);
+    }
   }
 
   function renderCores(list) {

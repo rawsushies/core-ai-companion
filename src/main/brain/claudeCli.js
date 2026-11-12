@@ -169,7 +169,7 @@ class ClaudeCliBrain {
     this._killProc();
   }
 
-  _args({ sessionId, resume, tone, persistent }) {
+  _args({ sessionId, resume, tone, persistent, model }) {
     const f = this.flags;
     // Persistent sessions receive screenshots inline, so Claude needs no tools
     // at all. The per-message fallback still reads the screenshot file.
@@ -189,7 +189,7 @@ class ClaudeCliBrain {
     // On --resume, use the current system prompt (tone) rather than the one
     // recorded when the conversation started.
     if (f.has('--system-prompt-snapshot')) args.push('--system-prompt-snapshot', 'off');
-    if (this.cfg.model) args.push('--model', this.cfg.model);
+    if (model || this.cfg.model) args.push('--model', model || this.cfg.model);
     if (this.cfg.effort && f.has('--effort')) args.push('--effort', this.cfg.effort);
     if (resume) args.push('--resume', sessionId);
     else args.push('--session-id', sessionId);
@@ -339,10 +339,16 @@ class ClaudeCliBrain {
     });
   }
 
-  async ask({ prompt, image, tone, signal, onDelta, onTool }) {
+  // model: a different model for this one request (the router escalates hard
+  // tasks to the strong model). It runs as a one-shot process that resumes the
+  // same conversation, so nothing is lost; the warm session restarts after.
+  async ask({ prompt, image, tone, signal, onDelta, onTool, model }) {
     await this.detect();
     const existing = this.state.get('claudeSessionId');
-    const turn = (args) => (this.persistent ? this._persistentTurn(args) : this._turn({
+    const override = model && model !== this.cfg.model ? model : null;
+    this._oneShotModel = override;
+    if (override) this._killProc();
+    const turn = (args) => (this.persistent && !this._oneShotModel ? this._persistentTurn(args) : this._turn({
       ...args, sessionId: this.state.get('claudeSessionId') || randomUUID(), resume: !!this.state.get('claudeSessionId'),
     }));
     try {
@@ -355,20 +361,27 @@ class ClaudeCliBrain {
       }
       // The strong model hit its usage limit: step down to the fast model
       // (same login, often a separate allowance) before giving up on Claude.
+      const limited = !err.streamedAnything && /usage limit|rate.?limit|overloaded|429|529/i.test(err.message || '');
+      if (limited && this._oneShotModel) { // the escalated model is limited: answer on the normal one
+        this._oneShotModel = null;
+        return turn({ prompt, image, tone, signal, onDelta, onTool });
+      }
       const fb = this.cfg.fallbackModel;
-      if (fb && fb !== this.cfg.model && !err.streamedAnything && /usage limit|rate.?limit|overloaded|429|529/i.test(err.message || '')) {
+      if (fb && fb !== this.cfg.model && limited) {
         this.cfg = { ...this.cfg, model: fb, fallbackModel: '' };
         this._killProc();
         return turn({ prompt, image, tone, signal, onDelta, onTool });
       }
       throw err;
+    } finally {
+      this._oneShotModel = null;
     }
   }
 
   // One process per message (older Claude Code without --input-format).
   _turn({ prompt, tone, signal, onDelta, onTool, sessionId, resume }) {
     return new Promise((resolve, reject) => {
-      const args = this._args({ sessionId, resume, tone, persistent: false });
+      const args = this._args({ sessionId, resume, tone, persistent: false, model: this._oneShotModel });
       const child = spawn(this.cmd.file, this.cmd.shell ? args.map(quoteForCmd) : args, {
         cwd: this.workDir,
         shell: this.cmd.shell,

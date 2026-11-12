@@ -27,7 +27,38 @@ let script;
 let baseRules = [];
 const errors = [];
 
+// A local stand-in for a second AI provider (OpenAI-compatible, streaming) and
+// for Jev's decision endpoint, so routing and failover run in the real app.
+const fake = { chats: [], decisions: [], jevAnswers: null, port: 0, server: null };
+function startFakeProviders() {
+  const http = require('http');
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      if (req.url === '/v1/models') { res.end(JSON.stringify({ data: [{ id: 'backup-model' }] })); return; }
+      if (req.url === '/v1/chat/completions') {
+        const j = JSON.parse(body);
+        fake.chats.push(j);
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        for (const piece of ['From the ', 'backup brain.']) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+      if (req.url === '/v1/systemone') {
+        fake.decisions.push({ auth: req.headers.authorization, body: JSON.parse(body) });
+        res.end(JSON.stringify({ model: 'jev-test', answers: fake.jevAnswers || {} }));
+        return;
+      }
+      res.statusCode = 404; res.end('{}');
+    });
+  });
+  fake.server = server;
+  return new Promise((r) => server.listen(0, '127.0.0.1', () => { fake.port = server.address().port; r(server); }));
+}
+
 test.before(async () => {
+  await startFakeProviders();
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-home-'));
   fs.mkdirSync(path.join(home, 'Dropbox'));
   userData = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-ud-'));
@@ -47,7 +78,13 @@ test.before(async () => {
   ]));
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
     orb: { graphics: 'software' },
-    brain: { claude: { command: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js') }, fallbacks: [] },
+    brain: {
+      claude: { command: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js') },
+      fallbacks: ['openai-compat'],
+      openaiCompat: { baseUrl: `http://127.0.0.1:${fake.port}/v1`, model: 'backup-model', noKey: true },
+      jev: { enabled: true, provider: 'typesafe', endpoint: `http://127.0.0.1:${fake.port}`, timeoutMs: 2000 },
+      secrets: { jev: 'plain:test-jev-key' },
+    },
     voice: { tts: false },
     presence: { chitchat: false },
     update: { enabled: false },
@@ -79,6 +116,7 @@ test.before(async () => {
 });
 
 test.after(async () => {
+  if (fake.server) { fake.server.closeAllConnections(); fake.server.close(); }
   if (!app) return;
   // COre lives in the tray when its windows close: quit it like the tray's Quit does.
   const proc = app.process();
@@ -546,6 +584,53 @@ test('mobile app: pairs over Wi-Fi, chats, copies memory, and answers through Ge
 
 test('no renderer errors were thrown', () => {
   assert.deepStrictEqual(errors, []);
+});
+
+test('Jev decides every turn: one typed request, confident answers steer the model choice', async () => {
+  const before = fake.decisions.length;
+  assert.ok(before > 0, 'earlier user turns already asked Jev');
+  const q = fake.decisions[before - 1];
+  assert.strictEqual(q.auth, 'Bearer test-jev-key');
+  assert.deepStrictEqual(Object.keys(q.body.questions).sort(), ['acts_on_system', 'complexity', 'effort', 'model', 'specialist', 'task', 'underspecified']);
+  assert.strictEqual(Object.keys(q.body.questions.model.criteria).length, 2, 'two eligible models: Claude and the backup');
+  const sure = (c, o) => ({ type: 'choice', choice: c, probabilities: { [c]: 0.9, [o]: 0.1 } });
+  const crit = q.body.questions.model.criteria;
+  const backup = Object.keys(crit).find((k) => /custom OpenAI-compatible/.test(crit[k]));
+  fake.jevAnswers = { task: sure('question', 'chat'), complexity: sure('simple', 'complex'), effort: sure('low', 'high'), specialist: sure('none', 'scout'), acts_on_system: { noul: 0.05 }, underspecified: { noul: 0.05 }, model: sure(backup, backup === 'm0' ? 'm1' : 'm0') };
+  const chats = fake.chats.length;
+  await send('what is the tallest mountain in the alps');
+  await dock.waitForFunction(() => /From the backup brain\./.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  assert.strictEqual(fake.chats.length, chats + 1, 'Jev picked the backup model and it answered');
+  fake.jevAnswers = null;
+  const audit = fs.readFileSync(path.join(userData, 'logs', 'tools.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.event === 'route');
+  assert.strictEqual(audit.at(-1).source, 'jev');
+  assert.strictEqual(audit.at(-1).task, 'question');
+});
+
+test('failover with continuity: Claude hits its usage limit mid-conversation, the backup answers with the context, Claude rests', async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: 'what was my trip budget', error: "You've hit your usage limit · resets 5pm" },
+    { match: 'my trip budget is 4200', reply: 'Noted: your trip budget is 4,200.' },
+    ...baseRules,
+  ]));
+  await send('my trip budget is 4200 dollars');
+  await dock.waitForFunction(() => /Noted: your trip budget is 4,200\./.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  const chats = fake.chats.length;
+  await send('what was my trip budget again?');
+  await dock.waitForFunction((n) => /usage limit/i.test(document.getElementById('log').innerText) && document.querySelectorAll('#log .msg.core').length >= n, 1, { timeout: 30000 });
+  await dock.waitForFunction(() => (document.getElementById('log').innerText.match(/From the backup brain\./g) || []).length >= 2, null, { timeout: 30000 });
+  const handoff = fake.chats[chats];
+  const userMsg = handoff.messages.at(-1).content;
+  assert.match(userMsg, /\[Earlier in this conversation\][\s\S]*my trip budget is 4200 dollars[\s\S]*Noted: your trip budget is 4,200/, 'the backup got the turns it missed');
+  // Next turn: Claude is resting, so the backup answers straight away.
+  const spawns = fs.readFileSync(path.join(userData, 'fake-args.log'), 'utf8').trim().split('\n').length;
+  await send('thanks, and in euros roughly?');
+  await dock.waitForFunction(() => (document.getElementById('log').innerText.match(/From the backup brain\./g) || []).length >= 3, null, { timeout: 15000 });
+  assert.strictEqual(fs.readFileSync(path.join(userData, 'fake-args.log'), 'utf8').trim().split('\n').length, spawns, 'Claude was not even started while resting');
+  // Changing brain settings gives Claude a fresh chance.
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+  await settings.evaluate(() => window.settingsApi.set('brain.mode', 'manual'));
+  await settings.evaluate(() => window.settingsApi.set('brain.mode', 'auto'));
 });
 
 test('chat still works after everything above', async () => {

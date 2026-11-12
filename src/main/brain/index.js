@@ -6,7 +6,7 @@ const path = require('path');
 const { ClaudeCliBrain } = require('./claudeCli');
 const { OllamaBrain, OpenAICompatBrain } = require('./httpModels');
 const { SpeechPlanner } = require('./speech');
-const { Router } = require('./router');
+const { Router, eligible, describe: describeModel, modelFor } = require('./router');
 
 const NAMES = {
   gemini: 'Google Gemini',
@@ -73,13 +73,34 @@ class Brain {
   // automatically chosen model.
   // profile: 'chat' (fast answers first) or 'strong' (deep work: the agent,
   // specialists). router: share one Router so all brains learn provider health.
-  constructor({ config, workDir, state, getKey, onModelChange, profile = 'chat', router = null }) {
+  // decider: the fast decision layer (decide.js), shared across brains.
+  constructor({ config, workDir, state, getKey, onModelChange, profile = 'chat', router = null, decider = null }) {
     this.ctx = { config, workDir, state, getKey, onModelChange };
     this.stats = {}; // provider id -> health counters (see health())
     this.profile = profile;
     this.router = router || new Router();
+    this.decider = decider;
     this.lastRoute = null;
+    // Continuity: one shared log of this conversation. Each provider remembers
+    // the last entry it saw, so a model taking over gets a recap of the turns
+    // it missed instead of starting blind.
+    this.turns = [];
+    this.seq = 0;
+    this.seen = {};
     this.reload(config);
+  }
+
+  _recapFor(p) {
+    const since = this.seen[p.id] || 0;
+    const missed = this.turns.filter((t) => t.seq > since).slice(-10);
+    if (!missed.length) return '';
+    return `[Earlier in this conversation] (another model answered these turns; continue naturally, do not mention the switch)\n${missed.map((t) => `${t.role === 'user' ? 'User' : 'COre'}: ${t.text.length > 600 ? `${t.text.slice(0, 600)}…` : t.text}`).join('\n')}`;
+  }
+
+  _logTurn(p, user, reply) {
+    for (const [role, text] of [['user', user], ['core', reply]]) if (text) this.turns.push({ seq: ++this.seq, role, text: String(text).slice(0, 2000) });
+    if (this.turns.length > 30) this.turns.splice(0, this.turns.length - 30);
+    this.seen[p.id] = this.seq;
   }
 
   routeStatus() { return { mode: this.mode, last: this.lastRoute, providers: this.router.status(this.chain) }; }
@@ -108,6 +129,8 @@ class Brain {
 
   resetConversation() {
     for (const p of this.chain) p.resetConversation();
+    this.turns = [];
+    this.seen = {};
   }
 
   // onItem receives {type:'say'|'gesture'|'end', ...}; onStatus receives
@@ -141,12 +164,36 @@ class Brain {
   // context: extra blocks for the model ([Memory], [Clipboard]), appended to the message.
   // Returns { reply, provider, truncated?, error? }: when a provider fails
   // after it already started answering, the partial reply is kept (truncated).
-  async ask({ text, shot, typed = false, context = '', signal, onItem = () => {}, onText, onStatus = () => {} }) {
+  // decide: run the fast decision layer first (Prime's user turns). hasFiles:
+  // the message carries attached files. Returns also { decision } when decided.
+  async ask({ text, shot, typed = false, context = '', signal, onItem = () => {}, onText, onStatus = () => {}, decide = false, hasFiles = false, agentEnabled = false }) {
+    const bc = this.ctx.config.brain || {};
     // Providers without a key are skipped quietly instead of failing loudly.
     const usable = this.chain.filter((p) => !p.available || p.available());
-    const need = { vision: !!(shot && shot.base64), depth: this.profile === 'strong' ? 'strong' : 'fast' };
-    const providers = this.router.order(usable, need, { mode: this.mode, preferred: this.ctx.config.brain.provider });
-    if (providers[0]) this.lastRoute = { provider: providers[0].name || providers[0].label, need, at: Date.now() };
+    const need = {
+      vision: !!(shot && shot.base64),
+      depth: this.profile === 'strong' ? 'strong' : 'fast',
+      tokens: Math.round((String(text).length + String(context).length) / 4) + 2000,
+    };
+    // 1. Hard limits (code, not opinion): vision, context size, health.
+    const pool = eligible(usable.filter((p) => !this.router.cooling(p.id)).length ? usable.filter((p) => !this.router.cooling(p.id)) : usable, need);
+    // 2. Fast decision: what is this, how hard, which specialist, which model.
+    let decision = null;
+    if (decide && this.decider) {
+      try {
+        decision = await this.decider.decide(text, { hasImage: need.vision, hasFiles, agentEnabled, recent: this.turns.slice(-4), candidates: pool.map((p) => ({ id: p.id, description: describeModel(p, bc.descriptions || {}) })) });
+      } catch { decision = null; }
+      if (signal && signal.aborted) throw Object.assign(new Error('aborted'), { aborted: true });
+      if (decision) {
+        if (this.profile !== 'strong') need.depth = decision.complexity === 'complex' || decision.effort === 'high' ? 'strong' : 'fast';
+        if (decision.modelIndex >= 0 && pool[decision.modelIndex]) need.prefer = pool[decision.modelIndex].id;
+        const hints = routeHints(decision);
+        if (hints) context = context ? `${context}\n\n${hints}` : hints;
+      }
+    }
+    // 3. Order: capability fit, measured health and speed, cost, preference.
+    const providers = this.router.order(eligible(usable, need), need, { mode: this.mode, preferred: bc.provider });
+    if (providers[0]) this.lastRoute = { provider: providers[0].name || providers[0].label, need, decision, at: Date.now() };
     const failures = [];
     const pc = this.ctx.config.personality || {};
     const tone = toneKey(pc.tone || 'sarcastic', pc.language);
@@ -171,8 +218,11 @@ class Brain {
       onStatus({ kind: 'provider', label: p.label });
       try {
         if (p.detect && shot) await p.detect().catch(() => {}); // know whether images can go inline
+        const recap = this._recapFor(p);
+        const model = modelFor(p, need, bc.routing);
         await p.ask({
-          prompt: buildPrompt(p, `${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}`, shot),
+          model: model && model !== (p.cfg && p.cfg.model) ? model : undefined,
+          prompt: buildPrompt(p, `${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}${recap ? `\n\n${recap}` : ''}`, shot),
           tone,
           image: shot && shot.base64 ? { base64: shot.base64, mediaType: shot.mediaType || 'image/png' } : null,
           signal: wd.signal,
@@ -189,8 +239,9 @@ class Brain {
         const reply = planner.finish();
         this._record(p, true, { firstTokenMs });
         this.router.success(p.id, { firstTokenMs });
-        this.lastRoute = { ...(this.lastRoute || {}), provider: p.name || p.label, model: p.cfg && p.cfg.model, at: Date.now() };
-        return { reply, provider: p.label };
+        this._logTurn(p, text, reply);
+        this.lastRoute = { ...(this.lastRoute || {}), provider: p.name || p.label, model: model || (p.cfg && p.cfg.model), at: Date.now() };
+        return { reply, provider: p.label, decision };
       } catch (err0) {
         clearTimeout(timer);
         if (signal && signal.aborted) throw Object.assign(err0 instanceof Error ? err0 : new Error('aborted'), { aborted: true });
@@ -203,7 +254,8 @@ class Brain {
         if (streamed) {
           // Keep what was already said instead of throwing it away.
           const reply = planner.finish();
-          return { reply, provider: p.label, truncated: true, error: err.message };
+          this._logTurn(p, text, reply);
+          return { reply, provider: p.label, truncated: true, error: err.message, decision };
         }
         if (i === providers.length - 1) {
           planner.finish();
@@ -222,9 +274,20 @@ class Brain {
   }
 }
 
+// A few words for the main brain about what the decision layer saw. Advice
+// only: it may delegate or suggest /do, never act on its own because of this.
+function routeHints(d) {
+  const out = [];
+  if (d.specialist && d.specialist !== 'none') out.push(`a specialist fits: ${d.specialist} (delegate if it helps)`);
+  if (d.actsOnSystem >= 0.6 && d.task === 'desktop') out.push('this asks to act on the computer: if the desktop agent can do it, tell the user to start it with /do and a short instruction');
+  if (d.underspecified >= 0.6) out.push('the request is vague: ask one short clarifying question first');
+  if (d.complexity === 'complex') out.push('this is complex: plan briefly, then answer step by step');
+  return out.length ? `[Route] ${out.join('; ')}.` : '';
+}
+
 // Watchdog limits (overridable with brain.timeouts in config.json). The first
 // token can take a while (cold Claude session, a local model loading); after
 // that, long silences mean the stream is dead.
 const TIMEOUTS = { firstTokenMs: 90_000, idleMs: 45_000 };
 
-module.exports = { Brain, buildPrompt, screenContext, chainIds, NAMES, TIMEOUTS };
+module.exports = { Brain, buildPrompt, screenContext, chainIds, routeHints, NAMES, TIMEOUTS };
