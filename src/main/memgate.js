@@ -139,6 +139,28 @@ class MemoryGateway {
 
   pending() { return this._readQueue().length; }
 
+  // Knowledge maintenance, two steps: plan() reports, apply(plan) changes only
+  // what the user approved. Cortex is checked (health) but never rewritten here.
+  async maintenancePlan() {
+    const native = this.memory ? this.memory.consolidate(Date.now(), { dryRun: true }) : { merged: 0, retired: 0, total: 0, plan: { merges: [], retirements: [] } };
+    let cortex = 'off';
+    if (this.cortexOn()) {
+      try { cortex = String(await this._withTimeout(this.cortex.call('brain_health', {}))).slice(0, 1500); } catch (err) { cortex = `unavailable: ${String(err.message || err).slice(0, 120)}`; }
+    }
+    let pending = 0; try { pending = (this._readQueue() || []).length; } catch {}
+    return { at: Date.now(), native, cortex, pending };
+  }
+
+  async applyMaintenance(plan, { merge = true, retire = false, flush = true } = {}) {
+    const out = { merged: 0, retired: 0, delivered: 0 };
+    if (this.memory && (merge || retire) && plan && (plan.native.merged || plan.native.retired)) {
+      const r = this.memory.consolidate(Date.now(), { retire });
+      out.merged = r.merged; out.retired = r.retired;
+    }
+    if (flush && plan && plan.pending) { const before = plan.pending; await this._flushQueue().catch(() => {}); let now = 0; try { now = (this._readQueue() || []).length; } catch {} out.delivered = Math.max(0, before - now); }
+    return out;
+  }
+
   async status() {
     const s = { cortex: 'off', pending: this.pending(), last: this.last };
     if (!this.cortex || !this.enabled()) return s;

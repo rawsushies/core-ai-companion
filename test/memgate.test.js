@@ -122,3 +122,27 @@ test('10: COre starts Cortex with history import off, and retrieved notes are fe
   assert.doesNotMatch(ctx.text, /\[\[forget/, 'action tags defused');
   cortex.dispose();
 });
+
+test('12: knowledge maintenance reports first and changes only what is approved', { skip, timeout: 60000 }, async () => {
+  const a = setup();
+  a.memory.remember('The site office is on Jalan Merdeka 12', { kind: 'fact' });
+  // A near-duplicate that got in another way (sync, import): remember() itself already dedupes.
+  { const f = a.memory.items.find((i) => i.kind === 'fact'); a.memory.items.push({ ...f, id: 'dup-1', text: 'The site office is on Jalan Merdeka 12.', ts: f.ts - 1000 }); }
+  const old = a.memory.noteEpisode('Opened the old lobby drawing');
+  const ep = a.memory.items.find((i) => i.kind === 'episode');
+  ep.ts = ep.createdAt = Date.now() - 400 * 864e5;
+  const before = a.memory.items.length;
+  const plan = await a.gate.maintenancePlan();
+  assert.ok(plan.native.merged >= 1 && plan.native.retired === 1, JSON.stringify(plan.native));
+  assert.strictEqual(a.memory.items.length, before, 'the report changes nothing');
+  assert.notStrictEqual(plan.cortex, 'off');
+  // Approve merges only: the old episode stays.
+  const r1 = await a.gate.applyMaintenance(plan, { merge: true, retire: false });
+  assert.ok(r1.merged >= 1 && r1.retired === 0);
+  assert.ok(a.memory.items.some((i) => i.kind === 'episode'), 'not retired without approval');
+  // Approve retiring too.
+  const r2 = await a.gate.applyMaintenance(await a.gate.maintenancePlan(), { merge: true, retire: true });
+  assert.strictEqual(r2.retired, 1);
+  assert.ok(!a.memory.items.some((i) => i.kind === 'episode'));
+  void old;
+});

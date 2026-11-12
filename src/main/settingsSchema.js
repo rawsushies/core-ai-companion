@@ -162,6 +162,7 @@ const SECTIONS = [
     title: 'Privacy',
     fields: [
       { key: 'memory.enabled', label: 'Remember things about me', type: 'toggle' },
+      { key: 'memory.maintenance', label: 'Knowledge maintenance check', type: 'select', options: [['off', 'Only when I ask (/memory maintain)'], ['weekly', 'Prepare a report every week; nothing changes until I approve']] },
       { key: 'memory.cortex.enabled', label: 'Connect my Cortex knowledge vault (long-term notes, project decisions, lessons) through its MCP server', type: 'toggle' },
       { key: 'memory.cortex.command', label: 'Cortex program (python, python3, or the path to Cortex.exe)', type: 'text', maxLength: 300, optional: true },
       { key: 'memory.cortex.script', label: "Cortex run.py path (leave empty for Cortex.exe)", type: 'text', maxLength: 400, optional: true },

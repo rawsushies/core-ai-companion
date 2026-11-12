@@ -60,6 +60,7 @@ const DEFAULTS = {
     reactions: true, // say something now and then when petted, poked or tossed
   },
   memory: {
+    maintenance: 'off', // 'weekly': prepare a knowledge-maintenance report each week; changes only after you approve (/memory maintain apply)
     // Cortex: your long-term knowledge vault (github.com/rawsushies/cortex-ai-brain),
     // reached through its MCP server. command: 'python' (or 'python3' / Cortex.exe),
     // script: path to Cortex's run.py (empty for Cortex.exe), vault: the vault folder.

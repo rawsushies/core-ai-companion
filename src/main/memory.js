@@ -323,10 +323,25 @@ class Memory {
   }
 
   // Merge near-duplicates and retire stale, unused, uncertain episodes.
-  consolidate(now = Date.now()) {
+  // dryRun: report what would change without changing anything. retire: false
+  // keeps every episode (only near-duplicates are merged, their text kept in
+  // the survivor's history).
+  consolidate(now = Date.now(), { dryRun = false, retire = true } = {}) {
     let merged = 0;
     let retired = 0;
     const out = [];
+    const plan = { merges: [], retirements: [] };
+    if (dryRun) {
+      const seen = [];
+      for (const i of this.items.slice().sort((a, b) => b.ts - a.ts)) {
+        const twin = i.kind !== 'episode' && seen.find((o) => o.kind !== 'episode' && (o.project || null) === (i.project || null) && similar(o.text, i.text));
+        if (twin) { plan.merges.push({ keep: twin.text, merge: i.text }); continue; }
+        const days = (now - (i.lastUsed || i.ts)) / 86_400_000;
+        if (retire && i.kind === 'episode' && !i.pinned && !i.hits && days > 180) { plan.retirements.push(i.text); continue; }
+        seen.push(i);
+      }
+      return { merged: plan.merges.length, retired: plan.retirements.length, total: this.items.length, plan, dryRun: true };
+    }
     for (const i of this.items.slice().sort((a, b) => b.ts - a.ts)) {
       const twin = i.kind !== 'episode' && out.find((o) => o.kind !== 'episode' && (o.project || null) === (i.project || null) && similar(o.text, i.text));
       if (twin) {
@@ -339,7 +354,7 @@ class Memory {
         continue;
       }
       const days = (now - (i.lastUsed || i.ts)) / 86_400_000;
-      if (i.kind === 'episode' && !i.pinned && !i.hits && days > 180) { retired++; continue; }
+      if (retire && i.kind === 'episode' && !i.pinned && !i.hits && days > 180) { retired++; continue; }
       out.push(i);
     }
     if (merged || retired) { this.items = out.sort((a, b) => a.ts - b.ts); this.save(); }

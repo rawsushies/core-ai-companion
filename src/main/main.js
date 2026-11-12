@@ -1021,9 +1021,52 @@ function startMemoryEngine() {
     embedder = new Embedder({ cacheDir: path.join(app.getPath('userData'), 'models') });
     memory.setEmbedder((texts) => embedder.embed(texts));
   }
-  const pass = () => { try { const r = memory.consolidate(); if (r.merged || r.retired) toDock('dock:memory', memory.list()); } catch {} };
+  // Daily: merge near-duplicates only (their text stays in the survivor's
+  // history). Retiring old episodes deletes, so it waits for your approval in
+  // knowledge maintenance (/memory maintain, or the weekly check if enabled).
+  const pass = () => { try { const r = memory.consolidate(Date.now(), { retire: false }); if (r.merged) toDock('dock:memory', memory.list()); } catch {} };
   setTimeout(pass, 90_000);
   setInterval(pass, 24 * 3600_000).unref();
+  setInterval(() => { if ((config.data.memory || {}).maintenance === 'weekly') weeklyMaintenance().catch(() => {}); }, 6 * 3600_000).unref();
+}
+
+let maintenancePlan = null;
+function maintenanceReport(p) {
+  const n = p.native;
+  const lines = [`Knowledge maintenance (nothing has changed yet):`,
+    `• COre memory: ${n.total} entries; ${n.merged} near-duplicate${n.merged === 1 ? '' : 's'} to merge, ${n.retired} old unused episode${n.retired === 1 ? '' : 's'} to retire.`];
+  for (const m of n.plan.merges.slice(0, 3)) lines.push(`   merge "${String(m.merge).slice(0, 70)}" into "${String(m.keep).slice(0, 70)}"`);
+  for (const r of n.plan.retirements.slice(0, 3)) lines.push(`   retire "${String(r).slice(0, 90)}"`);
+  lines.push(`• Cortex: ${p.cortex === 'off' ? 'not connected' : String(p.cortex).split('\n').slice(0, 6).join(' / ')}`);
+  if (p.pending) lines.push(`• ${p.pending} long-term note${p.pending === 1 ? '' : 's'} waiting to be delivered to Cortex.`);
+  lines.push('Apply with /memory maintain apply (merges and delivery) or /memory maintain apply all (also retire). Cortex notes are never rewritten.');
+  return lines.join('\n');
+}
+async function memoryMaintain(arg = '') {
+  if (!memory) { addTranscript('system', 'Memory is off.'); return; }
+  const a = String(arg).trim().toLowerCase();
+  if (a.startsWith('apply')) {
+    if (!maintenancePlan || Date.now() - maintenancePlan.at > 3600_000) { addTranscript('system', 'Run /memory maintain first to see what would change.'); return; }
+    const r = await gateway().applyMaintenance(maintenancePlan, { merge: true, retire: a === 'apply all', flush: true });
+    toolAudit({ event: 'memory-maintenance', approved: a, ...r });
+    gateway().log(`Knowledge maintenance approved: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered}`, { kind: 'maintenance' }).catch(() => {});
+    maintenancePlan = null;
+    toDock('dock:memory', memory.list());
+    addTranscript('system', `Done: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered} to Cortex.`);
+    return;
+  }
+  maintenancePlan = await gateway().maintenancePlan();
+  addTranscript('system', maintenanceReport(maintenancePlan));
+}
+async function weeklyMaintenance() {
+  const last = Number(state.get ? state.get('maintenanceAt') : 0) || 0;
+  if (Date.now() - last < 7 * 864e5) return;
+  if (state.set) state.set('maintenanceAt', Date.now());
+  maintenancePlan = await gateway().maintenancePlan();
+  const n = maintenancePlan.native;
+  if (!n.merged && !n.retired && !maintenancePlan.pending && !/error|corrupt|missing/i.test(String(maintenancePlan.cortex))) return;
+  addTranscript('system', maintenanceReport(maintenancePlan));
+  toOverlay('attention', { level: 'info', title: 'Weekly knowledge check is ready' });
 }
 
 // ---------------------------------------------------------------- Google Drive memory (optional)
@@ -3075,6 +3118,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
+    { const mm = /^\/memory\s+maintain\b\s*(.*)$/i.exec(text); if (mm) { addTranscript('user', text); memoryMaintain(mm[1]).catch((err) => addTranscript('system', `Maintenance failed: ${err.message}`)); return; } }
     if (/^\/automations?\s*$/i.test(text)) {
       addTranscript('user', text);
       startEventMonitor(); // picks up edited rules
