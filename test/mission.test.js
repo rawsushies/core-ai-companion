@@ -109,3 +109,28 @@ test('a whole mission through the real agent loop, policy and journal: zero appr
   assert.strictEqual(s.plan.length, 2);
   assert.ok(s.steps.length >= 3);
 });
+
+test('learning: a verified mission becomes a playbook route; a near-identical goal reuses it without planning, a different goal does not', async () => {
+  const PB = require('../src/main/playbooks');
+  const { W, root } = ws();
+  const dir = path.join(root, 'skills');
+  fs.mkdirSync(dir);
+  const report = { subgoals: E.parseMissionPlan('1. Write minutes.md | check: contains minutes.md :: Attendees glass\n2. Write summary.md | check: exists summary.md').map((x) => ({ ...x, status: 'done' })) };
+  PB.saveAgentSkill(dir, { name: 'mission-minutes', goal: 'make the meeting minutes and a summary', steps: E.routeLines(report) });
+  const skills = PB.loadSkills(dir);
+  const hit = E.findRoute(skills, 'make the meeting minutes and a short summary');
+  assert.ok(hit, 'near-identical goal finds the route');
+  assert.deepStrictEqual(hit.plan.map((p) => p.text), ['Write minutes.md', 'Write summary.md']);
+  assert.ok(new RegExp(hit.plan[0].check.re, 'i').test('Attendees: Ana. Decisions: glass'), 'checks survive the round trip');
+  assert.strictEqual(E.findRoute(skills, 'clean up my downloads folder'), null, 'a different goal plans from scratch');
+  // Reusing the route: no planning call, fewer model calls; still verified per subgoal.
+  let planned = 0;
+  const eng = new E.MissionEngine({
+    think: async () => { planned++; return ''; },
+    runSubgoal: async (sg) => { fs.writeFileSync(path.join(W, /minutes/.test(sg.text) ? 'minutes.md' : 'summary.md'), 'Attendees glass'); return { status: 'done', steps: 1 }; },
+  });
+  const r = await eng.run({ id: 'm', goal: 'make the meeting minutes and a short summary', grant: { folders: [W] }, plan: hit.plan });
+  assert.strictEqual(r.status, 'done');
+  assert.strictEqual(planned, 0);
+  assert.ok(r.subgoals.every((x) => x.evidence.kind === 'deterministic'));
+});

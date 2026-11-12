@@ -22,6 +22,9 @@ async function killedRun(delayMs) {
   fs.mkdirSync(W, { recursive: true });
   fs.writeFileSync(path.join(W, 'keep.md'), 'existing');
   const child = spawn(process.execPath, [CHILD, W, SAFE], { stdio: 'ignore' });
+  // Start the clock once the mission has made progress (a busy machine starts Node slowly).
+  const jf = path.join(SAFE, 'missions', 'crash', 'journal.jsonl');
+  for (let i = 0; i < 200 && !/"type":"result"/.test(fs.existsSync(jf) ? fs.readFileSync(jf, 'utf8') : ''); i++) await new Promise((r) => setTimeout(r, 50));
   await new Promise((r) => setTimeout(r, delayMs));
   child.kill('SIGKILL');
   await new Promise((r) => child.once('exit', r));
@@ -29,7 +32,7 @@ async function killedRun(delayMs) {
 }
 
 test('SIGKILL at random moments: the journal always matches the disk; undo restores the folder', { timeout: 120000 }, async () => {
-  const delays = [350, 520, 700, 880, 1100];
+  const delays = [0, 90, 170, 260, 410];
   for (const ms of delays) {
     const { W, SAFE, s } = await killedRun(ms);
     assert.ok(s.intact, `journal intact after a kill at ${ms} ms`);

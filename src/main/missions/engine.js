@@ -39,7 +39,7 @@ function parseCheck(s) {
   if (!t || /^none$/i.test(t)) return null;
   if ((m = /^exists\s+(.+)$/i.exec(t))) return { type: 'exists', path: m[1].trim() };
   if ((m = /^absent\s+(.+)$/i.exec(t))) return { type: 'absent', path: m[1].trim() };
-  if ((m = /^contains\s+(.+?)\s*::\s*(.+)$/i.exec(t))) return { type: 'contains', path: m[1].trim(), re: m[2].trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*') };
+  if ((m = /^contains\s+(.+?)\s*::\s*(.+)$/i.exec(t))) return { type: 'contains', path: m[1].trim(), words: m[2].trim(), re: m[2].trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*') };
   if ((m = /^count\s+(.+?)\s*=\s*(\d+)$/i.exec(t))) return { type: 'count', glob: m[1].trim(), n: Number(m[2]) };
   return null;
 }
@@ -134,6 +134,33 @@ class MissionEngine {
   }
 }
 
+// ---- learning: a verified mission becomes a reusable route (a playbook whose steps are
+// the subgoals with their checks). A later goal that is nearly the same reuses the route
+// instead of planning from scratch; it is still verified subgoal by subgoal, so an
+// outdated route fails its checks and the mission asks instead of trusting history.
+function routeLines(report) {
+  return report.subgoals.filter((s) => s.status === 'done').map((s) => `${s.text} | check: ${!s.check ? 'none' : s.check.type === 'contains' ? `contains ${s.check.path} :: ${String(s.check.words || s.check.re).replace(/\[\\s\\S\]\*/g, ' ').replace(/\\(.)/g, '$1')}` : s.check.type === 'count' ? `count ${s.check.glob} = ${s.check.n}` : `${s.check.type} ${s.check.path}`}`);
+}
+const words = (t) => new Set(String(t || '').toLowerCase().match(/[a-z0-9]{3,}/g) || []);
+function similarity(a, b) {
+  const A = words(a), B = words(b);
+  if (!A.size || !B.size) return 0;
+  let n = 0;
+  for (const w of A) if (B.has(w)) n++;
+  return n / (A.size + B.size - n);
+}
+// skills: loaded playbooks; -> { skill, plan } for the closest learned route (similarity >= 0.6), or null
+function findRoute(skills, goal) {
+  let best = null;
+  for (const s of skills || []) {
+    if (!s || s.enabled === false || !/\| check:/.test(s.body || '')) continue;
+    const learned = (/learned from: "([^"]+)"/.exec(s.body || '') || [])[1] || s.description;
+    const sim = similarity(goal, learned);
+    if (sim >= 0.6 && (!best || sim > best.sim)) best = { skill: s, sim, plan: parseMissionPlan(s.body) };
+  }
+  return best && best.plan.length ? best : null;
+}
+
 // One-line-per-subgoal text for the chat and the phone.
 function formatReport(r) {
   const icon = { done: '✓', failed: '✗', waiting: '…', pending: '·', running: '…' };
@@ -143,4 +170,4 @@ function formatReport(r) {
   return lines.join('\n');
 }
 
-module.exports = { MissionEngine, missionPlanPrompt, parseMissionPlan, parseCheck, formatReport, path };
+module.exports = { MissionEngine, missionPlanPrompt, parseMissionPlan, parseCheck, formatReport, routeLines, findRoute, similarity };

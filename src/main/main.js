@@ -2585,8 +2585,21 @@ async function startMission(goal) {
     onEvent: (e) => { if (e.type === 'plan') addTranscript('system', `Mission plan:\n${e.plan.map((x, i) => `${i + 1}. ${x.text}${x.check ? '' : ' (checked by Sentinel)'}`).join('\n')}`, { kind: 'progress' }); },
   });
   addTranscript('system', `Mission started: "${goal.slice(0, 120)}". Esc, Stop or the emergency hotkey ends it.`, { kind: 'progress' });
+  // Learned routes: a nearly identical goal that worked before is reused (still verified step by step).
+  let learned = null;
+  try { learned = E.findRoute(PB.loadSkills(playbookDir()), goal); } catch {}
+  if (learned) { addTranscript('system', `Reusing what worked before ("${learned.skill.name}", ${learned.plan.length} steps). Each step is still checked.`, { kind: 'progress' }); journal.append('route', { playbook: learned.skill.name, similarity: Math.round(learned.sim * 100) / 100 }); }
   let r;
-  try { r = await missionEngine.run({ id: taskId, goal, grant }); } catch (err) { r = { status: 'failed', reason: err.message, subgoals: [], steps: 0, ms: 0, goal }; }
+  try { r = await missionEngine.run({ id: taskId, goal, grant, plan: learned ? learned.plan : null }); } catch (err) { r = { status: 'failed', reason: err.message, subgoals: [], steps: 0, ms: 0, goal }; }
+  // Learn: a verified mission becomes a route for next time; subgoals that needed a second try become lessons.
+  if (r.status === 'done' && !learned && r.subgoals.length) {
+    try { const sk = PB.saveAgentSkill(playbookDir(), { name: `mission-${PB.slug(goal).slice(0, 30)}-${taskId.slice(-4)}`, goal, steps: E.routeLines(r) }); playbooks = PB.loadSkills(playbookDir()); addTranscript('system', `Saved this mission's route as "${sk.name}"; next time a goal like this reuses it.`, { kind: 'progress' }); } catch (err) { console.warn('[core] mission route:', err.message); }
+  }
+  for (const sg of (r.subgoals || []).filter((x) => x.attempts > 1)) {
+    const lesson = `Lesson from mission "${goal.slice(0, 80)}": "${sg.text.slice(0, 100)}" ${sg.status === 'done' ? 'needed a second try' : 'failed twice'} (${String(sg.evidence && sg.evidence.detail || '').slice(0, 120)}).`;
+    noteEpisode(lesson);
+    gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop' }).catch(() => {});
+  }
   missionEngine = null;
   addTranscript('core', E.formatReport(r), { direct: true });
   try { if (agentFiles().changed(taskId).length) addTranscript('system', 'Files were changed. Type /mission undo to put everything back.'); } catch {}

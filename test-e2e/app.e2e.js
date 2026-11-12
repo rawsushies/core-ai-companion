@@ -506,6 +506,16 @@ test('autopilot: one approval, a planned mission runs its subgoals with no furth
   await send('/mission undo');
   await dock.waitForFunction(() => /Undone: 2 files from the mission/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
   assert.ok(!fs.existsSync(path.join(project, 'minutes.md')) && !fs.existsSync(path.join(project, 'summary.md')));
+  // Learning: the verified mission was saved as a route; a near-identical goal reuses it (no planning call).
+  assert.match(await logText(), /Saved this mission's route as "mission-/);
+  fs.writeFileSync(script, JSON.stringify([...JSON.parse(fs.readFileSync(script, 'utf8')).filter((r) => !/mission-plan/.test(r.match))]));
+  await send('/autopilot make the meeting minutes and a short summary');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Goal: make the meeting minutes and a short/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => /Mission complete: make the meeting minutes and a short summary/.test(document.getElementById('log').innerText), null, { timeout: 60000 });
+  assert.match(await logText(), /Reusing what worked before \("mission-[^"]+", 2 steps\)/);
+  await send('/mission undo');
+  await dock.waitForFunction(() => (document.getElementById('log').innerText.match(/Undone: 2 files from the mission/g) || []).length === 2, null, { timeout: 8000 });
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
