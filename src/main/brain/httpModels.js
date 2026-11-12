@@ -172,7 +172,10 @@ class OpenAICompatBrain extends HistoryMixin {
     }
   }
 
-  async _ask({ prompt, image, tone, signal, onDelta, model: modelOverride }) {
+  // effort -> reasoning_effort, only where enabled (brain.<id>.reasoningEffort)
+  // and only until an endpoint rejects it.
+  async _ask({ prompt, image, tone, signal, onDelta, model: modelOverride, effort }) {
+    const re = effort && this.cfg.reasoningEffort && !this.noEffort ? ({ minimal: 'low', low: 'low', medium: 'medium', high: 'high' }[effort] || null) : null;
     const content = image && this.cfg.vision
       ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:${image.mediaType || 'image/png'};base64,${image.base64}` } }]
       : prompt;
@@ -182,6 +185,7 @@ class OpenAICompatBrain extends HistoryMixin {
       signal,
       body: JSON.stringify({
         model: modelOverride || this.cfg.model,
+        ...(re ? { reasoning_effort: re } : {}),
         stream: true,
         temperature: 0.7,
         messages: [{ role: 'system', content: persona({ canReadFiles: false, tone }) }, ...this.history, { role: 'user', content }],
@@ -197,6 +201,7 @@ class OpenAICompatBrain extends HistoryMixin {
         const ra = Number(res.headers && res.headers.get && res.headers.get('retry-after'));
         throw Object.assign(new Error(`${this.name} is rate limited right now (free tier limit).`), { retryAfterMs: Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3600) * 1000 : 0 });
       }
+      if (re && res.status === 400 && /reasoning/i.test(t)) { this.noEffort = true; return this._ask({ prompt, image, tone, signal, onDelta, model: modelOverride }); }
       const err = new Error(`${this.name} error ${res.status}: ${t.slice(0, 200)}`);
       err.modelProblem = res.status === 404 || /model/i.test(t);
       throw err;

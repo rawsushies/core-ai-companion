@@ -2457,7 +2457,7 @@ function routedConfig(kind) {
   const strong = b.claude && b.claude.strongModel;
   if (b.routing === 'off' || !strong || strong === b.claude.model) return config.data;
   if (!['agent', 'playbook', 'forge', 'sentinel', 'navigator', 'archivist', 'scout'].includes(kind)) return config.data;
-  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong, fallbackModel: b.claude.model } } };
+  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong, fallbackModel: b.claude.model, effort: b.claude.effort || 'high' } } }; // deep work keeps its warm session at high effort
 }
 
 function helperBrain(c) {

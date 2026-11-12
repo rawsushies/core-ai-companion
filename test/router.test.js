@@ -97,3 +97,43 @@ test('Claude steps down from the strong model to the fast one when the strong on
   c._turn = async () => { throw new Error("Claude's usage limit is reached"); };
   await assert.rejects(c.ask({ prompt: 'x', onDelta() {} }), /usage limit/, 'no loop once already on the fast model');
 });
+
+test('reasoning effort: Claude runs deep turns once with --effort high; HTTP providers get reasoning_effort until they reject it', async () => {
+  const { ClaudeCliBrain } = require('../src/main/brain/claudeCli');
+  const c = new ClaudeCliBrain({ config: { model: 'haiku' }, workDir: '/tmp', state: { get() {}, set() {} } });
+  c.detect = async () => {};
+  c.flags = new Set(['--effort', '--input-format']);
+  c.cmd = { file: 'claude', shell: false };
+  const seen = [];
+  c._turn = async () => { seen.push(c._args({ sessionId: 's', resume: false, tone: 'calm', persistent: false, model: c._oneShotModel || undefined, effort: c._oneShotEffort || undefined })); return { text: 'ok' }; };
+  c._persistentTurn = async () => { seen.push('persistent'); return { text: 'ok' }; };
+  c._killProc = () => {};
+  await c.ask({ prompt: 'x', onDelta() {}, effort: 'high' });
+  await c.ask({ prompt: 'x', onDelta() {}, effort: 'low' });
+  const a = seen[0];
+  assert.strictEqual(a[a.indexOf('--effort') + 1], 'high');
+  assert.strictEqual(seen[1], 'persistent', 'light turns keep the warm session');
+
+  const { OpenAICompatBrain } = require('../src/main/brain/httpModels');
+  const bodies = [];
+  const realFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    const b = JSON.parse(init.body);
+    bodies.push(b);
+    if (b.reasoning_effort && bodies.length === 2) return { ok: false, status: 400, text: async () => 'Unrecognized request argument: reasoning_effort' };
+    const enc = new TextEncoder();
+    return { ok: true, status: 200, body: new ReadableStream({ start(ctl) { ctl.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n')); ctl.close(); } }) };
+  };
+  try {
+    const g = new OpenAICompatBrain({ config: { baseUrl: 'https://x', model: 'm', reasoningEffort: true, noKey: true }, state: { get() {}, set() {} }, id: 'gemini', name: 'Gemini' });
+    await g.ask({ prompt: 'p', onDelta() {}, effort: 'high' });
+    assert.strictEqual(bodies[0].reasoning_effort, 'high');
+    await g.ask({ prompt: 'p', onDelta() {}, effort: 'medium' });
+    assert.strictEqual(bodies[2].reasoning_effort, undefined, 'retried without it after the 400');
+    await g.ask({ prompt: 'p', onDelta() {}, effort: 'high' });
+    assert.strictEqual(bodies[3].reasoning_effort, undefined, 'and not sent again');
+    const plain = new OpenAICompatBrain({ config: { baseUrl: 'https://x', model: 'm', noKey: true }, state: { get() {}, set() {} }, id: 'groq', name: 'Groq' });
+    await plain.ask({ prompt: 'p', onDelta() {}, effort: 'high' });
+    assert.strictEqual(bodies[4].reasoning_effort, undefined, 'off unless enabled for the provider');
+  } finally { global.fetch = realFetch; }
+});

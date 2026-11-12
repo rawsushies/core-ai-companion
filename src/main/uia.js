@@ -108,7 +108,7 @@ function outline(snap, { maxLines = 90 } = {}) {
   const w = snap.window || {};
   const lines = [];
   for (const e of snap.elements || []) {
-    if (!interesting(e) || !e.bounds) continue;
+    if (!interesting(e) || !e.bounds || (e.offscreen && e.depth > 0 && !e.bounds.w)) continue;
     const q = (s, n = 60) => JSON.stringify(String(s).length > n ? `${String(s).slice(0, n)}…` : String(s));
     const bits = [`[${e.id}]`, e.type, e.name ? q(e.name) : ''];
     if (e.aid && e.aid !== e.name && e.aid.length <= 40) bits.push(`#${e.aid}`);

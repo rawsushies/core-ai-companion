@@ -88,10 +88,13 @@ function Walk($root, $maxDepth, $max) {
     $item = $stack.Pop()
     $e = $item[0]
     $d = $item[1]
-    $skip = $false
-    try { if ($d -gt 0 -and $e.Current.IsOffscreen) { $skip = $true } } catch { $skip = $true }
-    if ($skip) { continue }
-    try { [void]$list.Add((Describe $e $d)) } catch { continue }
+    # Offscreen controls are kept (marked): some desktops, like remote or
+    # headless sessions, report everything offscreen. The outline decides.
+    try {
+      $o = Describe $e $d
+      try { if ($e.Current.IsOffscreen) { $o.offscreen = $true } } catch {}
+      [void]$list.Add($o)
+    } catch { continue }
     if ($d -lt $maxDepth) {
       $kids = New-Object System.Collections.ArrayList
       try {

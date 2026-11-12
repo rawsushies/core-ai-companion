@@ -25,6 +25,7 @@ test('UI Automation reads and operates real Notepad', { skip: !win, timeout: 900
     await uia.activate(w.id).catch(() => {});
     const snap = await uia.snapshot({ target: w.id, depth: 14, max: 400 });
     console.log(outline(snap, { maxLines: 40 }));
+    console.log('types:', JSON.stringify(snap.elements.map((e) => `${e.type}${e.offscreen ? '*' : ''}:${(e.patterns || []).join('+')}`)));
     const edit = snap.elements.find((e) => (e.patterns || []).includes('Value') && ['Edit', 'Document'].includes(e.type));
     assert.ok(edit, 'the text area is found by its control type and Value pattern');
     await uia.setValue(edit.id, 'hello from COre');
