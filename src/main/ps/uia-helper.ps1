@@ -22,14 +22,21 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 # Win32 controls (Edit, Button, CheckBox...) need the client-side providers;
 # without them they show up as plain "Pane" with no patterns.
+$script:providerStatus = 'not registered'
 try {
-  Add-Type -AssemblyName UIAutomationClientsideProviders
-  [System.Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly([UIAutomationClientsideProviders.UIAutomationClientSideProviders].Assembly.GetName())
-} catch {}
+  $asm = [System.Reflection.Assembly]::LoadWithPartialName('UIAutomationClientsideProviders')
+  if ($asm -eq $null) { throw 'assembly not found' }
+  [System.Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly($asm.GetName())
+  $script:providerStatus = 'registered'
+} catch { $script:providerStatus = "failed: $($_.Exception.Message)" }
 Add-Type -Namespace CoreUia -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, System.Text.StringBuilder lParam);
+[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+[DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int index);
 '@
 
 $AE = [System.Windows.Automation.AutomationElement]
@@ -55,6 +62,31 @@ function Add-Element($e) {
   return $script:nextId
 }
 
+# Win32 fallback (like pywinauto's win32 backend): standard controls that expose
+# no UIA patterns are still operable through their window handle.
+function Get-Win32Kind($e) {
+  $h = [IntPtr]$e.Current.NativeWindowHandle
+  if ($h -eq [IntPtr]::Zero) { return $null }
+  $cls = [string]$e.Current.ClassName
+  if ($cls -match 'EDIT|RichEdit') { return 'edit' }
+  if ($cls -match 'BUTTON') {
+    $style = [CoreUia.Native]::GetWindowLong($h, -16) -band 0xF
+    if ($style -in 2, 3, 5, 6) { return 'check' }
+    if ($style -in 4, 9) { return 'radio' }
+    return 'button'
+  }
+  if ($cls -match 'STATIC') { return 'text' }
+  return $null
+}
+
+function Get-Win32Text($e) {
+  $h = [IntPtr]$e.Current.NativeWindowHandle
+  $len = [int][CoreUia.Native]::SendMessage($h, 0x000E, [IntPtr]::Zero, [IntPtr]::Zero) # WM_GETTEXTLENGTH
+  $sb = New-Object System.Text.StringBuilder ($len + 1)
+  [void][CoreUia.Native]::SendMessage($h, 0x000D, [IntPtr]($len + 1), $sb) # WM_GETTEXT
+  return $sb.ToString()
+}
+
 function Describe($e, $depth) {
   $c = $e.Current
   $o = [ordered]@{
@@ -68,6 +100,17 @@ function Describe($e, $depth) {
     bounds = (Get-Rect $e)
     depth = $depth
     patterns = (Get-PatternNames $e)
+  }
+  if ($o.patterns.Count -eq 0 -or $o.type -eq 'Pane') {
+    $k = Get-Win32Kind $e
+    if ($k -eq 'edit') { $o.type = 'Edit'; $o.patterns = @('Value', 'Win32'); try { $o.value = Get-Win32Text $e } catch {} }
+    elseif ($k -eq 'button') { $o.type = 'Button'; $o.patterns = @('Invoke', 'Win32') }
+    elseif ($k -eq 'check' -or $k -eq 'radio') {
+      $o.type = $(if ($k -eq 'check') { 'CheckBox' } else { 'RadioButton' }); $o.patterns = @('Toggle', 'Win32')
+      $st = [int][CoreUia.Native]::SendMessage([IntPtr]$e.Current.NativeWindowHandle, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) # BM_GETCHECK
+      $o.toggle = $(if ($st -eq 1) { 'On' } else { 'Off' })
+    }
+    elseif ($k -eq 'text') { $o.type = 'Text'; try { $t = Get-Win32Text $e; if ($t) { $o.name = $t } } catch {} }
   }
   try {
     $vp = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
@@ -177,7 +220,9 @@ function Handle($req) {
       $c = $root.Current
       $win = [ordered]@{ name = $c.Name; cls = $c.ClassName; pid = $c.ProcessId; process = (Get-ProcessName $c.ProcessId); bounds = (Get-Rect $root); handle = $c.NativeWindowHandle }
       $els = Walk $root $depth $max
-      return @{ window = $win; elements = $els; errors = @($script:walkErrors | Select-Object -First 5) }
+      $errs = @($script:walkErrors | Select-Object -First 5)
+      if ($script:providerStatus -ne 'registered') { $errs += "client-side providers $($script:providerStatus)" }
+      return @{ window = $win; elements = $els; errors = $errs }
     }
     'invoke' {
       $e = Get-El $req
@@ -193,12 +238,17 @@ function Handle($req) {
         if ($p.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) { $p.Collapse() } else { $p.Expand() }
         return 'expanded'
       }
+      $k = Get-Win32Kind $e
+      if ($k -in 'button', 'check', 'radio') { [void][CoreUia.Native]::SendMessage([IntPtr]$e.Current.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero); return $(if ($k -eq 'button') { 'invoked' } else { 'toggled' }) } # BM_CLICK
       throw 'NO_PATTERN: this control has no press action; click its centre instead.'
     }
     'setvalue' {
       $e = Get-El $req
       $p = Try-Pattern $e ([System.Windows.Automation.ValuePattern]::Pattern)
-      if (-not $p) { throw 'NO_PATTERN: this control does not take text; focus it and type instead.' }
+      if (-not $p) {
+        if ((Get-Win32Kind $e) -eq 'edit') { [void][CoreUia.Native]::SendMessage([IntPtr]$e.Current.NativeWindowHandle, 0x000C, [IntPtr]::Zero, [string]$req.text); return 'set' } # WM_SETTEXT
+        throw 'NO_PATTERN: this control does not take text; focus it and type instead.'
+      }
       if ($p.Current.IsReadOnly) { throw 'That field is read-only.' }
       $p.SetValue([string]$req.text)
       return 'set'
@@ -206,7 +256,9 @@ function Handle($req) {
     'value' {
       $e = Get-El $req
       $p = Try-Pattern $e ([System.Windows.Automation.ValuePattern]::Pattern)
-      return @{ value = $(if ($p) { [string]$p.Current.Value } else { $null }); name = $e.Current.Name }
+      $v = $null
+      if ($p) { $v = [string]$p.Current.Value } elseif ((Get-Win32Kind $e) -eq 'edit') { $v = Get-Win32Text $e }
+      return @{ value = $v; name = $e.Current.Name }
     }
     'focus' { $e = Get-El $req; $e.SetFocus(); return 'focused' }
     'expand' {
