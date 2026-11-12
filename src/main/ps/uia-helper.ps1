@@ -101,6 +101,14 @@ function Walk($root, $maxDepth, $max) {
         $ch = $Walker.GetFirstChild($e)
         while ($ch -ne $null -and $kids.Count -lt 300) { [void]$kids.Add($ch); $ch = $Walker.GetNextSibling($ch) }
       } catch {}
+      # Some hosts (XAML islands) show nothing in the control view: try the raw view.
+      if ($kids.Count -eq 0) {
+        try {
+          $raw = [System.Windows.Automation.TreeWalker]::RawViewWalker
+          $ch = $raw.GetFirstChild($e)
+          while ($ch -ne $null -and $kids.Count -lt 300) { [void]$kids.Add($ch); $ch = $raw.GetNextSibling($ch) }
+        } catch {}
+      }
       for ($i = $kids.Count - 1; $i -ge 0; $i--) { $stack.Push(@($kids[$i], ($d + 1))) }
     }
   }
