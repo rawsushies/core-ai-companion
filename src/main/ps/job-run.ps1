@@ -14,7 +14,7 @@ param(
   [string]$Argv = ''
 )
 $ErrorActionPreference = 'Stop'
-try { $Rest = @(ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Argv)))) } catch { $Rest = @() }
+try { $Rest = @((ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Argv)))) | ForEach-Object { [string]$_ }) } catch { $Rest = @() }
 if ($Rest.Count -lt 1) { [Console]::Error.WriteLine('job-run: no command'); exit 2 }
 
 Add-Type -TypeDefinition @'
