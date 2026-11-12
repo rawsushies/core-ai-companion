@@ -41,6 +41,7 @@ test('UI Automation reads and operates a real Win32 app: fill, press, toggle, ve
     await uia.activate(w.id).catch(() => {});
     let snap = await uia.snapshot({ target: w.id });
     console.log(outline(snap));
+    console.log('elements:', snap.elements.length, 'errors:', JSON.stringify(snap.errors));
     const box = snap.elements.find((e) => e.type === 'Edit');
     const btn = snap.elements.find((e) => e.type === 'Button' && e.name === 'Greet');
     const chk = snap.elements.find((e) => e.type === 'CheckBox' && e.name === 'Remember me');

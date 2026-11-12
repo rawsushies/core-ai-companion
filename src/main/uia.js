@@ -71,7 +71,7 @@ class UiaClient {
   // target: 'foreground' or a window id from windows().
   async snapshot({ target = 'foreground', depth = 12, max = 300 } = {}) {
     const r = await this.request('snapshot', { target, depth, max });
-    this.last = { window: r.window || {}, elements: Array.isArray(r.elements) ? r.elements : (r.elements ? [r.elements] : []), at: Date.now() };
+    this.last = { window: r.window || {}, elements: Array.isArray(r.elements) ? r.elements : (r.elements ? [r.elements] : []), errors: [].concat(r.errors || []), at: Date.now() };
     return this.last;
   }
 

@@ -80,7 +80,9 @@ function Describe($e, $depth) {
   return $o
 }
 
+$script:walkErrors = New-Object System.Collections.ArrayList
 function Walk($root, $maxDepth, $max) {
+  $script:walkErrors.Clear()
   $list = New-Object System.Collections.ArrayList
   $stack = New-Object System.Collections.Stack
   $stack.Push(@($root, 0))
@@ -94,20 +96,21 @@ function Walk($root, $maxDepth, $max) {
       $o = Describe $e $d
       try { if ($e.Current.IsOffscreen) { $o.offscreen = $true } } catch {}
       [void]$list.Add($o)
-    } catch { continue }
+    } catch { [void]$script:walkErrors.Add("describe: $($_.Exception.Message)"); continue }
     if ($d -lt $maxDepth) {
       $kids = New-Object System.Collections.ArrayList
       try {
-        $ch = $Walker.GetFirstChild($e)
-        while ($ch -ne $null -and $kids.Count -lt 300) { [void]$kids.Add($ch); $ch = $Walker.GetNextSibling($ch) }
-      } catch {}
-      # Some hosts (XAML islands) show nothing in the control view: try the raw view.
+        $found = $e.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Automation]::ControlViewCondition)
+        foreach ($k in $found) { if ($kids.Count -ge 300) { break }; [void]$kids.Add($k) }
+      } catch { [void]$script:walkErrors.Add("FindAll: $($_.Exception.Message)") }
       if ($kids.Count -eq 0) {
-        try {
-          $raw = [System.Windows.Automation.TreeWalker]::RawViewWalker
-          $ch = $raw.GetFirstChild($e)
-          while ($ch -ne $null -and $kids.Count -lt 300) { [void]$kids.Add($ch); $ch = $raw.GetNextSibling($ch) }
-        } catch {}
+        foreach ($w in @($Walker, [System.Windows.Automation.TreeWalker]::RawViewWalker)) {
+          try {
+            $ch = $w.GetFirstChild($e)
+            while ($ch -ne $null -and $kids.Count -lt 300) { [void]$kids.Add($ch); $ch = $w.GetNextSibling($ch) }
+          } catch { [void]$script:walkErrors.Add("walker: $($_.Exception.Message)") }
+          if ($kids.Count -gt 0) { break }
+        }
       }
       for ($i = $kids.Count - 1; $i -ge 0; $i--) { $stack.Push(@($kids[$i], ($d + 1))) }
     }
@@ -167,7 +170,8 @@ function Handle($req) {
       foreach ($k in $keep.Keys) { if ($keep[$k] -eq $root) { $script:cache[$k] = $root } }
       $c = $root.Current
       $win = [ordered]@{ name = $c.Name; cls = $c.ClassName; pid = $c.ProcessId; process = (Get-ProcessName $c.ProcessId); bounds = (Get-Rect $root); handle = $c.NativeWindowHandle }
-      return @{ window = $win; elements = (Walk $root $depth $max) }
+      $els = Walk $root $depth $max
+      return @{ window = $win; elements = $els; errors = @($script:walkErrors | Select-Object -First 5) }
     }
     'invoke' {
       $e = Get-El $req
