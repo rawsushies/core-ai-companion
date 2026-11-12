@@ -102,7 +102,7 @@ test.before(async () => {
   app = await electron.launch({
     args: ['--no-sandbox', ROOT, `--user-data-dir=${userData}`],
     cwd: ROOT,
-    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_CLAUDE_ARGS: path.join(userData, 'fake-args.log'), FAKE_PLAYER: player,
+    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_CLAUDE_ARGS: path.join(userData, 'fake-args.log'), FAKE_CLAUDE_PROMPTS: process.env.E2E_PROMPTS || '', FAKE_PLAYER: player,
       PATH: `${path.join(ROOT, 'test', 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}` },
     timeout: 60000,
   });
@@ -705,6 +705,48 @@ test('memory gateway with the real Cortex: a decision goes to the vault, comes b
   assert.match(fs.readFileSync(path.join(cortexVault, 'Projects', 'Tower.md'), 'utf8'), /we decided the client wants a glass facade/);
   await send('what facade does the tower client want?');
   await dock.waitForFunction(() => /From your notes in Cortex \(Projects\/Tower\.md\)/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('PHASE 4 ACCEPTANCE: instruction -> knowledge -> specialist -> plan -> tools with a failure and recovery -> verified -> long-term memory', { skip: (process.platform !== 'linux' || !CORTEX_DIR) && 'needs Linux and a Cortex checkout' }, async () => {
+  // Knowledge from the earlier Cortex test: Projects/Tower.md says the client wants a glass facade.
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    { match: '^(?=[\\s\\S]*\\[Knowledge\\][\\s\\S]*glass facade)(?=[\\s\\S]*which facade)', full: true, reply: 'Per Projects/Tower.md the Tower client chose a glass facade.' },
+    { match: 'reply done again', reply: 'Checked: brief.txt has the facade decision. [[act {"type":"done","summary":"facade brief written and checked"}]]' },
+    { match: 'Step 3 of', reply: 'Written. [[act {"type":"done","summary":"facade brief written"}]]' },
+    { match: 'Step 1 of', reply: 'First, check for an existing brief. [[act {"type":"run","cmd":"node -e process.exit(3)","why":"look for an existing brief"}]]' },
+    { match: '^(?=[\\s\\S]*Step 2 of)(?=[\\s\\S]*glass facade)', full: true, reply: 'The check failed, writing the brief from the project notes instead. [[act {"type":"write","path":"brief.txt","text":"Tower facade: glass (client decision, Projects/Tower.md)","why":"save the brief"}]]' },
+    ...baseRules,
+  ]));
+  // 1. A specialist answers from long-term knowledge, routed and recorded.
+  await send('@Scout which facade did the Tower client choose?');
+  try {
+    await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-scout .msg')].some((m) => /Per Projects\/Tower\.md the Tower client chose a glass facade/.test(m.innerText)), null, { timeout: 30000 });
+  } catch (err) { console.log('LOG:', (await dock.evaluate(() => document.getElementById('log').innerText)).slice(-1500)); throw err; }
+  // 2. A desktop task: a command fails, the agent recovers, writes, re-checks.
+  await send('/do write a short Tower facade brief');
+  try {
+    await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Run/.test(document.getElementById('agent-label').textContent), null, { timeout: 30000 });
+  } catch (err) { console.log('LOG:', (await dock.evaluate(() => `${document.getElementById('agent-label').textContent} || ${document.getElementById('log').innerText.slice(-800)}`))); throw err; }
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write brief\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 30000 });
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => /Agent finished: facade brief written and checked/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  // 3. Verified from the result itself, not the agent's claim.
+  assert.strictEqual(fs.readFileSync(path.join(project, 'brief.txt'), 'utf8'), 'Tower facade: glass (client decision, Projects/Tower.md)');
+  const audit = fs.readFileSync(path.join(userData, 'logs', 'tools.log'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } });
+  assert.ok(audit.some((e) => e.event === 'agent-command' && /exit\(3\)/.test(JSON.stringify(e.argv))), 'the failing command really ran');
+  assert.ok(audit.some((e) => e.event === 'route'), 'turns were routed');
+  // 4. The verified outcome is preserved as project knowledge in Cortex.
+  const projDir = path.join(cortexVault, 'Projects');
+  let found = '';
+  for (let i = 0; i < 40 && !found; i++) {
+    await wait(250);
+    for (const f of fs.existsSync(projDir) ? fs.readdirSync(projDir) : []) { const t = fs.readFileSync(path.join(projDir, f), 'utf8'); if (/Verified on the desktop: facade brief written and checked/.test(t)) found = f; }
+  }
+  assert.ok(found, 'verified outcome filed in Cortex');
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 

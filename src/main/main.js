@@ -2815,7 +2815,7 @@ function askCore(coreId, text, { task, review = false } = {}) {
     c.ac = ac;
     try {
       const base = c.id === 'archivist' ? await archivistContext(text)
-        : memory && config.data.memory.enabled !== false ? (await memory.contextForAsync(text)) || '' : '';
+        : memory && config.data.memory.enabled !== false ? (await gateway().context(text, { budget: 1000, k: 5 })).text || '' : ''; // same gateway as Prime: COre memory + Cortex
       const others = coreResultsFor(c.id, text);
       const context = [base, others].filter(Boolean).join('\n\n');
       // Up to 3 rounds of read-only project tools before the final answer.

@@ -29,6 +29,7 @@ if (MODE === 'auth') {
 let turns = 0;
 function reply(text) {
   turns++;
+  if (process.env.FAKE_CLAUDE_PROMPTS) { try { fs.appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `\n=====\n${text}`); } catch {} }
   out({ type: 'system', subtype: 'init', session_id: sid, model: 'fake' });
   // FAKE_CLAUDE_REPLY: fixed reply for UI tests; {core} becomes the specialist's name.
   const core = (/\[core ([^\]]+)\]/.exec(text) || [])[1] || 'COre';
