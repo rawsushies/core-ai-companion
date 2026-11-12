@@ -10,6 +10,32 @@ The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs
 **Overall estimated completion: 93%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12; unchanged by the 12.1 audit, which verified items already counted as pending work in the knowledge layer: 5 of 6 criteria verified, typing inside Obsidian untested).
 
+## 13.0 Trustworthy Autonomy (in progress)
+
+Plan: [docs/dev/PLAN-13.0.md](docs/dev/PLAN-13.0.md) (approved 2026-11-12). Four pillars: foundation & trust, Level 5
+autonomy within a declared domain, phone as remote body, Jarvis presence. Every row states the **tier** of its
+evidence: T1 simulated · T2 real components on Linux · T3 real Windows CI · T4 the user's own Windows machine.
+Level 5 is claimed only from a T4 run of the 100-task evaluation meeting every threshold; nothing else counts.
+
+**Autonomy level today: L1–L2** (12.x agent: approval per changing step, or one approval for a plan). Not yet measured
+against the 100-task suite beyond the sample below.
+
+| Phase | Criterion | Status | Tier | Evidence |
+|---|---|---|---|---|
+| P0 | 100-task suite (planned mix) + 20 injected variants; every reference solution passes, doing nothing fails | **Verified** | T1 | `test/eval.test.js`, `eval/autonomy/` |
+| P0 | Injection corpus v1, 64 fresh cases (file, web, email, screen, phone), not used for tuning | **Done**; advisory guard flags **8/64 (12.5%)** | T1 | `eval/results/security-detection-v1.md` |
+| P0 | Baseline of the 12.x agent on the suite | Sample only (free-tier model limits); full run needs the evaluation budget (decision 1 in the plan) | T2 | `eval/results/T2-baseline-12x-sample.md` |
+| P1 | One policy engine (grant, risk class, taint) replaces the scattered gates | Not started | — | — |
+| P1 | Write-ahead mission journal; replay after kill; compensation and undo | Not started | — | — |
+| P1 | Emergency stop < 1 s from every source; dead-man | Not started | — | — |
+| P2 | Mission engine, planner, Sentinel verification, recovery, learning | Not started | — | — |
+| P3 | Phone: mission feed, biometric-bound approvals, voice, tainted files, capabilities | Not started | — | — |
+| P4 | Presence: briefing, meeting prep, narration, heads-ups, continuity | Not started | — | — |
+| P5 | 100-task thresholds at T4; recovery and red-team suites | Not started | — | — |
+
+Blockers that only the user can clear: a model budget for the evaluation (free tiers rate-limit after a few tasks),
+access to the user's Windows PC for T4, and the decisions in PLAN-13.0 §9.
+
 ## Memory architecture status
 
 - **COre native memory** (`src/main/memory.js`) = active memory: profile,

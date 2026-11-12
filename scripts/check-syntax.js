@@ -10,6 +10,7 @@ const files = [];
     else if (/\.(c|m)?js$/.test(f)) files.push(p);
   }
 })(path.join(__dirname, '..', 'src'));
+(function walkEval(d) { if (!fs.existsSync(d)) return; for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (f === 'results') continue; if (fs.statSync(p).isDirectory()) walkEval(p); else if (/\.(c|m)?js$/.test(f)) files.push(p); } })(path.join(__dirname, '..', 'eval'));
 files.push(path.join(__dirname, '..', 'boot.js'));
 for (const f of files) execFileSync(process.execPath, ['--check', f], { stdio: 'inherit' });
 // Two top-level functions with the same name: the later one silently replaces
