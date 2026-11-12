@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### COre 2.1, part 1: Cores that read each other, helpers you can move
+
+- **Cores read each other's work.** Prime now sees what a specialist produced (new results automatically, and the latest from any core you name), so "what did Scout find?" works. Specialists also see the other specialists' recent results.
+- **Helpers spawn clear of the chat.** The chat window was never actually avoided (a width/height field mix-up), and helpers were placed by a smaller footprint than their window. Placement now keeps the whole helper window out of the chat's column, including the room it grows into.
+- **Drag a helper by its orb** to move it; it stays where you drop it (kept on screen).
+
 ### COre 2.0, part 11: Jev decision layer and unified routing
 
 - **Jev as System One**: before each answer, one batched, typed request (Jev, TypeSafe's decision model; through your OpenRouter key or a TypeSafe key) decides the task type, complexity, reasoning effort, the best specialist, whether the request acts on your computer, whether it is too vague, and which eligible model should answer. A decision needs a clear margin over the runner-up to count. Jev is time-limited (2.5 s) and fails open; after errors it rests. Without a key a **local classifier** gives the same typed decision, and trivial chat never pays for a remote call.

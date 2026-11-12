@@ -39,7 +39,10 @@ function reply(text) {
   if (process.env.FAKE_CLAUDE_SCRIPT) {
     try {
       for (const rule of JSON.parse(fs.readFileSync(process.env.FAKE_CLAUDE_SCRIPT, 'utf8'))) {
-        if (new RegExp(rule.match, 'i').test(text)) { scripted = rule.reply; failWith = rule.error || null; break; }
+        // Rules match the request, not the other cores' work quoted in the context
+        // (unless a rule asks for the full prompt with full: true).
+        const hay = rule.full ? text : text.replace(/\[Specialists' work\][\s\S]*?(?=\n\n\[|$)/, '');
+        if (new RegExp(rule.match, 'i').test(hay)) { scripted = rule.reply; failWith = rule.error || null; break; }
       }
     } catch {}
   }

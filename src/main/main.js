@@ -2327,8 +2327,16 @@ function cloneObstacles(except) {
   const d = primaryDisplay();
   const r = orbBounds.r || 60;
   const out = [CL.orbRect(d.bounds.x + orbBounds.x, d.bounds.y + orbBounds.y, r)];
-  if (dock && !dock.isDestroyed() && dock.isVisible()) out.push(dock.getBounds());
-  for (const c of clones.values()) if (c !== except && c.slot) out.push({ x: c.slot.x - CLONE_WIN * 0.4, y: c.slot.y - CLONE_WIN * 0.4, w: CLONE_WIN * 0.8, h: CLONE_WIN * 0.8 });
+  // Electron rects are { width, height }; placement checks { w, h }. (Before
+  // this, the chat was never avoided and helpers could spawn on top of it.)
+  if (dock && !dock.isDestroyed() && dock.isVisible()) {
+    // Reserve the column the chat can grow into (up to 460 px, up or down).
+    const b = dock.getBounds();
+    const top = Math.min(b.y, b.y + b.height - 460);
+    const bottom = Math.max(b.y + 460, b.y + b.height);
+    out.push({ x: b.x - 24, y: top - 24, w: b.width + 48, h: bottom - top + 48 });
+  }
+  for (const c of clones.values()) if (c !== except && c.slot) out.push({ x: c.slot.x - CLONE_WIN / 2, y: c.slot.y - CLONE_WIN / 2, w: CLONE_WIN, h: CLONE_WIN });
   return out;
 }
 
@@ -2386,7 +2394,7 @@ function ensureHelper(coreId) {
   const r = cloneRadius();
   const d = primaryDisplay();
   const from = { x: d.bounds.x + orbBounds.x, y: d.bounds.y + orbBounds.y };
-  const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: Math.max(r * 5.2, CLONE_WIN * 0.8), near: from });
+  const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: CLONE_WIN, near: from }); // the whole window stays clear
   if (!slot) { addTranscript('system', `No free spot on the screen for ${core.name}.`, { kind: 'error' }); return null; }
   const look = { name: core.name, tint: hexTint(core.color), color: core.color, voice: core.voice, semitones: core.semitones };
   const c = { id: core.id, core, look, name: core.name, r, slot, state: 'idle', brain: null, win: null, ac: new AbortController(), queue: Promise.resolve(), busy: 0 };
@@ -2481,6 +2489,28 @@ async function archivistContext(text) {
   return parts.join('\n\n');
 }
 
+// What the specialists produced, so the cores can read each other: Prime gets
+// results it has not seen yet (and the latest from any core you name), and a
+// specialist sees what the others did recently.
+const coreResults = []; // { id, core, name, ask, reply, at, seenByPrime }
+function noteCoreResult(c, ask, reply) {
+  coreResults.push({ id: `${c.id}-${Date.now()}`, core: c.id, name: c.name, ask: String(ask).slice(0, 300), reply: String(reply).slice(0, 6000), at: Date.now(), seenByPrime: false });
+  if (coreResults.length > 12) coreResults.shift();
+}
+function coreResultsFor(reader, text = '') {
+  const low = String(text).toLowerCase();
+  const named = new Set(cores.filter((c) => c.id !== 'prime' && low.includes(c.name.toLowerCase())).map((c) => c.id));
+  let picks;
+  if (reader === 'prime') {
+    const latestNamed = [...named].map((id) => [...coreResults].reverse().find((r) => r.core === id)).filter(Boolean);
+    picks = [...new Set([...coreResults.filter((r) => !r.seenByPrime), ...latestNamed])].slice(-4);
+    for (const r of picks) r.seenByPrime = true;
+  } else picks = coreResults.filter((r) => r.core !== reader).slice(-2);
+  if (!picks.length) return '';
+  const per = reader === 'prime' ? 1500 : 1200;
+  return `[Specialists' work] What your cores produced (you can use and refer to it):\n${picks.map((r) => `- ${r.name}, asked "${r.ask}":\n${r.reply.length > per ? `${r.reply.slice(0, per)}…` : r.reply}`).join('\n')}`;
+}
+
 function askCore(coreId, text, { task, review = false } = {}) {
   const c = ensureHelper(coreId);
   if (!c) return Promise.resolve({ ok: false, error: 'not available' });
@@ -2493,8 +2523,10 @@ function askCore(coreId, text, { task, review = false } = {}) {
     const ac = new AbortController();
     c.ac = ac;
     try {
-      const context = c.id === 'archivist' ? await archivistContext(text)
+      const base = c.id === 'archivist' ? await archivistContext(text)
         : memory && config.data.memory.enabled !== false ? (await memory.contextForAsync(text)) || '' : '';
+      const others = coreResultsFor(c.id, text);
+      const context = [base, others].filter(Boolean).join('\n\n');
       // Up to 3 rounds of read-only project tools before the final answer.
       let msg = CL.corePrompt(c.core, text, task);
       let reply = ''; let truncated = false; let error = null;
@@ -2511,6 +2543,7 @@ function askCore(coreId, text, { task, review = false } = {}) {
       // (or the whole answer if that's all there is).
       const details = full.split(/\n\s*\n/).slice(1).join('\n\n').trim();
       addTranscript('core', details || full || '(no answer)', { author: c.id, ...(task ? { task: task.id } : {}) });
+      if (full) noteCoreResult(c, text, full);
       offerProposals(full, c.id);
       // Navigator hands a plan to the desktop agent: you start it (Enter).
       const navTask = c.id === 'navigator' && /^\s*Task:\s*(.{4,300})$/im.exec(full);
@@ -2888,6 +2921,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       if (fileCtx.image && !shot) shot = fileImageShot(fileCtx.image, fileCtx.imageName);
       if (fileCtx.flags.length) toolAudit({ guard: 'injection-suspected', source: `files ${fileCtx.names.join(', ')}`, flags: fileCtx.flags });
     }
+    { const work = coreResultsFor('prime', text); if (work) contextBlocks.push(work); }
     if (playbook) contextBlocks.push(PB.skillBlock(playbook));
     else if (playbooksOn() && playbooks.length && !internal) {
       for (const s of PB.matchSkills(playbooks, text)) contextBlocks.push(PB.skillBlock(s));
@@ -3120,6 +3154,19 @@ function wireIpc() {
     if (!c) return;
     setDockVisible(true, true);
     toDock('dock:recipient', c.id);
+  });
+  // Drag a specialist by its orb: the window follows; where you drop it, it stays.
+  ipcMain.on('clone:drag', (e, d = {}) => {
+    const c = cloneFrom(e);
+    if (!c || !c.win || c.win.isDestroyed() || c.merging) return;
+    if (d.phase === 'start') { const [x, y] = c.win.getPosition(); c.dragFrom = { x, y }; return; }
+    if (d.phase === 'end') { c.dragFrom = null; return; }
+    if (!c.dragFrom || !Number.isFinite(+d.dx) || !Number.isFinite(+d.dy)) return;
+    const wa = screen.getDisplayMatching(c.win.getBounds()).workArea;
+    const x = Math.round(Math.min(Math.max(c.dragFrom.x + Number(d.dx), wa.x - CLONE_WIN / 3), wa.x + wa.width - CLONE_WIN * 2 / 3));
+    const y = Math.round(Math.min(Math.max(c.dragFrom.y + Number(d.dy), wa.y - CLONE_WIN / 3), wa.y + wa.height - CLONE_WIN * 2 / 3));
+    c.win.setPosition(x, y);
+    c.slot = { x: x + CLONE_WIN / 2, y: y + CLONE_WIN / 2 };
   });
   ipcMain.on('clone:interaction', (e, kind) => { const c = cloneFrom(e); if (c && kind === 'poke') mergeClone(c.id); });
   ipcMain.on('orb:interaction', (e, kind) => { if (fromOverlay(e) && ['pet', 'tickle', 'poke', 'toss'].includes(kind)) onInteraction(kind); });

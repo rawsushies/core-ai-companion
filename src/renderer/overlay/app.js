@@ -919,6 +919,7 @@
         if (bridge) bridge.holdTalk(false);
         return;
       }
+      if (d.moved && cfg.clone) { if (bridge && bridge.cloneDrag) bridge.cloneDrag({ phase: 'end' }); return; } // no click after a drag
       if (d.moved) {
         body.dragging = false;
         // A fast release tosses COre: it flies on and lands further along.
@@ -953,7 +954,7 @@
       const p = toView(e);
       const d = Math.hypot(p.x - body.pos.x, p.y - body.pos.y);
       if (d > body.r * 1.45) return;
-      down = { x: p.x, y: p.y, moved: false };
+      down = { x: p.x, y: p.y, sx: e.screenX, sy: e.screenY, moved: false };
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       // Press and hold (without moving) to talk; let go to send.
       clearTimeout(holdTimer);
@@ -975,7 +976,14 @@
       }
       if (e.buttons === 0) return release(); // button was released somewhere we didn't hear
       const p = toView(e);
-      if (cfg.clone || holding) return; // helpers can't be dragged; holding = talking
+      if (holding) return; // holding = talking
+      if (cfg.clone) {
+        // A helper's window is small and fixed in size: dragging moves the window.
+        if (!bridge || !bridge.cloneDrag) return;
+        if (!down.moved && Math.hypot(e.screenX - down.sx, e.screenY - down.sy) > 6) { down.moved = true; bridge.cloneDrag({ phase: 'start' }); }
+        if (down.moved) bridge.cloneDrag({ phase: 'move', dx: e.screenX - down.sx, dy: e.screenY - down.sy });
+        return;
+      }
       if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 6) {
         down.moved = true;
         clearTimeout(holdTimer);

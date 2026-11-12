@@ -69,12 +69,13 @@ test.before(async () => {
   const player = JSON.stringify({ status: 'Playing', posUs: 64000000, lenUs: 201000000, artUrl: require('url').pathToFileURL(cover).href, artist: 'The Smoke Choir', album: 'Signals', title: 'Midnight Signal' });
   script = path.join(userData, 'fake-script.json');
   fs.writeFileSync(script, JSON.stringify(baseRules = [
-    { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
-    { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
-    { match: 'Review the file changes', reply: 'Looks fine.\n\nThe readme change is plain text. Verdict: ship it' },
-    { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
+    // Cores see each other's work in their prompts: most specific rules first.
     { match: 'open my downloads folder', reply: 'I would open the file manager.\n\n1. Open Files\n2. Click Downloads\nTask: open the Downloads folder in the file manager' },
     { match: 'Memory stats\\] \\d+ memories', reply: 'From memory.\n\nArchivist checked: green tea, noted earlier.' },
+    { match: 'Review the file changes', reply: 'Looks fine.\n\nThe readme change is plain text. Verdict: ship it' },
+    { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
+    { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
+    { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
   ]));
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
     orb: { graphics: 'software' },
@@ -291,6 +292,40 @@ test('Meiosis: @Scout splits off and answers with its own name', async () => {
   let clone = null;
   for (let i = 0; i < 40 && !clone; i++) { clone = app.windows().find((p) => /clone/.test(p.url()) || /clone=/.test(p.url())); if (!clone) await wait(250); }
   assert.ok(clone || app.windows().length >= 4, 'a helper window exists');
+});
+
+test('cores read each other: Prime knows what Scout found; helpers spawn clear of the chat and can be dragged', async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: "Specialists' work[\\s\\S]*Scout found: the blue tent", full: true, reply: 'Scout already checked: the blue tent wins.' },
+    { match: 'pick a tent for me', reply: 'Comparing.\n\nScout found: the blue tent is lighter and cheaper.' },
+    ...baseRules,
+  ]));
+  await send('@Scout pick a tent for me');
+  await dock.waitForFunction(() => /Scout found: the blue tent/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  await send('what did scout decide?');
+  await dock.waitForFunction(() => /Scout already checked: the blue tent wins/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  // Placement: the helper's window never overlaps the chat (after its split animation).
+  await wait(1800);
+  const rects = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.isVisible()).map((w) => ({ url: w.webContents.getURL(), b: w.getBounds() })));
+  const chat = rects.find((r) => r.url.includes('/dock/')).b;
+  const helper = rects.find((r) => /clone/.test(r.url));
+  assert.ok(helper, 'Scout is on screen');
+  const h = helper.b;
+  assert.ok(h.x >= chat.x + chat.width || h.x + h.width <= chat.x || h.y >= chat.y + chat.height || h.y + h.height <= chat.y, `helper ${JSON.stringify(h)} clear of chat ${JSON.stringify(chat)}`);
+  // Drag it with the real mouse by its orb.
+  if (process.platform === 'linux' && fs.existsSync('/usr/bin/xdotool')) {
+    const x = require('child_process');
+    const cx = h.x + h.width / 2; const cy = h.y + h.height / 2;
+    x.execFileSync('xdotool', ['mousemove', String(cx), String(cy)]);
+    await wait(500); // helpers are click-through until the pointer rests over their smoke
+    x.execFileSync('xdotool', ['mousedown', '1']);
+    for (let i = 1; i <= 6; i++) { x.execFileSync('xdotool', ['mousemove', String(cx - i * 25), String(cy + i * 10)]); await wait(40); }
+    x.execFileSync('xdotool', ['mouseup', '1']);
+    await wait(300);
+    const after = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => /clone/.test(w.webContents.getURL())).getBounds());
+    assert.ok(Math.abs(after.x - (h.x - 150)) <= 12 && Math.abs(after.y - (h.y + 60)) <= 12, `moved with the mouse: ${JSON.stringify(after)} from ${JSON.stringify(h)}`);
+  }
+  fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
 test('a shared task shows a live card with each specialist', async () => {
