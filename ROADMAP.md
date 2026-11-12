@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 78%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 81%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -35,7 +35,7 @@ vault files directly.
 | 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; real-provider validation open | ~90% |
 | 2 COre 2.2 environmental intelligence | Acceptance passes on real Windows + real Cortex; app profiles, context sync, verified knowledge updates | ~85% |
 | 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e); opportunity detection, approved maintenance, opt-in auto-resume | ~80% |
-| 4 COre 3.0 unified experience | Combined acceptance scenario passes in the real app (stand-in providers); benchmarks in place | ~55% |
+| 4 COre 3.0 unified experience | Combined acceptance passes in the real app and on real Windows (scripted reasoning); benchmarks, diagnostics, responsiveness budgets | ~65% |
 
 ### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
 
@@ -107,8 +107,9 @@ vault files directly.
 | 3, 4 | Jev routing (capabilities, effort, health, latency, cost), effort passed to providers, failover | Implemented, verified with stand-ins | router/effort unit tests; e2e failover. Real providers unverified |
 | 6 | Monitoring, diagnostics, transparency | Implemented | `/diagnostics`: brain health and latency per provider, last routing decision, memory, Cortex, agent, sandbox, automations, recent problems (no secrets; e2e); command center, monitor panel, audit log |
 | 7, 11 | Updates, recovery, backups, rollback, portable knowledge | Present; backups now include notes waiting for Cortex and automation history | backup e2e, `test/backup.test.js`, updater, `/do undo`. The Cortex vault is the user's own folder (portable, versioned by Cortex) |
+| 12 | Responsive on Windows | **Measured on real Windows** | warm budgets checked every CI run (`test/situation.win.test.js`): window list 47 ms, control snapshot 67 ms, full situation with both memories 64 ms (windows-latest, b97e1fc) |
 | 9 | Real-world benchmarks | **Implemented** | `npm run benchmark`: memory hit rate and source correctness against real Cortex, restart reliability, injection guard (tuning and held-out sets), OS sandbox blocking, routing accuracy |
-| Acceptance | Complex instruction end to end | **Pass with stand-in providers** (CI ubuntu e2e, d0a81ff) | `test-e2e` "PHASE 4 ACCEPTANCE": Scout answers from Cortex, the agent plans, a command fails (exit 3), the agent recovers, writes and re-checks the brief, the file is read back, the verified outcome is filed in Cortex. Real providers and real multi-app Windows operation in one scenario: not yet |
+| Acceptance | Complex instruction end to end | **Pass with stand-in providers** (CI ubuntu e2e, d0a81ff) | `test-e2e` "PHASE 4 ACCEPTANCE": Scout answers from Cortex, the agent plans, a command fails (exit 3), the agent recovers, writes and re-checks the brief, the file is read back, the verified outcome is filed in Cortex. On real Windows too (`test/agent.win.test.js` PHASE 4, windows-latest b97e1fc): Cortex knowledge, an unauthorized read refused by the AppContainer (DENIED EPERM), recovery, a sandboxed command saves the name, the real app is filled and pressed through UIA, verified from the app and the disk, outcome recalled from Cortex. Real providers: not yet |
 
 ## Blocked or limited
 
@@ -121,4 +122,3 @@ vault files directly.
 ## Next execution target
 
 1. Real-provider validation once network access to provider APIs is available.
-2. Combined Phase 4 scenario on real Windows (UIA apps + sandboxed commands in one task).
