@@ -116,6 +116,7 @@ jobs:
       - run: node --test test/office.win.test.js
         env:
           CORE_OFFICE: '1'
+          CORE_SHOTS: ${{ runner.temp }}
       - name: Install Obsidian
         if: always()
         run: choco install obsidian -y --no-progress
@@ -124,3 +125,10 @@ jobs:
         run: node --test test/obsidian.win.test.js
         env:
           CORE_OBSIDIAN: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: office-screenshots-${{ github.sha }}
+          path: ${{ runner.temp }}/*.png
+          retention-days: 7
+          if-no-files-found: ignore

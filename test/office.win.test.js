@@ -30,7 +30,14 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
   const file = path.join(dir, 'budget.csv');
   fs.writeFileSync(file, 'Item,Cost\r\nFacade,4200000\r\n');
   // The CSV filter options skip the import dialog (comma separated, UTF-8, from line 1).
-  const app = spawn(SOFFICE, ['--calc', '--norestore', '--nologo', '--infilter=CSV:44,34,76,1', file], { stdio: 'ignore' });
+  // A clean LibreOffice profile for the test, with the "Keep current format?" prompt off
+  // (that dialog is as invisible to UI Automation as the rest of LibreOffice).
+  const profile = path.join(dir, 'lo-profile');
+  fs.mkdirSync(path.join(profile, 'user'), { recursive: true });
+  fs.writeFileSync(path.join(profile, 'user', 'registrymodifications.xcu'), '<?xml version="1.0" encoding="UTF-8"?>\n<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n<item oor:path="/org.openoffice.Office.Common/Save/Document"><prop oor:name="WarnAlienFormat" oor:op="fuse"><value>false</value></prop></item>\n<item oor:path="/org.openoffice.Setup/Office"><prop oor:name="ooSetupInstCompleted" oor:op="fuse"><value>true</value></prop></item>\n</oor:items>\n');
+  const shots = process.env.CORE_SHOTS || dir;
+  const shot = (name) => { try { execFileSync('powershell.exe', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $i=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($i); $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); $i.Save('${path.join(shots, name).replace(/'/g, "''")}')`], { stdio: 'ignore', timeout: 20000 }); } catch {} };
+  const app = spawn(SOFFICE, [`-env:UserInstallation=file:///${profile.replace(/\\/g, '/')}`, '--calc', '--norestore', '--nologo', '--infilter=CSV:44,34,76,1', file], { stdio: 'ignore' });
   const uia = new UiaClient({ timeoutMs: 60000 });
   const keys = new WindowsDriver();
   const key = (combo) => keys.perform({ type: 'key', combo });
@@ -49,14 +56,15 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
     if (b) { await keys.perform({ type: 'click', button: 'left' }, { x: b.x + Math.round(b.w / 2), y: b.y + Math.round(b.h / 2) }); await wait(800); }
     const fg = (await uia.windows()).find((x) => x.foreground);
     console.log('foreground before typing:', fg && fg.name);
-    // The profile's route: Ctrl+Shift+F5 focuses the Name Box; type a cell, Enter jumps there.
-    await key('ctrl+shift+f5'); await wait(400);
-    await keys.perform({ type: 'type', text: 'A3' }); await key('enter'); await wait(400);
+    shot('calc-1-open.png');
+    // Keyboard route: Ctrl+Home goes to A1, Down twice to A3; Tab moves right.
+    await key('ctrl+home'); await wait(300);
+    await key('down'); await key('down'); await wait(300);
     await keys.perform({ type: 'type', text: 'Glass' }); await key('tab');
-    await keys.perform({ type: 'type', text: '900000' }); await key('enter'); await wait(400);
-    // Ctrl+S on a CSV asks "Keep current format?": Enter keeps Text CSV.
-    await key('ctrl+s'); await wait(2500);
-    await key('enter');
+    await keys.perform({ type: 'type', text: '900000' }); await key('enter'); await wait(600);
+    shot('calc-2-typed.png');
+    await key('ctrl+s'); await wait(3000);
+    shot('calc-3-saved.png');
 
     await wait(1500);
     console.log('windows after save:', JSON.stringify((await uia.windows({ owned: true })).map((x) => ({ name: x.name, fg: x.foreground, dialog: x.dialog }))));
