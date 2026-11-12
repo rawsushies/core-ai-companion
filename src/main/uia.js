@@ -66,7 +66,8 @@ class UiaClient {
     });
   }
 
-  async windows() { return (await this.request('windows')).windows || []; }
+  // owned: also list owned windows (message boxes, dialogs) under their owner.
+  async windows({ owned = false } = {}) { return (await this.request('windows', owned ? { owned: true } : {})).windows || []; }
 
   // target: 'foreground' or a window id from windows().
   async snapshot({ target = 'foreground', depth = 12, max = 300 } = {}) {

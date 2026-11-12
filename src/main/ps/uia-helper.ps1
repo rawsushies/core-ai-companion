@@ -208,7 +208,7 @@ function Get-ProcessName($procId) {
   try { return (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch { return '' }
 }
 
-function Get-Windows() {
+function Get-Windows($owned) {
   $script:cache = @{}
   $wins = $AE::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
   $fg = [CoreUia.Native]::GetForegroundWindow().ToInt64()
@@ -229,10 +229,11 @@ function Get-Windows() {
         $o.state = ([string]$wp.Current.WindowVisualState).ToLower()
         $o.modal = [bool]$wp.Current.IsModal
       } catch {}
-      # Owned windows (message boxes, modal dialogs) sit under their owner in the tree.
-      try {
-        $owned = $w.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)))
-        foreach ($d in $owned) {
+      # Owned windows (message boxes, modal dialogs) sit under their owner in the
+      # tree. Only on request (situation awareness): it costs a search per window.
+      if ($owned) { try {
+        $kids = $w.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)))
+        foreach ($d in $kids) {
           $dc = $d.Current
           if (-not $dc.Name) { continue }
           $out += [ordered]@{
@@ -242,7 +243,7 @@ function Get-Windows() {
             state = 'normal'; modal = $true; dialog = $true; owner = $c.Name
           }
         }
-      } catch {}
+      } catch {} }
     } catch {}
   }
   return ,$out
@@ -261,7 +262,7 @@ function Try-Pattern($e, $pattern) {
 function Handle($req) {
   switch ($req.op) {
     'ping' { return 'pong' }
-    'windows' { return @{ windows = (Get-Windows) } }
+    'windows' { return @{ windows = (Get-Windows ([bool]$req.owned)) } }
     'snapshot' {
       $depth = if ($req.depth) { [int]$req.depth } else { 12 }
       $max = if ($req.max) { [int]$req.max } else { 300 }

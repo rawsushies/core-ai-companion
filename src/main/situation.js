@@ -41,7 +41,7 @@ class Situation {
     const at = Date.now();
     if (!this.uia) return { at, active: null, windows: [], dialogs: [], controls: [], changes: [], error: 'UI Automation is not available on this system' };
     let windows = [];
-    try { windows = await this.uia.windows(); } catch (err) { return { at, active: null, windows: [], dialogs: [], controls: [], changes: [], error: `could not read windows: ${clip(err.message || err)}` }; }
+    try { windows = await this.uia.windows({ owned: true }); } catch (err) { return { at, active: null, windows: [], dialogs: [], controls: [], changes: [], error: `could not read windows: ${clip(err.message || err)}` }; }
     windows = windows.filter((w) => w && w.name);
     const dialogs = windows.filter((w) => w.modal || w.dialog || DIALOG_CLASSES.has(w.cls));
     const active = windows.find((w) => w.foreground) || null;

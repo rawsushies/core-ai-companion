@@ -54,7 +54,7 @@ test('PHASE 2 ACCEPTANCE: real desktop + project + both memory systems, sourced,
     let ws = [];
     for (let i = 0; i < 60; i++) {
       await wait(500);
-      ws = await uia.windows();
+      ws = await uia.windows({ owned: true });
       if (ws.some((w) => w.name === 'Lakeside Budget.xlsx - Planner') && ws.some((w) => w.name === 'Planner')) break;
     }
     console.log('windows:', JSON.stringify(ws.map((w) => ({ name: w.name, cls: w.cls, fg: w.foreground, state: w.state, modal: w.modal, dialog: w.dialog }))));

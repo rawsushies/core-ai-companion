@@ -90,9 +90,10 @@ test('window source: new titles after the baseline are events', async () => {
 test('PHASE 3 ACCEPTANCE: real file event -> relevance -> history + Cortex -> authorized workflow -> verified report', { skip: cortexSkip, timeout: 90000 }, async () => {
   const inbox = tmp('core-inbox-'), dataDir = tmp('core-mem-');
   const memory = new Memory(path.join(dataDir, 'memory.json'));
-  const cortex = new CortexClient({ cfg: { command: PY, args: [path.join(CORTEX_DIR, 'run.py'), 'mcp'], vault: tmp('core-vault-'), env: { CORTEX_LOCAL_DIR: path.join(dataDir, 'cl') } }, timeoutMs: 20000 });
+  const cortex = new CortexClient({ cfg: { command: PY, args: [path.join(CORTEX_DIR, 'run.py'), 'mcp'], vault: tmp('core-vault-'), env: { CORTEX_LOCAL_DIR: path.join(dataDir, 'cl') } }, timeoutMs: 60000 }); // first start on a fresh CI machine can be slow
   clients.push(cortex);
-  const gate = new MemoryGateway({ memory, cortex, queueFile: path.join(dataDir, 'q.json'), recallTimeoutMs: 15000 });
+  const gate = new MemoryGateway({ memory, cortex, queueFile: path.join(dataDir, 'q.json'), recallTimeoutMs: 30000 });
+  await cortex.call('brain_health', {}); // warm up: start Cortex before timing anything
   assert.strictEqual((await gate.remember('Invoice totals over 10000 must be flagged for review', { kind: 'decision', project: 'Invoices' })).stored, 'cortex');
 
   // The workflow: total the invoice CSV and write a summary next to it. The
