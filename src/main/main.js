@@ -696,12 +696,24 @@ function applySetting(key, value) {
 
 let settingsWin = null;
 
+// Settings and the command center are built ahead of time, hidden, so opening them
+// is instant (a window loads in ~0.3-1 s; showing a ready one takes a frame). They
+// reload their data whenever they become visible. performance.prebuildWindows: false
+// turns this off (saves the memory of two idle renderers).
+function prebuildWindows() {
+  if ((config.data.performance || {}).prebuildWindows === false || SMOKE) return;
+  if (!settingsWin || settingsWin.isDestroyed()) buildSettings();
+  if (!centerWin || centerWin.isDestroyed()) buildCenter();
+}
+function showWhenReady(win) {
+  if (win.__ready) { win.show(); win.focus(); return; }
+  win.__showOnReady = true;
+}
 function openSettings() {
-  if (settingsWin && !settingsWin.isDestroyed()) {
-    settingsWin.show();
-    settingsWin.focus();
-    return;
-  }
+  if (!settingsWin || settingsWin.isDestroyed()) buildSettings();
+  showWhenReady(settingsWin);
+}
+function buildSettings() {
   settingsWin = new BrowserWindow({
     width: 780,
     height: 580,
@@ -721,9 +733,10 @@ function openSettings() {
       sandbox: true,
     },
   });
-  settingsWin.loadFile(path.join(RENDERER, 'settings', 'index.html'));
-  settingsWin.once('ready-to-show', () => { settingsWin.center(); settingsWin.show(); });
-  settingsWin.on('closed', () => { settingsWin = null; });
+  const w = settingsWin;
+  w.loadFile(path.join(RENDERER, 'settings', 'index.html'));
+  w.once('ready-to-show', () => { w.__ready = true; w.center(); if (w.__showOnReady) { w.show(); w.focus(); } });
+  w.on('closed', () => { if (settingsWin === w) settingsWin = null; setTimeout(prebuildWindows, 1500); });
 }
 
 // ---------------------------------------------------------------- command center
@@ -732,15 +745,19 @@ function openSettings() {
 // the emergency stop always in reach.
 let centerWin = null;
 function openCommandCenter() {
-  if (centerWin && !centerWin.isDestroyed()) { centerWin.show(); centerWin.focus(); return; }
+  if (!centerWin || centerWin.isDestroyed()) buildCenter();
+  showWhenReady(centerWin);
+}
+function buildCenter() {
   centerWin = new BrowserWindow({
     width: 960, height: 680, minWidth: 640, minHeight: 460, show: false, frame: false, transparent: true, backgroundColor: '#00000000',
     title: 'COre command center', icon: path.join(ROOT, 'assets', 'icon.png'),
     webPreferences: { preload: path.join(PRELOAD, 'command.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  centerWin.loadFile(path.join(RENDERER, 'command', 'index.html'));
-  centerWin.once('ready-to-show', () => { centerWin.center(); centerWin.show(); });
-  centerWin.on('closed', () => { centerWin = null; });
+  const w = centerWin;
+  w.loadFile(path.join(RENDERER, 'command', 'index.html'));
+  w.once('ready-to-show', () => { w.__ready = true; w.center(); if (w.__showOnReady) { w.show(); w.focus(); } });
+  w.on('closed', () => { if (centerWin === w) centerWin = null; setTimeout(prebuildWindows, 1500); });
 }
 
 function readAudit(n = 80) {
@@ -2508,9 +2525,12 @@ function schedulePrewarm() { clearTimeout(prewarmTimer); prewarmTimer = setTimeo
 
 function prewarmQuickVoice() {
   const v = config.data.voice;
-  if (!tts || v.tts === false || v.engine !== 'kokoro' || config.data.skills.quick === false) return;
+  if (!tts || v.tts === false || v.engine !== 'kokoro') return;
   tts.clearCache();
-  tts.prewarm([...Object.values(QUICK_LINES.music), QUICK_LINES.lyrics, QUICK_LINES.music_card], { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed });
+  // Spoken openers first (every voice reply can use them), then the instant answers.
+  const openers = require('./brain/persona').OPENERS;
+  const quick = config.data.skills.quick === false ? [] : [...Object.values(QUICK_LINES.music), QUICK_LINES.lyrics, QUICK_LINES.music_card];
+  tts.prewarm([...openers, ...quick], { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed });
 }
 
 function quickReply(text, { typed }) {
@@ -3383,13 +3403,15 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   const contextBlocks = [];
   let situationNow = null;
   try {
-    if (memory && config.data.memory.enabled !== false) {
-      const mem = (await gateway().context(text)).text; // active memory + long-term knowledge
-      if (mem) contextBlocks.push(mem);
-    }
+    // Memory recall and the desktop read run at the same time (both are on the path to the first word).
+    const memP = memory && config.data.memory.enabled !== false ? gateway().context(text).catch(() => null) : null; // active memory + long-term knowledge
+    const sitP = SITUATION_RE.test(text) && !internal ? situation().describe(text.replace(/^\/situation\s*/i, '')) : null;
+    if (sitP) sitP.catch(() => {});
+    const mem = memP ? ((await memP) || {}).text : '';
+    if (mem) contextBlocks.push(mem);
     if (ONGOING_RE.test(text) && !internal) { const og = ongoingWork(); if (og) contextBlocks.push(og); }
-    if (SITUATION_RE.test(text) && !internal) {
-      situationNow = await situation().describe(text.replace(/^\/situation\s*/i, ''));
+    if (sitP) {
+      situationNow = await sitP;
       contextBlocks.push(situationNow.prompt);
       toolAudit({ event: 'situation', facts: situationNow.facts.length, projects: situationNow.projects.map((p) => p.project), cortex: situationNow.memory.cortex });
     }
@@ -3776,17 +3798,34 @@ function wireIpc() {
     config.data.orb.home = { x: Math.round(home.x), y: Math.round(home.y) };
     config.save();
   });
+  // Speculative recognition: the microphone sends the audio when you first go quiet,
+  // so Whisper runs during the end-of-turn wait. If the turn then ends with only
+  // silence added, that result is used; if you keep talking it is dropped.
+  let specStt = null;
+  const speechEnd = (v) => { const end = Number(v); return end > 0 && end <= Date.now() && Date.now() - end < 60000 ? end : Date.now(); };
+  ipcMain.on('listen:pause', (e, { audio, speechEndAt } = {}) => {
+    if (!fromOverlay(e) || !audio || !stt) return;
+    const pcm = audio instanceof Float32Array ? audio : new Float32Array(audio);
+    const len = pcm.length;
+    specStt = { len, promise: stt.transcribe(pcm).then((t) => { latency.mark('transcript'); return t; }) };
+    specStt.promise.catch(() => {});
+    latency.begin('voice', speechEnd(speechEndAt));
+  });
+  ipcMain.on('listen:react', (e) => { if (fromOverlay(e)) latency.mark('react'); });
+  ipcMain.on('listen:resume', (e) => { if (!fromOverlay(e)) return; specStt = null; latency.turn = null; });
   ipcMain.on('listen:audio', async (e, { audio, withScreen, speechEndAt }) => {
     if (!fromOverlay(e)) return;
     listening = null;
-    const end = Number(speechEndAt);
-    latency.begin('voice', end > 0 && end <= Date.now() && Date.now() - end < 60000 ? end : Date.now());
+    const pcm = audio instanceof Float32Array ? audio : new Float32Array(audio);
+    // Use the speculative result when all that was added since is the silence before the turn ended.
+    const spec = specStt && pcm.length >= specStt.len && pcm.length - specStt.len <= 16000 ? specStt : null;
+    specStt = null;
+    if (!spec || !latency.turn) latency.begin('voice', speechEnd(speechEndAt));
     latency.mark('heard');
     toOverlay('state', 'thinking');
     latency.mark('react');
     try {
-      const pcm = audio instanceof Float32Array ? audio : new Float32Array(audio);
-      const text = await stt.transcribe(pcm);
+      const text = spec ? await spec.promise : await stt.transcribe(pcm);
       latency.mark('transcript');
       if (!text) {
         toOverlay('state', 'idle');
@@ -4186,7 +4225,8 @@ app.whenReady().then(async () => {
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();
-  setTimeout(prewarmQuickVoice, 45_000);
+  setTimeout(prewarmQuickVoice, 15_000); // openers + instant answers ready early
+  setTimeout(prebuildWindows, 8_000); // settings + command center open instantly
   scheduleDriveSync(120_000);
   setInterval(() => scheduleDriveSync(0), 3600_000).unref();
   setInterval(checkAutoBackup, 3600_000).unref();

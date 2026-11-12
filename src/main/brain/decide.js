@@ -205,8 +205,12 @@ class Decider {
     const base = local(text, ctx);
     const t0 = this.now();
     const out = { ...base, modelIndex: -1, source: 'local', confidence: {}, ms: 0 };
-    // Fast path: trivial chat never pays for a remote decision.
-    if (base.task === 'chat' && base.complexity === 'trivial') { this.last = { ...out, at: this.now() }; return out; }
+    // Fast path: plain conversation never waits for a remote decision (it would sit on the
+    // critical path before the brain starts). Chat and short questions with no files, image,
+    // specialist or system action are decided locally; harder or acting requests ask Jev.
+    const plain = ['chat', 'question'].includes(base.task) && ['trivial', 'simple'].includes(base.complexity)
+      && base.specialist === 'none' && base.actsOnSystem < 0.5 && !ctx.hasFiles && !ctx.hasImage;
+    if (plain) { out.fast = true; this.last = { ...out, at: this.now() }; return out; }
     const answers = await this.ask(buildState(text, ctx), questions(ctx));
     out.ms = this.now() - t0;
     if (answers) {

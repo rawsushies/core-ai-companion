@@ -156,10 +156,11 @@ async function main() {
     const { Decider } = require('../src/main/brain/decide');
     const dj = new Decider({ cfg: { enabled: true, provider: 'openrouter', timeoutMs: 30000 }, getKey: (id) => (id === 'openrouter' ? KEY : '') });
     const cases = [['please open notepad and type hello world into it', 'desktop', 'navigator'], ['can you review this function for bugs: function add(a,b){return a-b}', 'review', 'sentinel'], ['research the best heat pumps for a small office in Jakarta', 'research', 'scout'], ['why exactly is the sky blue during the day?', 'question', null], ['build a python script that renames my photos by date taken', 'build', 'forge'], ['plan a three day trip to Bali with a small budget', 'plan', null]];
-    let ok = 0, spec = 0; const ms = []; const got = [];
-    for (const [t, want, sp] of cases) { const r = await dj.decide(t, {}); ms.push(r.ms); got.push(`${want}->${r.task}/${r.specialist}`); if (r.task === want) ok++; if (!sp || r.specialist === sp) spec++; }
+    let ok = 0, spec = 0, fast = 0; const ms = []; const got = [];
+    for (const [t, want, sp] of cases) { const r = await dj.decide(t, {}); if (r.fast) fast++; else ms.push(r.ms); got.push(`${want}->${r.task}/${r.specialist}${r.fast ? ' (local)' : ''}`); if (r.task === want) ok++; if (!sp || r.specialist === sp) spec++; }
     const st = dj.status();
-    record('routing decisions from the real Jev', st.ok === cases.length && ok === cases.length, `${st.ok}/${cases.length} calls answered, task right ${ok}/${cases.length}, specialist as expected ${spec}/${cases.length}, ${Math.min(...ms)}-${Math.max(...ms)} ms; ${got.join(', ')}`);
+    const remote = cases.length - fast; // plain conversation is decided locally at once (no remote call)
+    record('routing decisions from the real Jev', st.ok === remote && ok === cases.length, `${st.ok}/${remote} remote calls answered (${fast} plain turn(s) decided locally), task right ${ok}/${cases.length}, specialist as expected ${spec}/${cases.length}, ${ms.length ? `${Math.min(...ms)}-${Math.max(...ms)} ms` : 'n/a'}; ${got.join(', ')}`);
   }
   const models = {};
   for (const id of ONLY) {

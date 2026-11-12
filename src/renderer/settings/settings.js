@@ -326,6 +326,10 @@
   document.getElementById('restart').addEventListener('click', () => api.action('restart'));
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.querySelector('.hotkey.listening')) api.close(); });
 
+  // Built ahead of time and kept hidden: reload the values each time it is shown.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && data) api.load().then((d) => { data = d; render(); }).catch(() => {});
+  });
   api.load().then((d) => {
     data = d;
     document.getElementById('version').textContent = `v${d.version}`;

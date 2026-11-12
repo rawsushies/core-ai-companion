@@ -1,6 +1,6 @@
 :root {
-  --bg: rgba(5, 7, 10, 0.96);
-  --line: rgba(232, 255, 241, 0.08);
+  --bg: transparent;          /* invisible design (../brand.css): your screen shows through */
+  --line: #1d3327;
   --text: #e8fff1;
   --muted: #86a595;
   --accent: #3dff85;
@@ -128,3 +128,14 @@ textarea:focus, textarea:focus-visible { outline: none; border-color: #1f6b42; b
 .ghost:hover { background: #0b1f15; }
 .toggle input { accent-color: #3dff85; }
 .hints { font-family: 'COre Mono', monospace; font-size: 10.5px; }
+
+/* Invisible design: no fill; header, status, notes and hints sit on the screen with a halo. */
+.shell { border-radius: 16px; }
+.bar, .status, .msg.system, .hints, .toggle, .msg.notice { text-shadow: 0 0 2px #05070a, 0 0 5px #05070a, 0 1px 8px #05070a; }
+.status { color: #e8fff1; }
+.msg.notice { background: #0b1f15; border-color: #1f6b42; text-shadow: none; }
+.menu { background: #0b1f15; border-color: #18382a; box-shadow: none; }
+.menu button:hover { background: #05070a; }
+.icon:hover { background: transparent; }
+.log::-webkit-scrollbar { width: 6px; }
+.log::-webkit-scrollbar-thumb { background: #1d3327; }

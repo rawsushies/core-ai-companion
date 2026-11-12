@@ -142,6 +142,13 @@
 
   const listener = new window.Listener({
     onLevel: (v) => { listenLevel = v; },
+    onPause: (audio, speechEndAt) => { if (bridge && bridge.listenPause) bridge.listenPause(audio, speechEndAt); },
+    onReact: () => {
+      setMode('thinking');
+      if (body) pulseAt(body.pos.x, body.pos.y, 0.35); // "mm-hm": you paused, COre is with you
+      if (bridge && bridge.listenReact) bridge.listenReact();
+    },
+    onResume: () => { setMode('listening'); if (bridge && bridge.listenResume) bridge.listenResume(); },
     onAudio: (audio, meta) => {
       if (wake) wake.pause(false);
       setMode('thinking');

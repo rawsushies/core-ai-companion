@@ -5,3 +5,4 @@ dist/
 # Built in CI by scripts/ci/bundle.sh and shipped in the installer
 vendor/*/*
 !vendor/*/.gitkeep
+test-e2e/out/

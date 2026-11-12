@@ -131,9 +131,22 @@ test('the decision layer can pick the model among eligible ones', async () => {
   const answers = { task: sure('question', ['chat']), model: sure('m1', ['m0']) };
   const d = new Decider({ getKey: keys({ openrouter: 'k' }), fetchImpl: fakeFetch(answers) });
   const { b, seen } = brainOver({ 'claude-cli': async () => 'claude', groq: async () => 'groq' }, { decider: d });
-  const r = await b.ask({ text: 'what is the capital of australia and why not sydney', decide: true });
+  const r = await b.ask({ text: 'explain in detail why the capital of australia is canberra and not sydney or melbourne, with the history of that compromise', decide: true });
   assert.strictEqual(r.reply, 'groq');
   assert.strictEqual(seen[0].id, 'groq');
+});
+
+test('plain conversation is decided locally at once: no remote call on the critical path', async () => {
+  let calls = 0;
+  const d = new Decider({ getKey: keys({ openrouter: 'k' }), fetchImpl: async (...a) => { calls++; return fakeFetch({ task: sure('question', ['chat']) })(...a); } });
+  for (const t of ['hey there', 'what did the tower client decide about the facade?', 'why is the sky blue?']) {
+    const r = await d.decide(t, {});
+    assert.ok(r.fast && r.source === 'local', t);
+    assert.ok(['minimal', 'low'].includes(r.effort), `${t}: low effort for a quick turn`);
+  }
+  assert.strictEqual(calls, 0);
+  await d.decide('please open notepad and type hello world into it', { agentEnabled: true });
+  assert.strictEqual(calls, 1, 'requests that act on the desktop still ask Jev');
 });
 
 test('continuity: a model taking over gets a recap of the turns it missed, once', async () => {
