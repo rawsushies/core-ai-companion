@@ -23,10 +23,11 @@ test('Windows job: commands run and return output inside the job', { skip: !win,
 });
 
 test('Windows job: a timeout kills the whole process tree, grandchildren included', { skip: !win, timeout: 90000 }, async () => {
-  // cmd.exe (child) starts ping.exe (grandchild); a unique ping target marks ours.
-  const mark = `127.0.0.${2 + (process.pid % 200)}`;
-  const count = () => { try { return (execFileSync('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | ForEach-Object { $_.CommandLine }"], { encoding: 'utf8' }).match(new RegExp(mark.replace(/\./g, '\\.'), 'g')) || []).length; } catch { return 0; } };
-  const w = SBX.wrap(['cmd.exe', '/c', `ping -n 120 ${mark}`], { cwd: dir, roots: [dir] });
+  // cmd.exe (child) starts a second cmd.exe (grandchild) that loops forever;
+  // a unique marker in its command line identifies it. (No network in the box.)
+  const mark = `COREMARK${process.pid}`;
+  const count = () => { try { return (execFileSync('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | ForEach-Object { $_.CommandLine }"], { encoding: 'utf8' }).match(new RegExp(`rem ${mark}`, 'g')) || []).length; } catch { return 0; } };
+  const w = SBX.wrap(['cmd.exe', '/d', '/c', `cmd.exe /d /c for /l %i in (1,0,2) do @rem ${mark}`], { cwd: dir, roots: [dir] });
   const p = T.runCommand([w.file, ...w.args], { cwd: dir, timeoutMs: 8000 });
   let seen = 0;
   for (let i = 0; i < 25 && !seen; i++) { await new Promise((res) => setTimeout(res, 250)); seen = count(); }

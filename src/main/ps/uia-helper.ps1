@@ -221,7 +221,14 @@ function Get-Windows() {
         id = (Add-Element $w); name = $c.Name; cls = $c.ClassName; pid = $c.ProcessId
         process = (Get-ProcessName $c.ProcessId); bounds = (Get-Rect $w)
         handle = $c.NativeWindowHandle; foreground = ([int64]$c.NativeWindowHandle -eq $fg)
+        state = 'normal'; modal = $false; dialog = ($c.ClassName -eq '#32770')
       }
+      try {
+        $wp = $w.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        $o = $out[$out.Count - 1]
+        $o.state = ([string]$wp.Current.WindowVisualState).ToLower()
+        $o.modal = [bool]$wp.Current.IsModal
+      } catch {}
     } catch {}
   }
   return ,$out
