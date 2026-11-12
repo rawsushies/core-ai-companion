@@ -34,7 +34,8 @@ test('Windows job: a timeout kills the whole process tree, grandchildren include
 });
 
 test('Windows job: process count and memory are capped', { skip: !win, timeout: 90000 }, async () => {
-  const many = await run("const cp=require('child_process');let ok=0,fail=0;for(let i=0;i<8;i++){try{const r=cp.spawnSync(process.execPath,['-e','0']);if(r.error||r.status!==0)fail++;else ok++;}catch{fail++}}console.log('ok',ok,'fail',fail)", { maxProcs: 3 });
+  // Children run at the same time (sequential ones never exceed the cap).
+  const many = await run("const cp=require('child_process');let ok=0,fail=0;const kids=[];for(let i=0;i<8;i++){try{const c=cp.spawn(process.execPath,['-e','setTimeout(()=>{},3000)'],{stdio:'ignore'});if(c.pid)ok++;else fail++;c.on('error',()=>{});kids.push(c)}catch{fail++}}console.log('ok',ok,'fail',fail);kids.forEach(k=>{try{k.kill()}catch{}})", { maxProcs: 3 });
   assert.match(many.out, /fail [1-9]/, `some children refused: ${many.out}`);
   const big = await run("try{const a=[];for(let i=0;i<64;i++)a.push(Buffer.alloc(32*1024*1024,1));console.log('LEAK')}catch(e){console.log('blocked',e.message)}", { memoryMB: 256 });
   assert.doesNotMatch(big.out, /LEAK/, `memory cap enforced (exit ${big.code}): ${big.out.slice(0, 200)}`);
