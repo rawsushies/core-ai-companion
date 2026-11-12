@@ -27,6 +27,13 @@ const DEFAULTS = {
     // Smart routing: conversation stays on the fast model; the desktop agent,
     // specialist cores and playbook writing use the strong model ('off' = all fast).
     routing: 'auto',
+    // Jev, the fast decision layer (TypeSafe's decision model). It classifies
+    // each request, estimates complexity and effort, suggests a specialist and
+    // picks among eligible models. Uses your OpenRouter key, or a TypeSafe key
+    // (Settings, Brain). Without a key a local classifier does the same job.
+    // Advice only: it never approves actions.
+    jev: { enabled: true, provider: 'auto', model: '', timeoutMs: 2500, minConfidence: 0.35 },
+    jevKey: '', // TypeSafe key for Jev: stored as an encrypted secret instead
     gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', prefer: 'flash', vision: true },
     groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', prefer: 'versatile|70b|llama', vision: false },
     openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', prefer: ':free$', vision: false },

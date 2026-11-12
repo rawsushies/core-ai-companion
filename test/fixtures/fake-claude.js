@@ -35,12 +35,17 @@ function reply(text) {
   // FAKE_CLAUDE_SCRIPT: a JSON file of [{ match: regex, reply }]; the first rule
   // whose regex matches the prompt wins, otherwise FAKE_CLAUDE_REPLY.
   let scripted = null;
+  let failWith = null; // { match, error }: fail like the real CLI (e.g. a usage limit)
   if (process.env.FAKE_CLAUDE_SCRIPT) {
     try {
       for (const rule of JSON.parse(fs.readFileSync(process.env.FAKE_CLAUDE_SCRIPT, 'utf8'))) {
-        if (new RegExp(rule.match, 'i').test(text)) { scripted = rule.reply; break; }
+        if (new RegExp(rule.match, 'i').test(text)) { scripted = rule.reply; failWith = rule.error || null; break; }
       }
     } catch {}
+  }
+  if (failWith) {
+    process.stderr.write(`${failWith}\n`);
+    process.exit(1);
   }
   const base = scripted || process.env.FAKE_CLAUDE_REPLY;
   const r = base ? base.replace(/\{core\}/g, core).replace(/\\n/g, '\n') : `You said: ${text.trim()}. [[explain]] Done.`;

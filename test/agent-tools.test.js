@@ -152,3 +152,26 @@ test('checkpoints are saved each step and a task resumes where it left off', asy
   assert.match(prompts[0], /Step 2 of/);
   assert.match(prompts[0], /Press ctrl\+s/);
 });
+
+test('failure advisor: after two failures the agent changes approach, asks you, or stops; lessons reach the prompt', async () => {
+  const advice = [];
+  const { r, prompts } = runner(['[[act {"type":"click","x":5,"y":5}]]'], {
+    driver: { perform: async () => { throw new Error('element not found'); } },
+    autoApprove: true,
+    experience: '- Lesson from desktop task "save": Click at 5, 5 did not work; what worked: Press ctrl+s',
+    advise: async (info) => { advice.push(info); return advice.length === 1 ? 'retry_differently' : 'ask_human'; },
+  });
+  const out = await r.run('save the file');
+  assert.match(prompts[0], /similar tasks before[\s\S]*Press ctrl\+s/);
+  assert.strictEqual(advice[0].attempts, 2);
+  assert.match(prompts[2], /Do NOT repeat the failed step/);
+  assert.strictEqual(out.status, 'ask', 'stuck: hands back to the user');
+  assert.match(out.question, /keeps failing/);
+});
+
+test('failure advisor abort stops the task safely', async () => {
+  const { r } = runner(['[[act {"type":"click","x":5,"y":5}]]'], { driver: { perform: async () => { throw new Error('x'); } }, autoApprove: true, advise: async () => 'abort' });
+  const out = await r.run('x');
+  assert.strictEqual(out.status, 'failed');
+  assert.match(out.reason, /stopped safely/);
+});

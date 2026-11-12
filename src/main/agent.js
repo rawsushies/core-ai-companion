@@ -229,7 +229,7 @@ function driverFor(platform = process.platform) {
 
 // ------------------------------------------------------------------ the loop
 
-function agentPrompt(goal, history, shot, step, maxSteps, { tools = false, note = '' } = {}) {
+function agentPrompt(goal, history, shot, step, maxSteps, { tools = false, note = '', experience = '' } = {}) {
   const past = history.length
     ? history.slice(-8).map((h, i) => `${history.length - Math.min(8, history.length) + i + 1}. ${h.label}${h.ok ? '' : ` (failed: ${h.error})`}`).join('\n')
     : 'none yet';
@@ -240,6 +240,7 @@ function agentPrompt(goal, history, shot, step, maxSteps, { tools = false, note 
     `[agent] You are operating this computer to finish one task for the user. Step ${step} of at most ${maxSteps}.`,
     `Task: ${goal}`,
     `The attached screenshot is ${shot.width} x ${shot.height} pixels; give coordinates in those pixels. Open windows: ${(shot.windows || []).slice(0, 12).join('; ') || 'unknown'}.`,
+    ...(experience ? [`What happened on similar tasks before (avoid repeating mistakes):\n${experience}`] : []),
     `Steps so far:\n${past}`,
     ...(result ? [result] : []),
     ...(fails ? [`The last ${fails > 1 ? `${fails} steps` : 'step'} failed. Do not repeat the same thing: look at the screen again and try another way (a keyboard shortcut, a different element, or a tool action).`] : []),
@@ -277,6 +278,7 @@ class AgentRunner {
     const history = resume && Array.isArray(resume.history) ? resume.history.slice(-30) : [];
     let allowAll = !!this.d.autoApprove || !!(resume && resume.allowAll);
     let verifying = false;
+    let advice = '';
     let changed = history.some((h) => h.changed);
     let first = resume && resume.step ? resume.step + 1 : 1;
     const report = (o) => { try { this.d.onStep(o); } catch {} };
@@ -287,8 +289,9 @@ class AgentRunner {
         if (signal.aborted) return stopped();
         const shot = await this.d.screenshot();
         if (signal.aborted) return stopped();
-        const note = verifying ? 'You said the task is done. Look at this fresh screenshot (and the last results) and confirm: reply done again if it really is finished, otherwise keep going.' : '';
-        const reply = await this.d.think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note }), shot, signal });
+        const note = verifying ? 'You said the task is done. Look at this fresh screenshot (and the last results) and confirm: reply done again if it really is finished, otherwise keep going.' : advice;
+        advice = '';
+        const reply = await this.d.think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '' }), shot, signal });
         if (signal.aborted) return stopped();
         const ex = extractAction(reply);
         const v = ex.error ? ex : validateAction(ex.raw, shot);
@@ -344,6 +347,18 @@ class AgentRunner {
         let fails = 0;
         for (let i = history.length - 1; i >= 0 && !history[i].ok; i--) fails++;
         if (fails >= 4) return { status: 'failed', reason: `${fails} steps in a row failed (last: ${error})`, steps: history };
+        // Failure advisor (decision layer): after two failures in a row, decide
+        // whether to retry, change approach, ask the user or stop. It can only
+        // make the agent more careful; it never approves anything.
+        if (fails >= 2 && this.d.advise) {
+          let a = 'retry_differently';
+          try { a = await this.d.advise({ goal, step: label, error, attempts: fails }); } catch {}
+          if (signal.aborted) return stopped();
+          report({ step, advice: a });
+          if (a === 'ask_human') { save(step, 'ask'); return { status: 'ask', question: `I'm stuck: "${label}" keeps failing (${error}). How should I continue?`, steps: history }; }
+          if (a === 'abort') { save(step, 'failed'); return { status: 'failed', reason: `stopped safely after repeated failures (${error})`, steps: history }; }
+          advice = a === 'retry_same' ? 'The last failure looked temporary: you may try that step once more.' : 'Do NOT repeat the failed step. Use a different approach, element, shortcut or tool.';
+        }
         if (!TOOL.has(a.type)) await new Promise((r) => setTimeout(r, this.d.settleMs));
       }
       save(this.d.maxSteps, 'limit');

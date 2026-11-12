@@ -67,6 +67,8 @@ const SECTIONS = [
     fields: [
       { key: 'brain.claude.model', label: 'Claude model', type: 'select', options: [['haiku', 'Haiku (fastest)'], ['sonnet', 'Sonnet (smarter)'], ['opus', 'Opus (smartest, slowest)']] },
       { key: 'brain.mode', label: 'Choosing a brain', type: 'select', options: [['auto', 'Automatic: the best healthy brain for each request (recommended)'], ['manual', 'Manual: always try them in my order']] },
+      { key: 'brain.jev.enabled', label: 'Jev decision layer: classify each request and pick the model in milliseconds (uses an OpenRouter or TypeSafe key; a local classifier works without one)', type: 'toggle' },
+      { key: 'brain.jevKey', label: 'TypeSafe key for Jev (optional; your OpenRouter key also works)', type: 'text', maxLength: 300, optional: true, secret: 'jev' },
       { key: 'brain.routing', label: 'Smart routing', type: 'select', options: [['auto', 'Chat on the model above; agent and specialists on the stronger one'], ['off', 'Use the model above for everything']] },
       { key: 'brain.claude.strongModel', label: 'Stronger Claude model (for routing)', type: 'select', options: [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku (same as fast)']] },
       { key: 'brain.provider', label: 'Preferred brain', type: 'select', options: [['claude-cli', 'Claude (Claude Code login)'], ['gemini', 'Google Gemini'], ['groq', 'Groq'], ['openrouter', 'OpenRouter'], ['ollama', 'Local model (Ollama)']] },

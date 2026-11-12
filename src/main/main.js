@@ -255,10 +255,13 @@ function setSecret(id, value) {
 // that is rate limited or down is skipped by all of them at once.
 const { Router: BrainRouter } = require('./brain/router');
 const brainRouter = new BrainRouter();
+const { Decider } = require('./brain/decide');
+const decider = new Decider({ cfg: () => (config && config.data.brain && config.data.brain.jev) || {}, getKey: (id) => getSecret(id) });
 
 function makeBrain() {
   return new Brain({
     router: brainRouter,
+    decider,
     profile: 'chat',
     config: config.data,
     workDir,
@@ -745,7 +748,7 @@ function centerState() {
   return {
     version: app.getVersion(),
     brain: brainStatus(),
-    route: brain ? brain.routeStatus() : null,
+    route: brain ? { ...brain.routeStatus(), jev: decider.status() } : null,
     agent: { enabled: !!(config.data.agent || {}).enabled, running: !!(agentRunner && agentRunner.running), task: t ? { goal: String(t.goal || ''), step: t.step, status: t.status, at: t.at, changed } : null },
     cores: cores.map((c) => { const h = clones.get(c.id); return { id: c.id, name: c.name, role: c.role, color: c.color, active: c.id === 'prime' || !!h, busy: h ? h.busy : 0 }; }),
     tasks: (state.get('tasks') || []).slice(-8).reverse().map((k) => ({ id: k.id, text: String(k.text || '').slice(0, 200), status: k.status, at: k.createdAt, steps: (k.steps || []).map((x) => ({ core: (coreById(x.core) || { name: x.core }).name, status: x.status })) })),
@@ -832,6 +835,8 @@ function applyLive(key, value) {
     try {
       if (brain) for (const p of brain.chain) if (p.dispose) p.dispose();
       if (brain) brain.reload(config.data); else brain = makeBrain();
+      // New brain settings: give every brain a fresh chance.
+      for (const id of Object.keys(brainRouter.h)) brainRouter.clear(id);
       // The agent and idle specialists pick up the new model on their next turn.
       if (agentBrainInst && !(agentRunner && agentRunner.running)) { for (const p of agentBrainInst.chain) if (p.dispose) p.dispose(); agentBrainInst = null; }
       for (const c of clones.values()) if (!c.busy) disposeHelperBrain(c);
@@ -1943,6 +1948,15 @@ function stopAgent(reason) {
   for (const [id, a] of agentApprovals) { a.resolve('no'); agentApprovals.delete(id); }
 }
 
+// Past desktop tasks and lessons that look like this goal (from memory).
+async function agentExperience(goal) {
+  try {
+    if (!memory || config.data.memory.enabled === false) return '';
+    const hits = (await memory.searchAsync(goal, 4, { kinds: ['episode'] })) || [];
+    return hits.map((h) => `- ${(h.item || h).text}`).filter((l) => /desktop task|lesson/i.test(l)).slice(0, 4).join('\n');
+  } catch { return ''; }
+}
+
 async function startAgent(goal, { remote = false } = {}) {
   const ag = config.data.agent || {};
   if (/^undo$/i.test(goal.trim())) { addTranscript('user', '/do undo'); undoAgentTask(); return; }
@@ -2004,6 +2018,7 @@ async function startAgent(goal, { remote = false } = {}) {
       if (r.error) throw new Error(r.error);
     },
     onStep: (o) => {
+      if (o.advice) { addTranscript('system', `Agent: ${{ retry_same: 'trying that once more', retry_differently: 'changing approach', ask_human: 'asking you', abort: 'stopping safely' }[o.advice] || o.advice} after repeated failures.`, { kind: 'progress' }); return; }
       if (o.error) addTranscript('system', `Agent step ${o.step}: ${o.error}`, { kind: 'error' });
       else if (o.running) addTranscript('system', `Agent step ${o.step}: ${o.label}${o.action.why ? ` (${o.action.why})` : ''}`, { kind: 'progress' });
       else if (o.ok === false) addTranscript('system', `Agent step ${o.step} failed: ${o.error}`, { kind: 'error' });
@@ -2016,6 +2031,8 @@ async function startAgent(goal, { remote = false } = {}) {
       return g.text;
     },
     checkpoint: (st) => writeAgentTask({ ...st, taskId }),
+    advise: (info) => decider.adviseFailure(info),
+    experience: await agentExperience(goal),
   });
   let r;
   try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
@@ -2031,6 +2048,12 @@ async function startAgent(goal, { remote = false } = {}) {
   if (r.status !== 'done' && r.status !== 'ask') addTranscript('system', 'Type /do resume to continue this task later.');
   toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
   noteEpisode(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`);
+  // Learn from mistakes: what failed on the way, and what finally worked.
+  const failed = (r.steps || []).filter((h) => !h.ok && !/^invalid/.test(h.label)).map((h) => `${h.label} (${String(h.error || '').slice(0, 60)})`);
+  if (failed.length) {
+    const worked = (r.steps || []).filter((h) => h.ok && h.changed).slice(-2).map((h) => h.label).join(', ');
+    noteEpisode(`Lesson from desktop task "${goal.slice(0, 80)}": ${failed.slice(0, 3).join('; ')} did not work${r.status === 'done' && worked ? `; what worked: ${worked}` : ''}.`);
+  }
   if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
   return r;
 }
@@ -2895,10 +2918,13 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   toDock('dock:busy', true);
   toDock('dock:message', { role: 'core-start' });
   try {
-    const { reply, truncated, error: cutReason } = await brain.ask({
+    const { reply, truncated, error: cutReason, decision } = await brain.ask({
       text,
       shot,
       typed,
+      decide: !internal && !remote,
+      hasFiles: !!fileCtx,
+      agentEnabled: !!(config.data.agent || {}).enabled,
       context: contextBlocks.join('\n\n'),
       signal: ac.signal,
       onText: (t) => {
@@ -2925,6 +2951,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       },
     });
     if (reply) addTranscript('core', reply);
+    if (decision) toolAudit({ event: 'route', task: decision.task, complexity: decision.complexity, effort: decision.effort, specialist: decision.specialist, source: decision.source, ms: decision.ms, provider: (brain.lastRoute || {}).provider, model: (brain.lastRoute || {}).model });
     if (reply) offerProposals(reply, 'prime');
     if (truncated) {
       // The brain dropped mid-answer: keep what was said, say so, offer to continue.

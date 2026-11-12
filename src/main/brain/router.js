@@ -13,13 +13,26 @@
 //     and only skips providers that are cooling down.
 
 // Static strengths, 1 (weak) .. 3 (strong). Vision may be overridden by config.
+// ctx: usable context window in tokens; cost: 0 free .. 3 expensive (per request,
+// relative; a Claude subscription counts as cheap but has usage limits).
 const CAPS = {
-  'claude-cli': { depth: 3, speed: 2, vision: true, local: false },
-  gemini: { depth: 2.5, speed: 3, vision: true, local: false },
-  groq: { depth: 2, speed: 3, vision: false, local: false },
-  openrouter: { depth: 1.5, speed: 1.5, vision: false, local: false },
-  'openai-compat': { depth: 2, speed: 2, vision: false, local: false },
-  ollama: { depth: 1, speed: 2, vision: false, local: true },
+  'claude-cli': { depth: 3, speed: 2, vision: true, local: false, ctx: 200000, cost: 1 },
+  gemini: { depth: 2.5, speed: 3, vision: true, local: false, ctx: 1000000, cost: 0 },
+  groq: { depth: 2, speed: 3, vision: false, local: false, ctx: 128000, cost: 0 },
+  openrouter: { depth: 1.5, speed: 1.5, vision: false, local: false, ctx: 32000, cost: 0 },
+  'openai-compat': { depth: 2, speed: 2, vision: false, local: false, ctx: 64000, cost: 1 },
+  ollama: { depth: 1, speed: 2, vision: false, local: true, ctx: 8000, cost: 0 },
+};
+
+// Natural-language model descriptions (Jev reads these to pick a model).
+// Override per provider with brain.descriptions[id] in config.json.
+const DESCRIPTIONS = {
+  'claude-cli': 'Claude through Claude Code: strongest reasoning, coding and planning, sees images; slower to start and has usage limits',
+  gemini: 'Google Gemini: fast, sees images, very long context; free tier has rate limits',
+  groq: 'Groq: very fast text-only answers, good general knowledge; free tier rate limits',
+  openrouter: 'OpenRouter free models: text only, slower and less reliable, a last resort',
+  'openai-compat': 'A custom OpenAI-compatible endpoint configured by the user',
+  ollama: 'A small local model: private and offline, weak at hard reasoning, short context',
 };
 
 function capsOf(p) {
@@ -31,7 +44,37 @@ function capsOf(p) {
     if (/opus/.test(m)) { base.depth = 3.2; base.speed = 1.5; }
   } else if (p.id === 'ollama') base.vision = !!cfg.visionModel;
   else if (typeof cfg.vision === 'boolean') base.vision = cfg.vision;
+  if (Number(cfg.contextTokens) > 0) base.ctx = Number(cfg.contextTokens);
+  if (Number.isFinite(Number(cfg.cost)) && cfg.cost !== '' && cfg.cost != null) base.cost = Number(cfg.cost);
   return base;
+}
+
+function describe(p, overrides = {}) {
+  const c = capsOf(p);
+  const model = p.cfg && p.cfg.model ? ` (${p.cfg.model})` : '';
+  return `${overrides[p.id] || DESCRIPTIONS[p.id] || p.name || p.id}${model}. ${c.vision ? 'Can see images.' : 'Text only.'} Context about ${Math.round(c.ctx / 1000)}k tokens.`;
+}
+
+// Hard limits first (no opinion involved): a request with an image needs a
+// brain that can see; a long request needs a big enough context window.
+// Returns the eligible providers, or all of them when none qualify (so the
+// best effort still runs and fails loudly rather than silently doing nothing).
+function eligible(providers, need = {}) {
+  const ok = providers.filter((p) => {
+    const c = capsOf(p);
+    if (need.vision && !c.vision) return false;
+    if (need.tokens && c.ctx < need.tokens * 1.2) return false;
+    return true;
+  });
+  return ok.length ? ok : providers;
+}
+
+// Which model a provider should use for this need: the strong model for deep
+// work when the provider has one configured (brain.<id>.strongModel).
+function modelFor(p, need = {}, routing = 'auto') {
+  const cfg = p.cfg || {};
+  if (routing === 'off' || need.depth !== 'strong') return cfg.model || '';
+  return cfg.strongModel || cfg.model || '';
 }
 
 // -> 'auth' | 'rate' | 'overload' | 'timeout' | 'network' | 'model' | 'other'
@@ -121,6 +164,8 @@ class Router {
       else score += c.speed * 1.5 + c.depth * 0.8;
       if (s.ok + s.fail >= 3) score += (s.ok / (s.ok + s.fail) - 0.5) * 2;
       if (s.firstTokenMs != null && need.depth !== 'strong') score -= Math.min(2, s.firstTokenMs / 8000);
+      score -= c.cost * (need.depth === 'strong' ? 0.15 : 0.4); // cheaper wins ties, more so for easy requests
+      if (need.prefer === p.id) score += 5; // the decision layer picked this model
       if (p.id === preferred) score += 1.5;
       score -= i * 0.05; // stable: configured order breaks exact ties
       return { p, score };
@@ -149,4 +194,4 @@ class Router {
   }
 }
 
-module.exports = { Router, classify, capsOf, CAPS, COOLDOWN };
+module.exports = { Router, classify, capsOf, describe, eligible, modelFor, CAPS, COOLDOWN, DESCRIPTIONS };
