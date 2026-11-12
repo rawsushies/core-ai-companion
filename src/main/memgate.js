@@ -89,10 +89,17 @@ class MemoryGateway {
     const found = /^No notes match/i.test(hits.trim()) ? '' : norm(hits.replace(/[«»]/g, ''));
     const probe = norm(text).slice(0, 60);
     if (probe && found.includes(probe)) return { stored: 'duplicate', detail: 'already in Cortex' };
+    // Search snippets show only part of a note: check the project note itself too.
+    const notePathFor = (p) => `Projects/${String(p).replace(/[\\/:*?"<>|#[\]]/g, '').slice(0, 60) || 'General'}.md`;
+    if (project) {
+      let body = '';
+      try { body = String(await this.cortex.call('brain_read', { path: notePathFor(project) })); } catch {}
+      if (probe && !/^(No note|Not found|Error)/i.test(body.trim()) && norm(body).includes(probe)) return { stored: 'duplicate', detail: 'already in Cortex' };
+    }
     const date = new Date().toISOString().slice(0, 10);
     const line = `- ${date}: ${text} (via COre)`;
     if (project) {
-      const notePath = `Projects/${String(project).replace(/[\\/:*?"<>|#[\]]/g, '').slice(0, 60) || 'General'}.md`;
+      const notePath = notePathFor(project);
       await this.cortex.call('brain_edit', { path: notePath, section: SECTION[kind] || 'Notes', content: line, mode: 'append' });
       return { stored: 'cortex', detail: `${notePath} › ${SECTION[kind] || 'Notes'}` };
     }
@@ -121,20 +128,23 @@ class MemoryGateway {
     return { stored: 'queued', detail: item.error ? `Cortex unavailable (${item.error}); will retry` : 'waiting for Cortex' };
   }
 
-  async _flushQueue() {
-    if (!this.cortexOn() || this.flushing) return 0;
+  // Deliver queued long-term writes. A caller that arrives while a delivery is
+  // running waits for that same delivery instead of getting 0 back early.
+  _flushQueue() {
+    if (this.flushing) return this.flushing;
+    if (!this.cortexOn()) return Promise.resolve(0);
     const q = this._readQueue();
-    if (!q.length) return 0;
-    this.flushing = true;
-    let done = 0;
-    const left = [];
-    try {
+    if (!q.length) return Promise.resolve(0);
+    this.flushing = (async () => {
+      const delivered = new Set();
       for (const item of q) {
-        try { await this._cortexWrite(item); done++; } catch { left.push(item); }
+        try { await this._cortexWrite(item); delivered.add(norm(item.text)); } catch {}
       }
-      this._writeQueue(left);
-    } finally { this.flushing = false; }
-    return done;
+      // Re-read: writes queued during the delivery must not be lost.
+      this._writeQueue(this._readQueue().filter((x) => !delivered.has(norm(x.text))));
+      return delivered.size;
+    })().finally(() => { this.flushing = null; });
+    return this.flushing;
   }
 
   pending() { return this._readQueue().length; }
