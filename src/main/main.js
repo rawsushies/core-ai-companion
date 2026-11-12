@@ -130,6 +130,7 @@ let floor = null;
 let lastReaction = 0;
 let notes = null;
 let plugins = [];
+let lastChatAt = 0; // last ordinary message you sent (not a command)
 const PB = require('./playbooks');
 let playbooks = [];
 let playbookScheduler = null;
@@ -1842,6 +1843,13 @@ async function runWorkflow(s) {
   toolAudit({ event: 'workflow', name: s.name });
   addTranscript('system', `Workflow: ${s.name} (${s.schedule}).`, { kind: 'progress' });
   noteEpisode(`Ran workflow ${s.name}`);
+  if (s.agent) {
+    // A scheduled desktop workflow runs unattended only if you allowed that; approvals still apply.
+    if ((config.data.agent || {}).background === true && (config.data.agent || {}).enabled) { startAgent(`${s.name}: ${s.description}`.slice(0, 500), { instructions: s.body }); return; }
+    addTranscript('system', `Workflow ${s.name} wants to operate the desktop. Start it with /skill ${s.name} (or allow background desktop tasks in Settings, Agent).`, { kind: 'progress' });
+    toOverlay('attention', { level: 'info', title: `Workflow ${s.name} is ready` });
+    return;
+  }
   if (s.core !== 'prime' && coreById(s.core)) await askCore(s.core, PB.skillBlock(s, 'scheduled run'));
   else { await waitPrimeIdle(); handleUserText(`[workflow ${s.name}] Run the "${s.name}" playbook now.`, { internal: true, typed: true, playbook: s }); }
 }
@@ -1853,6 +1861,17 @@ function listPlaybooks() {
 }
 // "/skill save NAME": COre writes a playbook from the conversation so far.
 async function savePlaybookFromChat(name) {
+  // Right after a finished desktop task: save exactly the steps that worked.
+  if (monitor.status === 'done' && monitor.endedAt && Date.now() - monitor.endedAt < 30 * 60e3 && lastChatAt < monitor.endedAt && monitor.steps.some((x) => x.status === 'ok')) {
+    try {
+      const steps = monitor.plan && monitor.plan.steps.length ? monitor.plan.steps : monitor.steps.filter((x) => x.status === 'ok').map((x) => x.label);
+      const s = PB.saveAgentSkill(playbookDir(), { name, goal: monitor.goal, steps, doneWhen: monitor.plan ? monitor.plan.doneWhen : '' });
+      reloadPlaybooks();
+      addTranscript('system', `Saved desktop workflow "${s.name}" (${steps.length} steps). Run it with /skill ${s.name}. File: ${s.file}`);
+      toolAudit({ event: 'playbook-saved', name: s.name, agent: true });
+    } catch (err) { addTranscript('system', `Could not save the workflow: ${err.message}`, { kind: 'error' }); }
+    return;
+  }
   const recent = transcript.filter((e) => e.role === 'user' || e.role === 'core').slice(-24).map((e) => `${e.role === 'user' ? 'User' : 'COre'}: ${String(e.text).slice(0, 1200)}`).join('\n');
   if (!recent) { addTranscript('system', 'Nothing to learn from yet: talk it through first, then save it.'); return; }
   addTranscript('system', `Writing playbook "${PB.slug(name)}" from this conversation…`, { kind: 'progress' });
@@ -1875,6 +1894,7 @@ function playbookCommand(text, { files = [] } = {}) {
   const s = playbooks.find((p) => p.name === PB.slug(run[1]));
   if (!s) { addTranscript('user', text); addTranscript('system', `No playbook called ${run[1]}. ${listPlaybooks()}`, { kind: 'error' }); return true; }
   const input = run[2].trim();
+  if (s.agent) { startAgent(`${s.name}: ${input || s.description}`.slice(0, 500), { instructions: s.body }); return true; }
   if (s.core !== 'prime' && coreById(s.core)) {
     addTranscript('user', text, { to: [s.core] });
     askCore(s.core, PB.skillBlock(s, input || 'see the files and context you have'));
@@ -2039,11 +2059,11 @@ async function agentExperience(goal) {
   try {
     if (!memory || config.data.memory.enabled === false) return '';
     const hits = (await memory.searchAsync(goal, 4, { kinds: ['episode'] })) || [];
-    return hits.map((h) => `- ${(h.item || h).text}`).filter((l) => /desktop task|lesson/i.test(l)).slice(0, 4).join('\n');
+    return hits.map((h) => `- ${(h.item || h).text}`).filter((l) => /desktop task|lesson|workflow that worked/i.test(l)).slice(0, 4).join('\n');
   } catch { return ''; }
 }
 
-async function startAgent(goal, { remote = false } = {}) {
+async function startAgent(goal, { remote = false, instructions = '' } = {}) {
   const ag = config.data.agent || {};
   if (/^undo$/i.test(goal.trim())) { addTranscript('user', '/do undo'); undoAgentTask(); return; }
   let resume = null;
@@ -2137,13 +2157,14 @@ async function startAgent(goal, { remote = false } = {}) {
     checkpoint: (st) => writeAgentTask({ ...st, taskId }),
     advise: (info) => decider.adviseFailure(info),
     uia: agentUia(),
-    experience: await agentExperience(goal),
+    experience: [instructions ? `Saved workflow to follow:\n${String(instructions).slice(0, 3000)}` : '', await agentExperience(goal)].filter(Boolean).join('\n'),
   });
   let r;
   try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
   try { globalShortcut.unregister('Escape'); } catch {}
   { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }
   monitor.status = r.status;
+  monitor.endedAt = Date.now();
   monitor.summary = r.summary || r.question || r.reason || '';
   sendMonitor();
   toDock('dock:agent-approve', null);
@@ -2156,6 +2177,12 @@ async function startAgent(goal, { remote = false } = {}) {
   if (r.status !== 'done' && r.status !== 'ask') addTranscript('system', 'Type /do resume to continue this task later.');
   toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
   noteEpisode(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`);
+  // Learn what worked: the successful steps of a finished task, for next time.
+  if (r.status === 'done') {
+    const okSteps = (r.steps || []).filter((h) => h.ok && !/^said done/.test(h.label)).map((h) => h.label);
+    if (okSteps.length) noteEpisode(`Workflow that worked for desktop task "${goal.slice(0, 80)}": ${okSteps.slice(0, 10).join(' → ')}`);
+    if (okSteps.length >= 3) addTranscript('system', 'To reuse this task later, save it: /skill save a-short-name');
+  }
   // Learn from mistakes: what failed on the way, and what finally worked.
   const failed = (r.steps || []).filter((h) => !h.ok && !/^invalid/.test(h.label)).map((h) => `${h.label} (${String(h.error || '').slice(0, 60)})`);
   if (failed.length) {
@@ -2992,6 +3019,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   if (typed || internal) followUpPending = false;
   const fileCtx = files.length ? fileShelf().contextFor(files) : null;
   if (!internal) {
+    lastChatAt = Date.now();
     addTranscript('user', text, fileCtx ? { files: fileCtx.names } : {});
     if (presence) presence.noteInteraction();
     stopCloneSpeech(); // the user talking to COre interrupts a specialist; COre's own turns don't

@@ -52,7 +52,8 @@ function parseSkill(text, file = '') {
   const schedule = fm.schedule && parseSchedule(fm.schedule) ? fm.schedule.trim() : '';
   const enabled = !/^(false|no|off|0)$/i.test(String(fm.enabled ?? 'true'));
   const trimmed = body.trim();
-  return { name, description, triggers, core, schedule, enabled, body: trimmed.length > MAX_BODY ? `${trimmed.slice(0, MAX_BODY)}\n…(cut)` : trimmed, file };
+  const agent = /^(true|yes|on|1)$/i.test(String(fm.agent || '')); // runs on the desktop agent
+  return { name, description, triggers, core, schedule, enabled, agent, body: trimmed.length > MAX_BODY ? `${trimmed.slice(0, MAX_BODY)}\n…(cut)` : trimmed, file };
 }
 
 function loadSkills(dir) {
@@ -189,13 +190,26 @@ class Scheduler {
 
 // ------------------------------------------------------------------ writing
 
-function skillFile({ name, description, triggers = [], core = '', schedule = '', body }) {
+function skillFile({ name, description, triggers = [], core = '', schedule = '', agent = false, body }) {
   const lines = ['---', `name: ${slug(name)}`, `description: ${String(description || '').replace(/\n/g, ' ').slice(0, 200)}`];
   if (triggers.length) lines.push(`triggers: ${triggers.join(', ')}`);
   if (core && core !== 'prime') lines.push(`core: ${core}`);
   if (schedule) lines.push(`schedule: ${schedule}`);
+  if (agent) lines.push('agent: true');
   lines.push('enabled: true', '---', '', String(body || '').trim(), '');
   return lines.join('\n');
+}
+
+// Save a desktop workflow that just worked as a playbook (no model involved).
+function saveAgentSkill(dir, { name, goal, steps = [], doneWhen = '' }) {
+  const n = slug(name);
+  if (!NAME_RE.test(n)) throw new Error('Use a short name: letters, numbers and dashes.');
+  const folder = path.join(dir, n);
+  if (fs.existsSync(folder) || fs.existsSync(path.join(dir, `${n}.md`))) throw new Error(`A playbook called ${n} already exists.`);
+  const body = [`Desktop workflow learned from: "${String(goal).slice(0, 200)}"`, '', ...steps.slice(0, 15).map((x, i) => `${i + 1}. ${x}`), ...(doneWhen ? ['', `Done when: ${doneWhen}`] : [])].join('\n');
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, 'SKILL.md'), skillFile({ name: n, description: String(goal).slice(0, 180), agent: true, body }));
+  return parseSkill(fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8'), path.join(folder, 'SKILL.md'));
 }
 
 // Save a playbook the brain drafted ("/skill save NAME"). Never overwrites.
@@ -235,4 +249,4 @@ function seedExamples(dir, examplesDir) {
   } catch { return 0; }
 }
 
-module.exports = { parseSkill, loadSkills, matchSkills, catalog, skillBlock, parseSchedule, nextRun, Scheduler, skillFile, saveSkill, seedExamples, slug };
+module.exports = { parseSkill, loadSkills, matchSkills, catalog, skillBlock, parseSchedule, nextRun, Scheduler, skillFile, saveSkill, saveAgentSkill, seedExamples, slug };

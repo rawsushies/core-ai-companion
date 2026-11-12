@@ -464,6 +464,12 @@ test('desktop agent: tools write a file and run a command (always asked), result
   await send('/do undo');
   await dock.waitForFunction(() => /Undone: 1 file/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
   assert.ok(!fs.existsSync(path.join(project, 'notes.txt')));
+  // What worked can be saved as a reusable desktop playbook (built from the real steps).
+  await send('/skill save note-writer');
+  await dock.waitForFunction(() => /Saved desktop workflow "note-writer"/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  const pb = fs.readFileSync(path.join(userData, 'skills', 'note-writer', 'SKILL.md'), 'utf8');
+  assert.match(pb, /agent: true/);
+  assert.match(pb, /1\. Write notes\.txt/);
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
