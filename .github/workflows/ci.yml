@@ -90,3 +90,23 @@ jobs:
             dist/COre-Setup-*.exe.blockmap
             dist/latest.yml
           retention-days: 7
+
+  # Office-suite scenarios on real Windows. Microsoft Office cannot be installed
+  # on CI without a license, so this uses LibreOffice (Calc), a real office app.
+  office-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+      - name: Install LibreOffice
+        run: choco install libreoffice-fresh -y --no-progress
+      - run: node --test test/office.win.test.js
+        env:
+          CORE_OFFICE: '1'
