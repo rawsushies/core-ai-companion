@@ -119,6 +119,7 @@ let dockVisible = true;
 let dockHeight = 60;
 let currentPipeline = null;
 let memory = null;
+const latency = new (require('./latency').Latency)(); // turn timings (src/main/latency.js)
 // Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
 const { CortexClient } = require('./cortex');
 const { MemoryGateway, isDecision } = require('./memgate');
@@ -126,7 +127,10 @@ let cortexClient = null;
 let memGate = null;
 function cortexCfg() {
   const c = (config.data.memory && config.data.memory.cortex) || {};
-  return { command: c.command || '', args: [...(c.script ? [c.script] : []), 'mcp'], vault: c.vault || '' };
+  let documents = '';
+  try { documents = app.getPath('documents'); } catch {}
+  const { command, args, vault } = require('./cortex').resolveCortex(c, { resourcesPath: app.isPackaged ? process.resourcesPath : '', documents });
+  return { command, args, vault };
 }
 function gateway() {
   const want = JSON.stringify(cortexCfg());
@@ -1018,7 +1022,7 @@ function noteEpisode(text) {
 function startMemoryEngine() {
   if (!memory) return;
   if ((config.data.memory || {}).semantic !== false) {
-    embedder = new Embedder({ cacheDir: path.join(app.getPath('userData'), 'models') });
+    embedder = new Embedder({ cacheDir: modelCacheFor('Xenova/all-MiniLM-L6-v2') });
     memory.setEmbedder((texts) => embedder.embed(texts));
   }
   // Daily: merge near-duplicates only (their text stays in the survivor's
@@ -1040,6 +1044,7 @@ function opportunities() {
     cortexOn: () => gateway().cortexOn(),
     automationHistory,
     pending: () => { try { return gateway().pending(); } catch { return 0; } },
+    conflicts: () => { const { findConflicts } = require('./vaultsync'); const { vaultPath } = require('./obsidian'); return findConflicts(vaultPath(cortexCfg().vault)); },
     dismissed: state.get('dismissedSuggestions') || [],
   });
 }
@@ -1060,6 +1065,69 @@ function dailySuggestions() {
   showSuggestions({ quietIfNone: true }).catch(() => {});
 }
 
+// Automatic knowledge-vault setup. First launch of a new install: turn on the
+// bundled Cortex, create the vault (Documents\COre Vault unless Cortex already has
+// one) and add it to Obsidian's vault list so it shows up there by itself. Existing
+// users keep their choice (/vault setup does it on request). Later launches only
+// add the vault to Obsidian once Obsidian is installed. Installing Obsidian itself
+// is offered, never done unasked (/vault obsidian).
+function setupVault({ force = false, announce = true, freshInstall = false } = {}) {
+  const O = require('./obsidian');
+  const c = config.data.memory.cortex || (config.data.memory.cortex = {});
+  const firstTime = !state.get('vaultSetup');
+  if (force || (firstTime && freshInstall && !c.enabled)) {
+    const r = cortexCfg();
+    if (force || require('./cortex').resolveCortex(c, { resourcesPath: app.isPackaged ? process.resourcesPath : '' }).bundled || r.command) { c.enabled = true; config.save(); }
+  }
+  if (!c.enabled) return null;
+  const vault = cortexCfg().vault;
+  if (!vault) return null;
+  const made = O.ensureVault(vault);
+  let obsidian = 'not installed';
+  if (O.obsidianInstalled()) {
+    obsidian = state.get('obsidianRegistered') === vault && !force ? 'already' : O.registerVault(vault);
+    if (obsidian === 'added' || obsidian === 'already') state.set('obsidianRegistered', vault);
+  }
+  state.set('vaultSetup', vault);
+  const msg = [`Your knowledge vault is ready${made.created ? ' (new)' : ''}: ${vault}. COre's long-term memory (Cortex, built in) keeps its notes there.`,
+    obsidian === 'added' ? 'It is now in Obsidian\'s vault list (restart Obsidian if it was open). Type /obsidian to open it.'
+      : obsidian === 'already' ? 'Obsidian already knows it. Type /obsidian to open it.'
+        : obsidian === 'not installed' ? `Obsidian is not installed. ${process.platform === 'win32' ? 'Type /vault obsidian and I\'ll install it (free) and connect it.' : 'Install it from obsidian.md and the vault will be added automatically.'}`
+          : `I could not add it to Obsidian (${obsidian}); open the folder there with "Open folder as vault".`,
+    'Turn this off in Settings → Privacy. To share it with another device, see /vault.'].join('\n');
+  if (announce && (force || firstTime || obsidian === 'added')) addTranscript('system', msg);
+  toolAudit({ event: 'vault-setup', vault, created: made.created, obsidian });
+  return { vault, obsidian, created: made.created };
+}
+
+async function installObsidian() {
+  const O = require('./obsidian');
+  if (process.platform !== 'win32') { addTranscript('system', 'Install Obsidian from obsidian.md; COre adds your vault to it on the next start.'); return; }
+  if (O.obsidianInstalled()) { setupVault({ force: true }); return; }
+  addTranscript('system', 'Installing Obsidian (its official package via winget)…');
+  const code = await new Promise((resolve) => {
+    const p = spawn('winget', O.OBSIDIAN_WINGET, { windowsHide: true, stdio: 'ignore' });
+    p.on('error', () => resolve(-1)); p.on('exit', resolve);
+  });
+  toolAudit({ event: 'install-obsidian', code });
+  if (!O.obsidianInstalled()) { addTranscript('system', code === -1 ? 'winget is not available here. Install Obsidian from obsidian.md, then type /vault setup.' : `The install did not finish (code ${code}). You can install it from obsidian.md, then type /vault setup.`); return; }
+  // A fresh Obsidian has no vault list until it first runs: create it with ours.
+  fs.mkdirSync(path.dirname(O.obsidianConfigPath()), { recursive: true });
+  const r = setupVault({ force: true });
+  if (r && r.vault) shell.openExternal(O.noteUri(r.vault));
+}
+
+// /vault: the knowledge layer at a glance: the Markdown vault (source of truth),
+// Obsidian, the Cortex index, Syncthing between devices, and sync conflicts.
+async function vaultReport() {
+  const { vaultPath, isObsidianVault } = require('./obsidian');
+  const { Syncthing, findConflicts, formatStatus } = require('./vaultsync');
+  const vault = vaultPath(cortexCfg().vault);
+  const gs = await gateway().status().catch((e) => ({ cortex: `error: ${e.message}` }));
+  const sync = vault ? await new Syncthing().vaultStatus(vault) : { reason: 'no vault set' };
+  return formatStatus({ vault, obsidian: isObsidianVault(vault), cortex: gs.cortex, sync, conflicts: findConflicts(vault) });
+}
+
 // /diagnostics: one readable report of what COre is running on (no secrets). The
 // JSON one for support (copyDiagnostics) is diagnostics() further down.
 async function diagnosticsReport() {
@@ -1077,13 +1145,29 @@ async function diagnosticsReport() {
     `• Brain (${rs.mode || 'auto'}): ${(rs.providers || []).map((p) => `${p.name || p.id} ${p.state}${p.firstTokenMs != null ? ` ~${Math.round(p.firstTokenMs / 100) / 10}s` : ''}${p.ok + p.fail ? ` ${p.ok}/${p.ok + p.fail} ok` : ''}${p.reason ? ` (${String(p.reason).slice(0, 60)})` : ''}`).join('; ') || 'none'}`,
     rs.last ? `  last turn: ${rs.last.provider || ''} ${rs.last.model || ''}${rs.last.reason ? ` because ${String(rs.last.reason).slice(0, 80)}` : ''}` : '',
     `• Memory: ${st ? `${st.total} entries (${Object.entries(st.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}), ${st.conflicts} conflicts kept` : 'off'}`,
+    `• Response times: ${require('./latency').Latency.format(latency.stats()).replace(/\n/g, '\n  ')}`,
     `• Cortex: ${gs.cortex}${gs.pending ? `, ${gs.pending} waiting` : ''}`,
+    `• Vault: ${(await vaultReport().catch((e) => `error: ${e.message}`)).split('\n').slice(0, 4).join('; ')}`,
     `• Desktop agent: ${ag.enabled ? 'on' : 'off'}, approvals ${ag.approve || 'every'}, UI Automation ${agentUia() ? 'available' : 'not available'}`,
     `• Command sandbox: ${sbx.ok ? sbx.kind + (sbx.kind === 'job' ? ` + ${ag.sandboxWindows || 'appcontainer'}` : '') : `none (${sbx.reason})`}, mode ${ag.sandbox || 'auto'}`,
     `• Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}, ${(ev.rules || []).length} rule(s), monitor ${eventMonitor ? 'running' : 'stopped'}`,
     fails.length ? `• Recent problems:\n${fails.map((e) => `   ${new Date(e.at || e.ts || Date.now()).toLocaleTimeString()} ${e.event || ''} ${String(e.error || e.reason || e.status || '').slice(0, 80)}`).join('\n')}` : '• Recent problems: none logged',
   ].filter(Boolean);
   return lines.join('\n');
+}
+
+// "continue", "where were we", "lanjut": what COre was last doing, so the
+// user never has to repeat it. Read from COre's own records, nothing guessed.
+const ONGOING_RE = /^\s*(continue|carry on|keep going|go on|resume|where (were|was) (we|i)|what were we doing|lanjut(kan)?|terusin|teruskan)\b/i;
+function ongoingWork() {
+  const lines = [];
+  const t = readAgentTask();
+  if (t && t.goal && Date.now() - (t.at || 0) < 7 * 864e5) lines.push(`- Desktop task "${String(t.goal).slice(0, 120)}": ${t.status || 'unknown'}${t.status === 'running' ? ` (stopped at step ${t.step || 0}; /do resume continues it)` : ''}`);
+  for (const k of (state.get('tasks') || []).slice(-2).reverse()) lines.push(`- Shared task "${String(k.text || '').slice(0, 120)}": ${k.status || 'unknown'}${(k.steps || []).length ? ` (${k.steps.map((x) => `${(coreById(x.core) || { name: x.core }).name} ${x.status}`).join(', ')})` : ''}`);
+  const recent = transcript.filter((m) => m.role === 'user' && !/^\//.test(m.text || '')).slice(-3).map((m) => `"${String(m.text).slice(0, 100)}"`);
+  if (recent.length) lines.push(`- Your last requests: ${recent.join(', ')}`);
+  try { const h = automationHistory(); const last = Object.entries(h).map(([id, r]) => ({ id, ...(r[r.length - 1] || {}) })).sort((a, b) => (b.at || 0) - (a.at || 0))[0]; if (last && last.at && Date.now() - last.at < 864e5) lines.push(`- Automation ${last.id}: ${last.status}${last.verified ? ' (verified)' : ''} for ${String(last.what || '').slice(0, 80)}`); } catch {}
+  return lines.length ? `[Ongoing work] What COre was doing most recently (from its own records). Continue from here; if it is unclear which item the user means, ask.\n${lines.join('\n')}` : '';
 }
 
 let maintenancePlan = null;
@@ -3165,6 +3249,7 @@ function playGame(name) {
 // chain: a follow-up turn right after the previous one (skill results): the
 // previous reply keeps speaking and this one queues after it.
 async function handleUserText(text, { withScreen = false, typed = false, internal = false, chain = 0, remote = false, files = [], playbook = null } = {}) {
+  if (typed && !internal && !remote && chain === 0 && !/^\//.test(String(text || ''))) latency.begin('typed');
   text = String(text || '').trim();
   if (!text) return;
   // Meiosis routing: decide the recipient before touching Prime's turn, so
@@ -3181,6 +3266,19 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       addTranscript('user', text);
       if (sg[1]) { const it = lastSuggestions[Number(sg[1]) - 1]; if (it) { state.set('dismissedSuggestions', [...(state.get('dismissedSuggestions') || []), it.id].slice(-200)); addTranscript('system', 'Hidden.'); } return; }
       showSuggestions().catch((err) => addTranscript('system', `Could not check: ${err.message}`));
+      return;
+    } }
+    if (/^\/vault\s+setup\s*$/i.test(text)) { addTranscript('user', text); try { setupVault({ force: true }); } catch (err) { addTranscript('system', `Vault setup failed: ${err.message}`); } return; }
+    if (/^\/vault\s+obsidian\s*$/i.test(text)) { addTranscript('user', text); installObsidian().catch((err) => addTranscript('system', `Could not install Obsidian: ${err.message}`)); return; }
+    if (/^\/vault\s*$/i.test(text)) { addTranscript('user', text); vaultReport().then((r) => addTranscript('system', r)).catch((err) => addTranscript('system', `Could not check the vault: ${err.message}`)); return; }
+    { const ob = /^\/obsidian\b\s*(.*)$/i.exec(text); if (ob) {
+      addTranscript('user', text);
+      const { vaultPath, isObsidianVault, noteUri } = require('./obsidian');
+      const vault = vaultPath(cortexCfg().vault);
+      const uri = noteUri(vault, ob[1].trim());
+      if (!vault) addTranscript('system', 'No Cortex vault is set. Set memory.cortex.vault (or run Cortex init) first.');
+      else if (!uri) addTranscript('system', 'That note path is outside your vault.');
+      else { shell.openExternal(uri); addTranscript('system', `Opening ${ob[1].trim() || 'your vault'} in Obsidian.${isObsidianVault(vault) ? '' : ' (Obsidian has not opened this folder yet; it will ask to add it as a vault.)'}`); }
       return;
     } }
     { const mm = /^\/memory\s+maintain\b\s*(.*)$/i.exec(text); if (mm) { addTranscript('user', text); memoryMaintain(mm[1]).catch((err) => addTranscript('system', `Maintenance failed: ${err.message}`)); return; } }
@@ -3238,7 +3336,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   if (!internal && !chain && !withScreen && !files.length && !playbook) {
     // Instant answers for short requests (time, music keys, lyrics card).
     const busyBefore = !!current;
-    if (quickReply(text, { typed })) { if (!busyBefore) toOverlay('state', 'idle'); return; }
+    if (quickReply(text, { typed })) { latency.reclassify('instant'); latency.mark('firstToken'); if (!busyBefore) toOverlay('state', 'idle'); return; }
   }
   if (chain) {
     if (syncTurn && syncTurn.finished) toDock('dock:done', { text: syncTurn.reply });
@@ -3289,6 +3387,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       const mem = (await gateway().context(text)).text; // active memory + long-term knowledge
       if (mem) contextBlocks.push(mem);
     }
+    if (ONGOING_RE.test(text) && !internal) { const og = ongoingWork(); if (og) contextBlocks.push(og); }
     if (SITUATION_RE.test(text) && !internal) {
       situationNow = await situation().describe(text.replace(/^\/situation\s*/i, ''));
       contextBlocks.push(situationNow.prompt);
@@ -3340,7 +3439,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       context: contextBlocks.join('\n\n'),
       signal: ac.signal,
       onText: (t) => {
-        if (!firstTextAt) { firstTextAt = Date.now(); if (process.env.CORE_DEBUG) console.log(`[core] timing first-text ${firstTextAt - turnStart}ms`); }
+        if (!firstTextAt) { firstTextAt = Date.now(); latency.mark('firstToken', firstTextAt); if (process.env.CORE_DEBUG) console.log(`[core] timing first-text ${firstTextAt - turnStart}ms`); }
         if (!ac.signal.aborted && !turnSync) toDock('dock:delta', t);
       },
       onItem: (item) => {
@@ -3412,6 +3511,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       current = null;
       toDock('dock:busy', false);
     }
+    if (!synced && latency.turn) latency.finish(); // no voice to wait for
   }
 }
 
@@ -3451,12 +3551,18 @@ function setHandsFree(on) {
 }
 
 let sttNoticeShown = false;
+// Local models: the installer ships them in resources/models (COre works offline
+// from the first start); anything not bundled is downloaded once into userData/models.
+function modelCacheFor(id) {
+  const bundled = app.isPackaged ? path.join(process.resourcesPath, 'models') : '';
+  return bundled && id && fs.existsSync(path.join(bundled, ...String(id).split('/'))) ? bundled : path.join(app.getPath('userData'), 'models');
+}
 function makeStt() {
   const v = config.data.voice;
   return new SpeechToText({
     model: v.sttModel,
     language: v.sttLanguage,
-    cacheDir: path.join(app.getPath('userData'), 'models'),
+    cacheDir: modelCacheFor(v.sttModel),
     onProgress: (p) => {
       toPanel('status', { kind: 'download', file: p.file, pct: p.pct });
       // transformers.js reports progress even when reading its cache: only
@@ -3670,13 +3776,18 @@ function wireIpc() {
     config.data.orb.home = { x: Math.round(home.x), y: Math.round(home.y) };
     config.save();
   });
-  ipcMain.on('listen:audio', async (e, { audio, withScreen }) => {
+  ipcMain.on('listen:audio', async (e, { audio, withScreen, speechEndAt }) => {
     if (!fromOverlay(e)) return;
     listening = null;
+    const end = Number(speechEndAt);
+    latency.begin('voice', end > 0 && end <= Date.now() && Date.now() - end < 60000 ? end : Date.now());
+    latency.mark('heard');
     toOverlay('state', 'thinking');
+    latency.mark('react');
     try {
       const pcm = audio instanceof Float32Array ? audio : new Float32Array(audio);
       const text = await stt.transcribe(pcm);
+      latency.mark('transcript');
       if (!text) {
         toOverlay('state', 'idle');
         return;
@@ -3731,6 +3842,7 @@ function wireIpc() {
   });
   ipcMain.on('overlay:log', (e, msg) => { if (fromOverlay(e)) console.log('[overlay]', msg); });
   ipcMain.on('voice:spoken', (e, { text, ms } = {}) => {
+    if (fromOverlay(e) && text) latency.mark('firstAudio');
     if (process.env.CORE_DEBUG) console.log(`[core] spoken ${Date.now()} ms=${Math.round(ms)} ${String(text).slice(0, 50)}`);
     if (!fromOverlay(e) || !syncTurn || !text) return;
     // The chat reveals this sentence word by word over its real audio length.
@@ -3739,6 +3851,7 @@ function wireIpc() {
   });
   ipcMain.on('voice:idle', (e) => {
     if (fromOverlay(e)) mainSpeaking = false;
+    if (fromOverlay(e) && latency.turn && latency.turn.marks.firstAudio != null) latency.finish();
     if (fromOverlay(e) && process.env.CORE_DEBUG) console.log(`[core] voice prime end ${Date.now()}`);
     if (fromOverlay(e) && followUpPending && !current && !listening) {
       followUpPending = false;
@@ -4008,11 +4121,11 @@ app.whenReady().then(async () => {
   stt = makeStt();
   let voiceNoticeShown = false;
   tts = new TextToSpeech({
-    cacheDir: path.join(userData, 'models'),
+    cacheDir: modelCacheFor('onnx-community/Kokoro-82M-v1.0-ONNX'),
     quality: config.data.voice.quality,
     onProgress: (p) => {
       toPanel('status', { kind: 'download', file: `voice ${p.file}`, pct: p.pct });
-      if (!voiceNoticeShown && !fs.existsSync(path.join(userData, 'models', 'onnx-community', 'Kokoro-82M-v1.0-ONNX'))) {
+      if (!voiceNoticeShown && !fs.existsSync(path.join(modelCacheFor('onnx-community/Kokoro-82M-v1.0-ONNX'), 'onnx-community', 'Kokoro-82M-v1.0-ONNX'))) {
         voiceNoticeShown = true;
         addTranscript('system', 'Downloading my voice (one time, about 90 MB). I will use your system voice until it is ready.');
       }
@@ -4121,6 +4234,7 @@ app.whenReady().then(async () => {
       root: ROOT,
       version: app.getVersion(),
       packaged: app.isPackaged,
+      resourcesPath: app.isPackaged ? process.resourcesPath : '',
       onDone: (code, report) => {
         console.log(`[core] smoke test ${report.ok ? 'passed' : 'FAILED'}${report.error ? `: ${report.error}` : ''}`);
         app.isQuitting = true;
@@ -4144,6 +4258,7 @@ app.whenReady().then(async () => {
   floor = new CL.SpeechFloor({ mainBusy: () => !!current || !!listening || (mainSpeaking && Date.now() - mainSpeakingSince < 60_000) });
   setInterval(() => floor.pump(), 500);
   if (process.env.CORE_DEBUG_CHITCHAT) setTimeout(() => startChitchat({ quietMinutes: 30 }), 9000); // end-to-end tests
+  { const freshInstall = !state.get('onboarded'); setTimeout(() => { try { setupVault({ freshInstall }); } catch (err) { console.warn('[core] vault setup:', err.message); } }, freshInstall ? 30000 : 2000); } // after the tour on a first run
   if (!state.get('onboarded')) setTimeout(runTour, 4500); // first run: show COre around
   else setTimeout(greetIfFirstToday, 3500);
 

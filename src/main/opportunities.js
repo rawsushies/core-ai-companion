@@ -9,6 +9,7 @@
 //   cortex      overdue / open to-dos in the user's Cortex vault (brain_tasks)
 //   automation  rules whose last run failed or could not be verified
 //   memory      long-term notes still waiting to reach Cortex
+//   vault       notes with a sync conflict copy (two versions kept)
 // Suggestions are history-informed, not assumed correct: wording says what is
 // known ("last run failed") rather than what to conclude.
 
@@ -58,6 +59,10 @@ class Opportunities {
         if (last.status === 'failed') found.push({ id: `auto:${rule}:${last.at}`, source: 'automation', score: 75, text: `Automation ${rule} last failed on ${String(last.what || '').slice(0, 60)}${last.summary ? `: ${String(last.summary).slice(0, 80)}` : ''}.`, action: '/automations' });
         else if (last.status === 'done' && !last.verified) found.push({ id: `auto:${rule}:${last.at}`, source: 'automation', score: 40, text: `Automation ${rule} finished ${String(last.what || '').slice(0, 60)} but the result was not verified.`, action: '/automations' });
       }
+    } catch {}
+    // Notes with two versions (two devices edited them while apart): both are kept until merged.
+    try {
+      for (const c of ((this.d.conflicts && this.d.conflicts()) || []).slice(0, 2)) found.push({ id: `conflict:${c.copy}`, source: 'vault', score: 85, text: `"${c.original}" has two versions (edited on two devices). Both are kept; merge them in Obsidian.`, action: `/obsidian ${c.copy}` });
     } catch {}
     // Long-term notes waiting for Cortex.
     try {

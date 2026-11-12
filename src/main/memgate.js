@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const GUARD = require('./guard');
+const { conflictOriginal } = require('./vaultsync');
 
 const DESTINATION = { profile: 'native', preference: 'native', fact: 'native', episode: 'native', project: 'native', decision: 'cortex', lesson: 'cortex', knowledge: 'cortex', research: 'cortex' };
 const SECTION = { decision: 'Decisions', lesson: 'Lessons', knowledge: 'Notes', research: 'Research' };
@@ -56,8 +57,11 @@ class MemoryGateway {
         const paths = [...String(r).matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()).slice(0, 8);
         if (paths.length) {
           const g = GUARD.untrusted(String(r).slice(0, budget * 5), 'long-term notes (Cortex)');
-          blocks.push(`[Knowledge] From the user's long-term notes in Cortex. Cite the note path when you use it.\n${g.text}`);
-          for (const p of paths) sources.push({ system: 'cortex', path: p });
+          // A sync conflict copy (two devices edited one note): say both versions exist, never pick one silently.
+          const conflicts = paths.map((p) => ({ copy: p, original: conflictOriginal(p) })).filter((c) => c.original);
+          const warn = conflicts.length ? `\n[Sync conflict] ${conflicts.map((c) => `${c.copy} is a second version of ${c.original}`).join('; ')}. Both versions are kept until the user merges them: if they differ, show both and do not choose.` : '';
+          blocks.push(`[Knowledge] From the user's long-term notes in Cortex. Cite the note path when you use it.${warn}\n${g.text}`);
+          for (const p of paths) sources.push({ system: 'cortex', path: p, ...(conflictOriginal(p) ? { conflictOf: conflictOriginal(p) } : {}) });
           cortex = 'ok';
         } else cortex = 'empty';
         this._flushQueue().catch(() => {});

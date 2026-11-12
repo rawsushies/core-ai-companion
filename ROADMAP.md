@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 78%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 93%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -20,6 +20,17 @@ verified acceptance criteria below, last update 2026-11-12).
   brain, specialists and agent use. One destination per kind (decision, lesson,
   knowledge, research go to Cortex; the rest stays native). No third engine.
 
+## Knowledge layer (COre × Obsidian × Cortex × Syncthing)
+
+COre ↔ memory gateway ↔ Obsidian-compatible Markdown vault (the one source of truth) ↔ Cortex (local index,
+retrieval, history); Syncthing carries the vault between devices. Details: [docs/VAULT.md](docs/VAULT.md).
+**Acceptance 8/8 with real files, two real Cortex servers and two real Syncthing devices** (`test/vault.sync.test.js`,
+CI Linux): COre memory → Markdown note; Obsidian-style edit and outside note indexed and recalled; device B
+receives it; B's change returns; offline changes meet after reconnection; conflicts keep both versions and are
+reported (`/vault`, `/suggest`, recall warns); a fresh install with an empty index reconnects. Obsidian itself is
+not launched in CI (its edits are file writes). Cortex health names Syncthing copies from
+rawsushies/cortex-ai-brain#1 (draft).
+
 ## Cortex integration status
 
 Connected through `src/main/cortex.js` (MCP client). Off until the user turns it
@@ -27,15 +38,20 @@ on (Settings, Privacy). History import stays off (`CORTEX_AUTO_IMPORT=off`);
 Cortex's own consent gate (`import_history`) is never touched. COre never writes
 vault files directly.
 
+Obsidian: the vault is plain Markdown that Obsidian opens as-is (Cortex writes
+atomically and re-indexes edits made in Obsidian). `/obsidian [note]` opens the
+vault or a cited note through an `obsidian://` link (paths outside the vault refused;
+`test/obsidian.test.js`). Not yet tried against an installed Obsidian.
+
 ## Phase status
 
 | Phase | Status | Estimate |
 |---|---|---|
 | 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
-| 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; real-provider validation open | ~90% |
-| 2 COre 2.2 environmental intelligence | Acceptance passes on real Windows + real Cortex; app profiles, context sync, verified knowledge updates | ~85% |
+| 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; agent loop verified with a real model | ~95% |
+| 2 COre 2.2 environmental intelligence | Acceptance on real Windows + real Cortex; a real model explains the desktop with no invented names | ~95% |
 | 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e); opportunity detection, approved maintenance, opt-in auto-resume | ~80% |
-| 4 COre 3.0 unified experience | Combined acceptance scenario passes in the real app (stand-in providers); benchmarks in place | ~55% |
+| 4 COre 3.0 unified experience | Combined acceptance in the real app and on real Windows; real-model validation 7/7 on Groq and on Gemini, live Jev 6/6; what remains needs the user's PC (Claude CLI, voice, presence) | ~85% |
 
 ### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
 
@@ -66,7 +82,7 @@ vault files directly.
 | Timeouts, process-tree kill, retries | Verified | taskkill /T; Job kill-on-close; failure advisor |
 | Memory gateway in planning and execution | Implemented | agent experience reads Cortex; lessons and outcomes written back |
 | Model switch keeps context | Verified with stand-in providers | e2e failover with continuity |
-| Real AI providers | **Unverified** | build sandbox cannot reach provider APIs |
+| Real AI providers | **Verified with Groq (7/7), Gemini (7/7) and live Jev routing (6/6)** | [docs/REAL-PROVIDERS.md](docs/REAL-PROVIDERS.md): `npm run validate:providers` runs COre's production brain against the real model: model picked from the live list (`openai/gpt-oss-120b`), `reasoning_effort=high` accepted, answer from real Cortex knowledge citing `Projects/Tower.md`, failover from a dead provider keeping the conversation, injected instructions in a file not obeyed, desktop explained with no unsupported names, and the agent loop reaching a verified result. Gemini (`gemini-3-flash-preview`, picked from the live list after the old default was retired) passes the same 7; Jev via OpenRouter routes 6/6 requests correctly. OpenRouter passed 7/7 earlier the same day but the recorded run hit the free key's daily cap (re-run with `--merge`). Claude CLI needs the user's PC |
 
 ### Phase 2: COre 2.2 environmental intelligence
 
@@ -76,7 +92,7 @@ vault files directly.
 | 2 | Active apps, window states, dialogs, changes | **Verified on real Windows** | `src/main/situation.js` (UIA windows, visual state, modal/#32770 dialogs, focused controls, opened/closed/retitled/switched); `test/situation.test.js` |
 | 3 | File intelligence (PDF, Office, images, audio, video, code, IFC, DXF) | Present from 2.0 | `src/main/fileintel.js` |
 | 4, 8 | Project context from both memory systems | Implemented | situation recall through the gateway; project matched from window titles against COre projects and Cortex `Projects/` notes |
-| 5 | Understand ongoing work without repeating | Partly | "what am I working on" / "where was I" attach the situation; agent resumes from checkpoints |
+| 5 | Understand ongoing work without repeating | Implemented | "continue" / "where were we" / "lanjut" attach `[Ongoing work]` from COre's own records (desktop task and its step, shared tasks per specialist, last requests, last automation); "what am I working on" attaches the situation; e2e |
 | 9 | Source verification, confirmed vs inferred | Implemented | every fact tagged observed / inferred / memory / cortex; `groundCheck` flags names in the reply that no source backs (shown to the user) |
 | 6 | Application-specific intelligence | Implemented | `src/main/appProfiles.js`: tips for Excel, Word, PowerPoint, Notepad, Explorer, browsers, VS Code, Archicad, plus workflows and lessons learned in that app, given to the agent as hints (approvals unchanged) |
 | 7 | Context sync across brain, specialists, gateway, agent | Implemented | one gateway for Prime, every specialist and the agent; the agent starts from the shared situation |
@@ -104,21 +120,30 @@ vault files directly.
 |---|---|---|---|
 | 1 | Voice, speech recognition, interruption | Present from 2.0 (local STT/TTS, barge-in) | e2e voice tests with stand-ins |
 | 2, 10 | Unified memory through the gateway, reliable across restarts | **Measured** | [docs/BENCHMARKS.md](docs/BENCHMARKS.md): recall after 5/5 full restarts, offline queue delivered 5/5 |
-| 3, 4 | Jev routing (capabilities, effort, health, latency, cost), effort passed to providers, failover | Implemented, verified with stand-ins | router/effort unit tests; e2e failover. Real providers unverified |
+| 3, 4 | Jev routing (capabilities, effort, health, latency, cost), effort passed to providers, failover | Verified with a real provider (Groq): effort accepted, failover with continuity | router/effort unit tests; e2e failover. Real providers unverified |
 | 6 | Monitoring, diagnostics, transparency | Implemented | `/diagnostics`: brain health and latency per provider, last routing decision, memory, Cortex, agent, sandbox, automations, recent problems (no secrets; e2e); command center, monitor panel, audit log |
-| 7, 11 | Updates, recovery, backups, rollback | Present from 2.0 | backup e2e, updater, `/do undo` |
+| 7, 11 | Updates, recovery, backups, rollback, portable knowledge | Present; backups now include notes waiting for Cortex and automation history | backup e2e, `test/backup.test.js`, updater, `/do undo`. The Cortex vault is the user's own folder (portable, versioned by Cortex) |
+| 12 | Responsive on Windows | **Measured on real Windows** | warm budgets checked every CI run (`test/situation.win.test.js`): window list 47 ms, control snapshot 67 ms, full situation with both memories 64 ms (windows-latest, b97e1fc) |
 | 9 | Real-world benchmarks | **Implemented** | `npm run benchmark`: memory hit rate and source correctness against real Cortex, restart reliability, injection guard (tuning and held-out sets), OS sandbox blocking, routing accuracy |
-| Acceptance | Complex instruction end to end | **Pass with stand-in providers** (CI ubuntu e2e, d0a81ff) | `test-e2e` "PHASE 4 ACCEPTANCE": Scout answers from Cortex, the agent plans, a command fails (exit 3), the agent recovers, writes and re-checks the brief, the file is read back, the verified outcome is filed in Cortex. Real providers and real multi-app Windows operation in one scenario: not yet |
+| Acceptance | Complex instruction end to end | **Pass with stand-in providers** (CI ubuntu e2e, d0a81ff) | `test-e2e` "PHASE 4 ACCEPTANCE": Scout answers from Cortex, the agent plans, a command fails (exit 3), the agent recovers, writes and re-checks the brief, the file is read back, the verified outcome is filed in Cortex. On real Windows too (`test/agent.win.test.js` PHASE 4, windows-latest b97e1fc): Cortex knowledge, an unauthorized read refused by the AppContainer (DENIED EPERM), recovery, a sandboxed command saves the name, the real app is filled and pressed through UIA, verified from the app and the disk, outcome recalled from Cortex. Real model: the same chain (knowledge, agent loop, failover) verified against Groq in docs/REAL-PROVIDERS.md |
 
 ## Blocked or limited
 
-- Injection guard on held-out examples: 4/6 flagged, 1/4 benign flagged (see benchmarks); every retrieved text is fenced as data regardless.
+- Installer: bundles Cortex.exe (built from Cortex's PyInstaller recipe) and the local models (speech recognition,
+  voice at both qualities, embeddings; ~570 MB) so voice, memory and knowledge work offline from first start.
+  `scripts/ci/check-install.js` fails the build if any app file, model or Cortex is missing or Cortex can't
+  write + recall (verified on a Linux package build; Windows installer verified in CI).
+- Reference research: most documentation sites (Microsoft Learn, MCP, OpenAI, LangGraph, OWASP, NIST, Letta, Mem0,
+  LiveKit, Langfuse, OpenTelemetry…) are not reachable from this build environment; only GitHub pages were read.
 
-- Real provider validation (Gemini, Groq, OpenRouter, Jev): no network access from the build environment.
+- Injection detection is weak on unseen attacks: on a fresh, untuned set the pattern guard flags 2/8 (0/6 false positives); Llama Prompt Guard 2 (Groq) flags 3/8, the two together 4/8. Detection is only a warning: the protection is deterministic (retrieved text is fenced as data, COre's action tags in it are broken, every action needs approval, commands run sandboxed), and the real-model test shows injected instructions not being obeyed.
+
+- Real providers: Groq, Gemini and Jev verified; OpenRouter's recorded run hit the free daily cap (50 requests/day without credit); Claude CLI not run (needs the user's signed-in PC). Free tiers rate-limit long runs (COre waits and retries).
+- Office apps: on a headless CI desktop LibreOffice Calc exposes only its window to UI Automation, so COre uses the keyboard route from its app profile and verifies from the saved file (`test/office.win.test.js`). Microsoft Office itself is not installed on CI.
 - Node package managers cannot run inside the Windows AppContainer (libuv named pipes are denied); they run with Job limits only.
 - Headless CI desktop: some apps (new Notepad's XAML view) expose little to UI Automation there.
 
 ## Next execution target
 
-1. Real-provider validation once network access to provider APIs is available.
-2. Combined Phase 4 scenario on real Windows (UIA apps + sandboxed commands in one task).
+1. Re-run OpenRouter when its daily cap resets (`npm run validate:providers -- --provider openrouter --no-jev --merge --out docs/REAL-PROVIDERS.md`).
+2. On the user's Windows PC: Claude CLI brain, voice and presence, Obsidian `/obsidian` link, Microsoft Office apps.

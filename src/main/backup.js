@@ -19,7 +19,9 @@ const crypto = require('crypto');
 
 const FORMAT = 'core-backup';
 const VERSION = 1;
-const FILES = ['config.json', 'state.json', 'memory.json', 'notes.json'];
+// cortex-queue.json: long-term notes not yet delivered to Cortex (losing it
+// would lose decisions); automation-history.json: what each automation did.
+const FILES = ['config.json', 'state.json', 'memory.json', 'notes.json', 'cortex-queue.json', 'automation-history.json'];
 const PLUGIN_DIR = 'skills';
 const NAME_RE = /^COre-backup-(\d{4}-\d{2}-\d{2}_\d{6})(?:-([a-z-]+))?\.json$/;
 const MAX_FILE = 5 * 1024 * 1024;

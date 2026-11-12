@@ -14,6 +14,8 @@ const PROFILES = [
     tips: ['Ctrl+F finds text, Ctrl+H replaces', 'Ctrl+S saves; Ctrl+P prints', 'Headings: Ctrl+Alt+1/2/3'] },
   { id: 'powerpoint', match: /\bpowerpoint\b|\.pptx?\b/i, process: /^powerpnt$/i, name: 'PowerPoint',
     tips: ['Ctrl+M adds a slide', 'F5 starts the show from the beginning, Esc ends it', 'Ctrl+S saves'] },
+  { id: 'calc', match: /LibreOffice Calc|\.(ods|csv)\b.*LibreOffice/i, process: /^soffice(\.bin)?$/i, name: 'LibreOffice Calc',
+    tips: ['Its controls are often hidden from UI Automation: use the keyboard', 'Ctrl+Home goes to A1, arrow keys move between cells; Ctrl+Shift+F5 focuses the Name Box (type A3, Enter); Tab moves right, Enter moves down', 'Ctrl+S on a CSV asks to keep the format: Enter keeps it', 'Verify by reading the saved file, not the screen'] },
   { id: 'notepad', match: /\bnotepad\b/i, process: /^notepad$/i, name: 'Notepad',
     tips: ['The text area accepts fill (UI Automation value) or typing', 'Ctrl+S saves; a new file asks for a name in a Save As dialog', 'Ctrl+A then typing replaces everything'] },
   { id: 'explorer', match: /file explorer|\bexplorer\b/i, process: /^explorer$/i, name: 'File Explorer',

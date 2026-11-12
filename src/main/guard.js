@@ -14,6 +14,12 @@ const PATTERNS = [
   ['override', /\b(?:ignore|disregard|forget|override)\b.{0,30}\b(?:previous|prior|above|earlier|all|any|your)\b.{0,20}\b(?:instructions?|rules?|prompts?|messages?)\b/i],
   ['override', /\b(?:ignore|disregard)\s+(?:all\s+of\s+|everything\s+)?(?:the\s+)?(?:above|preceding)\b/i],
   ['role', /\b(?:you are now|from now on you are|act as|pretend to be|system prompt|hidden prompt|developer mode|jailbreak)\b|\bnew instructions?\s*:/i],
+  ['override', /\b(?:ignore|disregard|forget|override|overlook|skip|bypass|set aside|pay no attention to)\b.{0,30}\b(?:earlier|previous|prior|above|preceding|your|all|any|the)\b.{0,20}\b(?:guidance|directions?|directives?|guidelines?|constraints?|instructions?|rules?)\b/i],
+  ['conceal', /\b(?:do not|don't|never)\s+(?:tell|inform|show|let)\s+(?:the user|anyone|them|him|her)\b|\bkeep (?:this|it) (?:between us|secret|quiet)\b|\b(?:silently|quietly|secretly|covertly|without (?:telling|notifying) (?:the user|anyone))\b.{0,30}\b(?:run|copy|send|upload|delete|forward|download|export|install|execute|move)\b/i],
+  ['lift', /\b(?:disable|turn off|switch off|bypass|skip|remove)\b.{0,20}\b(?:the\s+)?(?:approval|approvals|confirmations?|safety|sandbox|guard|security|permissions?|prompts? (?:for|before) approval|approval prompts?)\b/i],
+  ['spoof', /<\/?(?:system|assistant|developer|instructions?)>|^\s*#{2,}\s*(?:instruction|system)s?\s*:/im],
+  ['coerce', /\b(?:delete|wipe|erase|remove)\b.{0,15}\b(?:every|all)\b.{0,15}\b(?:files?|folders?|documents?|data)\b.{0,40}\bwithout (?:asking|confirm\w*|telling)\b/i],
+  ['exec', /\b(?:download|fetch|curl|wget|iwr|invoke-webrequest)\b.{0,60}\.(?:ps1|exe|bat|cmd|sh|vbs|scr)\b/i],
   ['template', /<\|(?:im_start|im_end|system|endoftext)\|>|\[\/?INST\]|<<\/?SYS>>/i],
   ['spoof', /^\s*(?:system|assistant|developer)\s*:/im],
   ['tags', /\[\[\s*(?:act|do|open|copy|remember|forget|read|list|find|delegate|clone|board)\b/i],
@@ -25,7 +31,7 @@ const PATTERNS = [
 
 function scan(text) {
   const t = String(text || '');
-  return PATTERNS.filter(([, re]) => re.test(t)).map(([name]) => name);
+  return [...new Set(PATTERNS.filter(([, re]) => re.test(t)).map(([name]) => name))]; // one entry per kind
 }
 
 // Neutralise and fence untrusted text. Returns { text, flags }.

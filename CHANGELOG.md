@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 12.0.0 — Desktop operator, environmental and proactive intelligence
+
+### COre 2.2 / 2.3 / 3.0: sees your desktop, notices what needs you, one experience
+
+- **Situation awareness**: COre reads the real desktop through UI Automation (windows, open dialogs, the project in view) and combines it with both memories; every fact it explains carries its source (observed, inferred, memory, Cortex note path), and a grounding check catches answers that name windows or files it never saw.
+- **App profiles**: what works reliably in Excel, Word, PowerPoint, LibreOffice Calc, Notepad, File Explorer, browsers, VS Code and Archicad, plus tips learned from your own finished tasks. Hints only; approvals still apply.
+- **Suggestions** (`/suggest`): an interrupted desktop task, overdue or due-today Cortex to-dos, automations that failed or were not verified, notes waiting for Cortex. Nothing runs until you pick one.
+- **Automations** (`/automations`): file and window events can start approved playbooks; results are verified and recorded.
+- **Knowledge maintenance** (`/memory maintain`): proposes merges and delivery of waiting notes; applies only what you approve. Cortex notes are never rewritten.
+- **Diagnostics** (`/diagnostics`): brain health and latency per provider, last routing decision, memory, Cortex, agent, sandbox, automations, recent problems (no secrets).
+- **Knowledge layer**: one Markdown vault shared by COre, Obsidian and Cortex, carried between devices by Syncthing. First start sets it up automatically (vault + Obsidian's vault list); `/vault`, `/vault setup`, `/vault obsidian` (installs Obsidian), `/obsidian [note]`. Sync conflicts keep both versions and are reported, never resolved silently.
+- **Installer bundles Cortex.exe and the local models** (speech, voice, embeddings): works offline from first start.
+- **Windows sandbox**: commands run in an AppContainer with a Job Object (no access outside granted folders); verified on real Windows.
+- **Free AI providers verified for real**: Groq and Gemini pass all 7 real-model scenarios (routing, effort, Cortex knowledge, failover, injection, grounding, agent loop); Jev routes 6/6 live requests. Models are picked from each provider's live list and COre moves off retired or overloaded models on its own.
+
 ### Memory architecture: COre × Cortex
 
 - **Memory gateway** (`memgate.js`): one memory interface for the brain, specialists and agent. It merges COre's active memory with recall from the user's **Cortex** knowledge vault (long-term notes, linked notes, decisions, lessons) within a token budget, keeps source paths, and fences retrieved notes as data. Each kind of memory has one destination: decisions, lessons, knowledge and research go to Cortex (deduplicated, appended under dated sections so history is kept); preferences, profile, facts and episodes stay in COre.

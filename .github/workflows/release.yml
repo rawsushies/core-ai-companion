@@ -5,9 +5,13 @@ name: Release
 # publishes anything. All gates must pass, and the result is a DRAFT release:
 # a human reviews it and clicks "Publish" (installed copies only see published
 # releases). See docs/dev/RELEASING.md.
+#
+# A release branch (release/vX.Y.Z) works the same way for maintainers who can push
+# branches but not tags: the workflow creates the vX.Y.Z tag on exactly that commit.
 on:
   push:
     tags: ['v*.*.*']
+    branches: ['release/v*.*.*']
   workflow_dispatch:
     inputs:
       tag:
@@ -26,12 +30,31 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write # create the draft release
-    env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
+      - name: Tag name (pushed tag, release/vX.Y.Z branch, or manual input)
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          t="${INPUT_TAG:-$GITHUB_REF_NAME}"; t="${t#release/}"
+          [[ "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a version tag: $t"; exit 1; }
+          echo "TAG=$t" >> "$GITHUB_ENV"; echo "tag=$t" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ startsWith(github.ref, 'refs/heads/release/') && github.sha || github.event.inputs.tag || github.ref_name }}
+      - name: Create the tag on the release branch commit
+        if: startsWith(github.ref, 'refs/heads/release/')
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            [ "$(git ls-remote --tags origin "refs/tags/$TAG^{}" | cut -f1)" = "$GITHUB_SHA" ] || [ "$(git ls-remote --tags origin "refs/tags/$TAG" | cut -f1)" = "$GITHUB_SHA" ] || { echo "tag $TAG already exists on another commit"; exit 1; }
+          else
+            git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "COre ${TAG#v}" "$GITHUB_SHA" && git push origin "refs/tags/$TAG"
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -50,6 +73,12 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Bundle Cortex.exe and the local AI models
+        shell: bash
+        run: bash scripts/ci/bundle.sh
       - name: Build installer
         run: npx electron-builder --win nsis --x64 --publish never
         env:
@@ -92,7 +121,7 @@ jobs:
     permissions:
       contents: write
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      TAG: ${{ needs.release.outputs.tag }}
     defaults:
       run:
         working-directory: mobile

@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('core', {
   orbHome: (home) => ipcRenderer.send('orb:home', home),
   orbAnchor: (a) => ipcRenderer.send('orb:anchor', a),
   stageNeed: (r) => ipcRenderer.send('stage:need', r),
-  sendAudio: (audio, withScreen) => ipcRenderer.send('listen:audio', { audio, withScreen }),
+  sendAudio: (audio, withScreen, speechEndAt) => ipcRenderer.send('listen:audio', { audio, withScreen, speechEndAt }),
   listenCancelled: (reason) => ipcRenderer.send('listen:cancelled', reason),
   wakeCheck: (audio) => ipcRenderer.send('wake:check', audio),
   bargeIn: () => ipcRenderer.send('voice:bargein'),

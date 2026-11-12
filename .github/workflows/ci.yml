@@ -36,9 +36,9 @@ jobs:
       - name: Cortex knowledge vault for the memory gateway tests
         shell: bash
         run: git clone --depth 1 https://github.com/rawsushies/cortex-ai-brain "$RUNNER_TEMP/cortex" && echo "CORTEX_DIR=$RUNNER_TEMP/cortex" >> "$GITHUB_ENV"
-      - name: Sandbox backend for the agent's commands (Linux)
+      - name: Sandbox backend for the agent's commands, Syncthing for the vault acceptance (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap >/dev/null && (bwrap --ro-bind / / --unshare-all true && echo bwrap works || echo "bwrap blocked here; sandbox tests will skip")
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap syncthing >/dev/null && (bwrap --ro-bind / / --unshare-all true && echo bwrap works || echo "bwrap blocked here; sandbox tests will skip")
       - run: npm test
       - name: Self-test the app (Linux, virtual display)
         if: runner.os == 'Linux'
@@ -63,6 +63,12 @@ jobs:
       - run: npm ci
         env:
           ONNXRUNTIME_NODE_INSTALL: skip # GPU (CUDA) binaries from nuget.org are not needed; the CPU ones ship in the package
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Bundle Cortex.exe and the local AI models
+        shell: bash
+        run: bash scripts/ci/bundle.sh
       - name: Build installer (not published)
         run: npx electron-builder --win nsis --x64 --publish never
       - name: Self-test the packaged app
@@ -90,3 +96,39 @@ jobs:
             dist/COre-Setup-*.exe.blockmap
             dist/latest.yml
           retention-days: 7
+
+  # Office-suite scenarios on real Windows. Microsoft Office cannot be installed
+  # on CI without a license, so this uses LibreOffice (Calc), a real office app.
+  office-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+      - name: Install LibreOffice
+        run: choco install libreoffice-fresh -y --no-progress
+      - run: node --test test/office.win.test.js
+        env:
+          CORE_OFFICE: '1'
+          CORE_SHOTS: ${{ runner.temp }}
+      - name: Install Obsidian
+        if: always()
+        run: choco install obsidian -y --no-progress
+      - name: Real Obsidian opens the vault COre set up
+        if: always()
+        run: node --test test/obsidian.win.test.js
+        env:
+          CORE_OBSIDIAN: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: office-screenshots-${{ github.sha }}
+          path: ${{ runner.temp }}/*.png
+          retention-days: 7
+          if-no-files-found: ignore

@@ -23,6 +23,10 @@ $p = Start-Process -FilePath $exe -ArgumentList "--smoke-test=$result", "--user-
 Get-Content $result | Write-Host
 if ($p.ExitCode -ne 0) { throw "installed app smoke test failed ($($p.ExitCode))" }
 
+Write-Host 'Checking the installed files, bundled Cortex and models'
+node (Join-Path $PSScriptRoot 'check-install.js') $dir
+if ($LASTEXITCODE -ne 0) { throw 'install completeness check failed' }
+
 Write-Host 'Uninstalling silently'
 $un = Join-Path $dir 'Uninstall COre.exe'
 if (-not (Test-Path $un)) { throw 'uninstaller missing' }

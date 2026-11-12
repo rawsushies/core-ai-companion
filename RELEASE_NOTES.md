@@ -1,39 +1,37 @@
-# COre 11.0.0
+# COre 12.0.0
 
-The biggest COre update yet: a redesigned chat, an agent that can work your desktop, an Android app, cards beside
-the orb, backups and Google-synced memory. Everything new is off or harmless by default.
+COre becomes a desktop operator: it sees what is on your screen, remembers your projects through your Cortex
+knowledge vault, notices what needs you, and works your apps one approved step at a time. Everything new is off
+or asks first.
 
 ## Install
 
-- **Windows:** download `COre-Setup-11.0.0.exe` and run it. Windows may warn that the installer is unsigned: choose
-  *More info* → *Run anyway*.
-- **Android:** download `COre-android-11.0.0.apk` on your phone and open it. Allow installing from your browser
-  when asked. In COre on your PC: Settings → Phone → Pair a phone.
+- **Windows:** download `COre-Setup-12.0.0.exe` and run it. Windows may warn that the installer is unsigned:
+  choose *More info* → *Run anyway*.
+- **Android:** download `COre-android-12.0.0.apk` on your phone and open it (allow installing from your browser
+  when asked). In COre on your PC: Settings → Phone → Pair a phone.
 - Checksums are in `SHA256SUMS.txt`.
 
 ## What's new
 
-- **New chat, built to the brand kit:** one clear panel with a solid frame, COre's mark and status, grouped
-  bubbles, and quick settings as cards.
-- **Desktop agent (off by default):** turn it on in Settings → Agent and type `/do` + a task. COre clicks and types
-  one step at a time, asks before every step, and Esc stops it.
-- **Cards beside the orb:** now playing with album art, synced lyrics, timer countdowns, weather, calendar, and
-  live progress when several cores work together.
-- **Instant answers:** time, date, media keys and "show the lyrics" answer in a fraction of a second, without the
-  brain.
-- **Phone:** pair with a QR code, chat end-to-end encrypted over your Wi-Fi, use media buttons. The new Android app
-  also works away from home with Gemini, and keeps what COre knows about you.
-- **Backups and cloud memory:** back up to any folder (OneDrive / Google Drive / Dropbox work as cloud backup), with
-  optional encryption. Optionally sync COre's memory with your Google Drive's private app folder (needs your own
-  Google OAuth client: see `docs/dev/CLOUD.md`).
-- **Lighter:** no drawing at all while hidden or locked (53% → 1.7% CPU measured), fewer particles while idle,
-  battery caps.
-- **Fixes:** many, including phone keys kept out of backups, a phone clock-skew loop, scrolling over chat gaps, and
-  the phone server stopping when a card closed.
-
-Full details: `CHANGELOG.md`.
+- **Long-term memory with Cortex:** connect your Cortex vault (Settings → Privacy). Decisions, lessons and
+  research go there; preferences stay in COre. If Cortex is offline, notes wait and are delivered later.
+- **Set up for you:** on first start COre creates your knowledge vault and adds it to Obsidian automatically (no
+  account or key). No Obsidian yet? Type `/vault obsidian`. Share it with other devices for free using Syncthing.
+- **Open in Obsidian:** your vault is plain Markdown. `/obsidian` opens it, `/obsidian Projects/X.md` opens a note.
+- **Knows what you're working on:** "what am I working on?" reads your open windows and dialogs, recalls the
+  project from both memories, and says where each fact came from. It won't invent windows it can't see.
+- **Smarter desktop agent:** reads real controls through Windows UI Automation, plans first, checks the result,
+  and knows how common apps (Excel, Word, LibreOffice Calc, Explorer, browsers, VS Code, Archicad) work best.
+- **Suggestions:** `/suggest` lists unfinished tasks, overdue to-dos from Cortex and automations that failed.
+  Nothing runs until you choose.
+- **Safer commands:** on Windows, commands run in a locked-down sandbox that can only touch folders you allow.
+- **Free AI that works out of the box:** Gemini, Groq and OpenRouter keys are enough; COre picks a current model by
+  itself and switches if one is retired or busy. `/diagnostics` shows how each brain is doing.
 
 ## Known limits
 
-Not yet verified on real hardware: the desktop agent's Windows input, Windows song reading, a real phone on real
-Wi-Fi, and Google sign-in with a real account.
+- The installer is unsigned.
+- Some apps (LibreOffice on a machine without accessibility tools) show COre no controls; it then uses the
+  keyboard and checks the saved file.
+- Injection detection is a warning only; the real protection is that every action needs your approval.

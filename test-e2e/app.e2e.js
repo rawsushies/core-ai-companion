@@ -750,6 +750,16 @@ test('PHASE 4 ACCEPTANCE: instruction -> knowledge -> specialist -> plan -> tool
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('continue: COre knows what it was doing without being told again', async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: '^(?=[\\s\\S]*\\[Ongoing work\\])(?=[\\s\\S]*write a short Tower facade brief)', full: true, reply: 'Picking up: the Tower facade brief is written and checked.' },
+    ...baseRules,
+  ]));
+  await send('continue');
+  await dock.waitForFunction(() => /Picking up: the Tower facade brief is written and checked/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('suggestions: /suggest lists unfinished work with its source, and changes nothing', async () => {
   await send('/suggest');
   await dock.waitForFunction(() => /Things that may need you \(from what COre can see; nothing has been done\)|Nothing waiting on you right now/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
