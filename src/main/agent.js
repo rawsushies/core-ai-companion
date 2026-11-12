@@ -464,7 +464,7 @@ class AgentRunner {
           if (signal.aborted) return stopped();
         }
         try {
-          if (a.type === 'wait') await new Promise((r) => setTimeout(r, a.ms));
+          if (a.type === 'wait') await new Promise((r) => { const t = setTimeout(r, a.ms); signal.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true }); }); // a stop ends the wait at once
           else if (a.type === 'open') await this.d.openApp(a.app);
           else if (UI.has(a.type)) result = await this._ui(a);
           else if (TOOL.has(a.type)) {

@@ -2508,7 +2508,9 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
     experience: [instructions ? `Saved workflow to follow:\n${String(instructions).slice(0, 3000)}` : '', await agentExperience(goal)].filter(Boolean).join('\n'),
   });
   let r;
-  try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
+  // The STOP file halts a step in progress too, not only the next one.
+  const stopPoll = setInterval(() => { try { if (fs.existsSync(stopFile())) { if (missionEngine) missionEngine.stop('the STOP file'); stopAgent('the STOP file'); } } catch {} }, 250);
+  try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; } finally { clearInterval(stopPoll); }
   try { journal.append(mission ? 'subgoal-end' : 'end', { status: r.status, reason: r.reason || '' }); } catch {}
   try { globalShortcut.unregister('Escape'); } catch {}
   { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }

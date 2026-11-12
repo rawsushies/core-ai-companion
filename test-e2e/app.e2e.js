@@ -447,6 +447,42 @@ test('emergency stop: the global hotkey halts a running agent task at once', { s
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('emergency stop timing: a running mission halts within 1 s from every source (hotkey, Esc, chat, command center, STOP file)', { skip: process.platform !== 'linux' || !require('fs').existsSync('/usr/bin/xdotool') }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: '\\[mission-plan\\]', reply: '1. Keep watching the screen | check: exists never-made.md' },
+    { match: '\\[agent-plan\\]', reply: '1. Watch\nDone when: never' },
+    { match: 'Task: Keep watching', reply: 'Watching. [[act {"type":"wait","ms":4000}]]' },
+  ]));
+  const center = async () => { let c = app.windows().find((p) => p.url().includes('/command/')); if (!c) { await send('/center'); for (let i = 0; i < 40 && !c; i++) { await wait(250); c = app.windows().find((p) => p.url().includes('/command/')); } } return c; };
+  const sources = {
+    hotkey: () => require('child_process').execFileSync('xdotool', ['key', 'ctrl+alt+shift+x']),
+    esc: () => require('child_process').execFileSync('xdotool', ['key', 'Escape']),
+    chat: () => send('/mission stop'),
+    'command center': async () => (await center()).evaluate(() => window.center.action('missionStop')),
+    'STOP file': () => fs.writeFileSync(path.join(userData, 'STOP'), ''),
+  };
+  const times = {};
+  for (const [name, trigger] of Object.entries(sources)) {
+    await send('/autopilot keep an eye on things');
+    await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Goal: keep an eye/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+    await dock.click('#agent-yes');
+    await dock.waitForFunction(() => /Agent step 1: Wait/.test(document.getElementById('log').innerText.slice(document.getElementById('log').innerText.lastIndexOf('/autopilot keep an eye'))), null, { timeout: 30000 });
+    await wait(300); // in the middle of a 4 s step
+    const t0 = Date.now();
+    await trigger();
+    await dock.waitForFunction(() => { const t = document.getElementById('log').innerText; return /Mission (stopped|limit|failed)/.test(t.slice(t.lastIndexOf('/autopilot keep an eye'))); }, null, { timeout: 8000 });
+    times[name] = Date.now() - t0;
+    if (name === 'STOP file') fs.rmSync(path.join(userData, 'STOP'), { force: true });
+    await wait(500);
+  }
+  console.log('stop times (ms):', JSON.stringify(times));
+  for (const [name, ms] of Object.entries(times)) assert.ok(ms < 1000, `${name} stopped the mission in ${ms} ms`);
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('desktop agent: tools write a file and run a command (always asked), results come back, /do undo restores', { skip: process.platform !== 'linux' }, async () => {
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
   fs.writeFileSync(script, JSON.stringify([
