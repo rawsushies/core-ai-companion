@@ -98,3 +98,15 @@ test('Windows AppContainer: no network, not even the host loopback', { skip: !wi
     assert.match(plain.out, /NET reachable/, plain.out);
   } finally { srv.close(); }
 });
+
+test('Windows AppContainer: child-process diagnostics (logged)', { skip: !win, timeout: 90000 }, async () => {
+  const code = `const cp=require('child_process');const t=(n,f)=>{try{const r=f();console.log(n,'ok',r&&r.status,r&&r.error&&r.error.code)}catch(e){console.log(n,'ERR',e.code,e.message)}};
+t('cmd-pipe',()=>cp.spawnSync('cmd.exe',['/c','echo hi']));
+t('node-pipe',()=>cp.spawnSync(process.execPath,['-e','0']));
+t('node-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{windowsHide:true}));
+t('node-ignore',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore'}));
+t('node-ignore-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore',windowsHide:true}));
+t('node-detached',()=>{const c=cp.spawn(process.execPath,['-e','0'],{stdio:'ignore',detached:true});return {status:c.pid}});`;
+  const r = await run(code);
+  console.log('DIAG', r.code, r.out);
+});
