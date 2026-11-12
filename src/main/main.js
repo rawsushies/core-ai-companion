@@ -1086,6 +1086,20 @@ async function diagnosticsReport() {
   return lines.join('\n');
 }
 
+// "continue", "where were we", "lanjut": what COre was last doing, so the
+// user never has to repeat it. Read from COre's own records, nothing guessed.
+const ONGOING_RE = /^\s*(continue|carry on|keep going|go on|resume|where (were|was) (we|i)|what were we doing|lanjut(kan)?|terusin|teruskan)\b/i;
+function ongoingWork() {
+  const lines = [];
+  const t = readAgentTask();
+  if (t && t.goal && Date.now() - (t.at || 0) < 7 * 864e5) lines.push(`- Desktop task "${String(t.goal).slice(0, 120)}": ${t.status || 'unknown'}${t.status === 'running' ? ` (stopped at step ${t.step || 0}; /do resume continues it)` : ''}`);
+  for (const k of (state.get('tasks') || []).slice(-2).reverse()) lines.push(`- Shared task "${String(k.text || '').slice(0, 120)}": ${k.status || 'unknown'}${(k.steps || []).length ? ` (${k.steps.map((x) => `${(coreById(x.core) || { name: x.core }).name} ${x.status}`).join(', ')})` : ''}`);
+  const recent = transcript.filter((m) => m.role === 'user' && !/^\//.test(m.text || '')).slice(-3).map((m) => `"${String(m.text).slice(0, 100)}"`);
+  if (recent.length) lines.push(`- Your last requests: ${recent.join(', ')}`);
+  try { const h = automationHistory(); const last = Object.entries(h).map(([id, r]) => ({ id, ...(r[r.length - 1] || {}) })).sort((a, b) => (b.at || 0) - (a.at || 0))[0]; if (last && last.at && Date.now() - last.at < 864e5) lines.push(`- Automation ${last.id}: ${last.status}${last.verified ? ' (verified)' : ''} for ${String(last.what || '').slice(0, 80)}`); } catch {}
+  return lines.length ? `[Ongoing work] What COre was doing most recently (from its own records). Continue from here; if it is unclear which item the user means, ask.\n${lines.join('\n')}` : '';
+}
+
 let maintenancePlan = null;
 function maintenanceReport(p) {
   const n = p.native;
@@ -3289,6 +3303,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       const mem = (await gateway().context(text)).text; // active memory + long-term knowledge
       if (mem) contextBlocks.push(mem);
     }
+    if (ONGOING_RE.test(text) && !internal) { const og = ongoingWork(); if (og) contextBlocks.push(og); }
     if (SITUATION_RE.test(text) && !internal) {
       situationNow = await situation().describe(text.replace(/^\/situation\s*/i, ''));
       contextBlocks.push(situationNow.prompt);
