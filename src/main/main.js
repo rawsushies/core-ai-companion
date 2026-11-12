@@ -1810,6 +1810,14 @@ function agentUia() {
   if (!uiaClient) uiaClient = new UiaClient();
   return uiaClient;
 }
+const { Situation, groundCheck } = require('./situation');
+let situationInst = null;
+function situation() {
+  if (!situationInst) situationInst = new Situation({ uia: agentUia(), gateway: gateway(), memory });
+  return situationInst;
+}
+// "what am I working on", "what's on my screen", "where was I", /situation
+const SITUATION_RE = /(^\/situation\b|what('?s| is) (on )?(my|the) (screen|desktop)|what am i (looking at|working on|doing)|where (was|am) i\b|what('?s| is) open\b|(lagi|sedang) (ngerjain|mengerjakan) apa)/i;
 let agentRunner = null;
 const agentTaskFile = () => path.join(app.getPath('userData'), 'agent-task.json');
 function readAgentTask() { try { return JSON.parse(fs.readFileSync(agentTaskFile(), 'utf8')); } catch { return null; } }
@@ -3096,10 +3104,16 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // Context for the model: relevant memories, and the clipboard when asked about it.
   // (Never let a context problem stop the message itself.)
   const contextBlocks = [];
+  let situationNow = null;
   try {
     if (memory && config.data.memory.enabled !== false) {
       const mem = (await gateway().context(text)).text; // active memory + long-term knowledge
       if (mem) contextBlocks.push(mem);
+    }
+    if (SITUATION_RE.test(text) && !internal) {
+      situationNow = await situation().describe(text.replace(/^\/situation\s*/i, ''));
+      contextBlocks.push(situationNow.prompt);
+      toolAudit({ event: 'situation', facts: situationNow.facts.length, projects: situationNow.projects.map((p) => p.project), cortex: situationNow.memory.cortex });
     }
     if (fileCtx) {
       contextBlocks.push(fileCtx.block);
@@ -3170,6 +3184,11 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       },
     });
     if (reply) addTranscript('core', reply);
+    if (reply && situationNow) {
+      // Names in the answer that nothing on screen or in memory backs.
+      const g = groundCheck(reply, situationNow.facts, situationNow.memory.text);
+      if (!g.ok) addTranscript('system', `Not seen on screen or in memory: ${g.unsupported.slice(0, 5).map((u) => `"${u}"`).join(', ')}. Treat ${g.unsupported.length > 1 ? 'these' : 'this'} as unverified.`);
+    }
     if (decision) toolAudit({ event: 'route', task: decision.task, complexity: decision.complexity, effort: decision.effort, specialist: decision.specialist, source: decision.source, ms: decision.ms, provider: (brain.lastRoute || {}).provider, model: (brain.lastRoute || {}).model });
     if (reply) offerProposals(reply, 'prime');
     if (truncated) {
