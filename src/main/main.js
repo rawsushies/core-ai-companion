@@ -126,7 +126,10 @@ let cortexClient = null;
 let memGate = null;
 function cortexCfg() {
   const c = (config.data.memory && config.data.memory.cortex) || {};
-  return { command: c.command || '', args: [...(c.script ? [c.script] : []), 'mcp'], vault: c.vault || '' };
+  let documents = '';
+  try { documents = app.getPath('documents'); } catch {}
+  const { command, args, vault } = require('./cortex').resolveCortex(c, { resourcesPath: app.isPackaged ? process.resourcesPath : '', documents });
+  return { command, args, vault };
 }
 function gateway() {
   const want = JSON.stringify(cortexCfg());
@@ -1018,7 +1021,7 @@ function noteEpisode(text) {
 function startMemoryEngine() {
   if (!memory) return;
   if ((config.data.memory || {}).semantic !== false) {
-    embedder = new Embedder({ cacheDir: path.join(app.getPath('userData'), 'models') });
+    embedder = new Embedder({ cacheDir: modelCacheFor('Xenova/all-MiniLM-L6-v2') });
     memory.setEmbedder((texts) => embedder.embed(texts));
   }
   // Daily: merge near-duplicates only (their text stays in the survivor's
@@ -1040,6 +1043,7 @@ function opportunities() {
     cortexOn: () => gateway().cortexOn(),
     automationHistory,
     pending: () => { try { return gateway().pending(); } catch { return 0; } },
+    conflicts: () => { const { findConflicts } = require('./vaultsync'); const { vaultPath } = require('./obsidian'); return findConflicts(vaultPath(cortexCfg().vault)); },
     dismissed: state.get('dismissedSuggestions') || [],
   });
 }
@@ -1060,6 +1064,17 @@ function dailySuggestions() {
   showSuggestions({ quietIfNone: true }).catch(() => {});
 }
 
+// /vault: the knowledge layer at a glance: the Markdown vault (source of truth),
+// Obsidian, the Cortex index, Syncthing between devices, and sync conflicts.
+async function vaultReport() {
+  const { vaultPath, isObsidianVault } = require('./obsidian');
+  const { Syncthing, findConflicts, formatStatus } = require('./vaultsync');
+  const vault = vaultPath(cortexCfg().vault);
+  const gs = await gateway().status().catch((e) => ({ cortex: `error: ${e.message}` }));
+  const sync = vault ? await new Syncthing().vaultStatus(vault) : { reason: 'no vault set' };
+  return formatStatus({ vault, obsidian: isObsidianVault(vault), cortex: gs.cortex, sync, conflicts: findConflicts(vault) });
+}
+
 // /diagnostics: one readable report of what COre is running on (no secrets). The
 // JSON one for support (copyDiagnostics) is diagnostics() further down.
 async function diagnosticsReport() {
@@ -1078,6 +1093,7 @@ async function diagnosticsReport() {
     rs.last ? `  last turn: ${rs.last.provider || ''} ${rs.last.model || ''}${rs.last.reason ? ` because ${String(rs.last.reason).slice(0, 80)}` : ''}` : '',
     `• Memory: ${st ? `${st.total} entries (${Object.entries(st.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}), ${st.conflicts} conflicts kept` : 'off'}`,
     `• Cortex: ${gs.cortex}${gs.pending ? `, ${gs.pending} waiting` : ''}`,
+    `• Vault: ${(await vaultReport().catch((e) => `error: ${e.message}`)).split('\n').slice(0, 4).join('; ')}`,
     `• Desktop agent: ${ag.enabled ? 'on' : 'off'}, approvals ${ag.approve || 'every'}, UI Automation ${agentUia() ? 'available' : 'not available'}`,
     `• Command sandbox: ${sbx.ok ? sbx.kind + (sbx.kind === 'job' ? ` + ${ag.sandboxWindows || 'appcontainer'}` : '') : `none (${sbx.reason})`}, mode ${ag.sandbox || 'auto'}`,
     `• Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}, ${(ev.rules || []).length} rule(s), monitor ${eventMonitor ? 'running' : 'stopped'}`,
@@ -3197,6 +3213,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       showSuggestions().catch((err) => addTranscript('system', `Could not check: ${err.message}`));
       return;
     } }
+    if (/^\/vault\s*$/i.test(text)) { addTranscript('user', text); vaultReport().then((r) => addTranscript('system', r)).catch((err) => addTranscript('system', `Could not check the vault: ${err.message}`)); return; }
     { const ob = /^\/obsidian\b\s*(.*)$/i.exec(text); if (ob) {
       addTranscript('user', text);
       const { vaultPath, isObsidianVault, noteUri } = require('./obsidian');
@@ -3476,12 +3493,18 @@ function setHandsFree(on) {
 }
 
 let sttNoticeShown = false;
+// Local models: the installer ships them in resources/models (COre works offline
+// from the first start); anything not bundled is downloaded once into userData/models.
+function modelCacheFor(id) {
+  const bundled = app.isPackaged ? path.join(process.resourcesPath, 'models') : '';
+  return bundled && id && fs.existsSync(path.join(bundled, ...String(id).split('/'))) ? bundled : path.join(app.getPath('userData'), 'models');
+}
 function makeStt() {
   const v = config.data.voice;
   return new SpeechToText({
     model: v.sttModel,
     language: v.sttLanguage,
-    cacheDir: path.join(app.getPath('userData'), 'models'),
+    cacheDir: modelCacheFor(v.sttModel),
     onProgress: (p) => {
       toPanel('status', { kind: 'download', file: p.file, pct: p.pct });
       // transformers.js reports progress even when reading its cache: only
@@ -4033,11 +4056,11 @@ app.whenReady().then(async () => {
   stt = makeStt();
   let voiceNoticeShown = false;
   tts = new TextToSpeech({
-    cacheDir: path.join(userData, 'models'),
+    cacheDir: modelCacheFor('onnx-community/Kokoro-82M-v1.0-ONNX'),
     quality: config.data.voice.quality,
     onProgress: (p) => {
       toPanel('status', { kind: 'download', file: `voice ${p.file}`, pct: p.pct });
-      if (!voiceNoticeShown && !fs.existsSync(path.join(userData, 'models', 'onnx-community', 'Kokoro-82M-v1.0-ONNX'))) {
+      if (!voiceNoticeShown && !fs.existsSync(path.join(modelCacheFor('onnx-community/Kokoro-82M-v1.0-ONNX'), 'onnx-community', 'Kokoro-82M-v1.0-ONNX'))) {
         voiceNoticeShown = true;
         addTranscript('system', 'Downloading my voice (one time, about 90 MB). I will use your system voice until it is ready.');
       }
@@ -4146,6 +4169,7 @@ app.whenReady().then(async () => {
       root: ROOT,
       version: app.getVersion(),
       packaged: app.isPackaged,
+      resourcesPath: app.isPackaged ? process.resourcesPath : '',
       onDone: (code, report) => {
         console.log(`[core] smoke test ${report.ok ? 'passed' : 'FAILED'}${report.error ? `: ${report.error}` : ''}`);
         app.isQuitting = true;

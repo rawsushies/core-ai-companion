@@ -50,6 +50,12 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Bundle Cortex.exe and the local AI models
+        shell: bash
+        run: bash scripts/ci/bundle.sh
       - name: Build installer
         run: npx electron-builder --win nsis --x64 --publish never
         env:

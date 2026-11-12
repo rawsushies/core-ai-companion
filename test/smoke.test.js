@@ -46,3 +46,15 @@ test('fails on a failed step or a timeout, and always writes a report', async ()
   assert.strictEqual(t.code, 1);
   assert.match(t.file.error, /timed out waiting for: overlay-ready/);
 });
+
+test('packaged Windows self-test requires the bundled Cortex and models', () => {
+  const { bundledChecks, BUNDLED } = require('../src/main/smoke');
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const res = fs.mkdtempSync(path.join(os.tmpdir(), 'core-res-'));
+  assert.deepStrictEqual(bundledChecks(res, 'linux'), []);
+  assert.ok(bundledChecks(res, 'win32').every((c) => !c.ok), 'missing bundle fails');
+  for (const rel of BUNDLED) { fs.mkdirSync(path.dirname(path.join(res, rel)), { recursive: true }); fs.writeFileSync(path.join(res, rel), 'x'); }
+  const c = bundledChecks(res, 'win32');
+  assert.ok(c.length === BUNDLED.length && c.every((x) => x.ok));
+  assert.ok(c.some((x) => x.name === 'bundled cortex'));
+});

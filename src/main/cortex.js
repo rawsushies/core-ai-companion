@@ -113,4 +113,24 @@ class CortexClient {
   dispose() { if (this.proc) { try { this.proc.stdin.end(); this.proc.kill(); } catch {} } this.proc = null; this.ready = null; }
 }
 
-module.exports = { CortexClient };
+// How COre starts Cortex. Settings win; otherwise the Cortex.exe bundled with the
+// installer (resources/cortex). The vault: the setting, else the vault Cortex itself
+// already uses (CORTEX_VAULT / Cortex's config), else "COre Vault" in Documents.
+// c: config.memory.cortex; o: { resourcesPath, platform, documents, env, home, exists }
+function resolveCortex(c = {}, o = {}) {
+  const pth = require('path');
+  const { vaultPath } = require('./obsidian');
+  const exists = o.exists || require('fs').existsSync;
+  const platform = o.platform || process.platform;
+  let command = c.command || '';
+  let args = [...(c.script ? [c.script] : []), 'mcp'];
+  let bundled = false;
+  if (!command && o.resourcesPath) {
+    const exe = pth.join(o.resourcesPath, 'cortex', platform === 'win32' ? 'Cortex.exe' : 'Cortex');
+    if (exists(exe)) { command = exe; args = ['mcp']; bundled = true; }
+  }
+  const vault = vaultPath(c.vault, o.env || process.env, o.home) || (o.documents ? pth.join(o.documents, 'COre Vault') : '');
+  return { command, args, vault, bundled };
+}
+
+module.exports = { CortexClient, resolveCortex };

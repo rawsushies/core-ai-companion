@@ -44,6 +44,11 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
 
     await uia.activate(w.id);
     await wait(1500);
+    // A real click in the sheet area gives Calc the keyboard even when focus-stealing rules block activation.
+    const b = w.bounds;
+    if (b) { await keys.perform({ type: 'click', button: 'left' }, { x: b.x + Math.round(b.w / 2), y: b.y + Math.round(b.h / 2) }); await wait(800); }
+    const fg = (await uia.windows()).find((x) => x.foreground);
+    console.log('foreground before typing:', fg && fg.name);
     // The profile's route: Ctrl+Shift+F5 focuses the Name Box; type a cell, Enter jumps there.
     await key('ctrl+shift+f5'); await wait(400);
     await keys.perform({ type: 'type', text: 'A3' }); await key('enter'); await wait(400);
@@ -53,6 +58,8 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
     await key('ctrl+s'); await wait(2500);
     await key('enter');
 
+    await wait(1500);
+    console.log('windows after save:', JSON.stringify((await uia.windows({ owned: true })).map((x) => ({ name: x.name, fg: x.foreground, dialog: x.dialog }))));
     let text = '';
     for (let i = 0; i < 30; i++) { await wait(1000); text = fs.readFileSync(file, 'utf8'); if (/Glass/.test(text)) break; }
     console.log('saved file:', JSON.stringify(text));

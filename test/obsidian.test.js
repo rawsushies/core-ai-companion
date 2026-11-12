@@ -28,3 +28,15 @@ test('obsidian links open the vault or a cited note, never outside it', () => {
   assert.strictEqual(noteUri(v, 'C:/x.md'), '');
   assert.strictEqual(noteUri('', 'a.md'), '');
 });
+
+test('Cortex: settings win, else the bundled Cortex.exe; vault from settings, Cortex config, else Documents/COre Vault', () => {
+  const { resolveCortex } = require('../src/main/cortex');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'core-rc-'));
+  const res = path.join(home, 'resources');
+  const exe = path.join(res, 'cortex', 'Cortex.exe');
+  const o = { resourcesPath: res, platform: 'win32', documents: path.join(home, 'Documents'), env: {}, home, exists: (p) => p === exe };
+  assert.deepStrictEqual(resolveCortex({}, o), { command: exe, args: ['mcp'], vault: path.join(home, 'Documents', 'COre Vault'), bundled: true });
+  assert.deepStrictEqual(resolveCortex({ command: 'python', script: 'C:/c/run.py', vault: path.join(home, 'V') }, o), { command: 'python', args: ['C:/c/run.py', 'mcp'], vault: path.join(home, 'V'), bundled: false });
+  assert.strictEqual(resolveCortex({}, { ...o, exists: () => false }).command, '');
+  assert.strictEqual(resolveCortex({}, { ...o, env: { CORTEX_VAULT: path.join(home, 'Brain') } }).vault, path.join(home, 'Brain'));
+});

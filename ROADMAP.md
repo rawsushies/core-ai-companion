@@ -20,6 +20,17 @@ verified acceptance criteria below, last update 2026-11-12).
   brain, specialists and agent use. One destination per kind (decision, lesson,
   knowledge, research go to Cortex; the rest stays native). No third engine.
 
+## Knowledge layer (COre × Obsidian × Cortex × Syncthing)
+
+COre ↔ memory gateway ↔ Obsidian-compatible Markdown vault (the one source of truth) ↔ Cortex (local index,
+retrieval, history); Syncthing carries the vault between devices. Details: [docs/VAULT.md](docs/VAULT.md).
+**Acceptance 8/8 with real files, two real Cortex servers and two real Syncthing devices** (`test/vault.sync.test.js`,
+CI Linux): COre memory → Markdown note; Obsidian-style edit and outside note indexed and recalled; device B
+receives it; B's change returns; offline changes meet after reconnection; conflicts keep both versions and are
+reported (`/vault`, `/suggest`, recall warns); a fresh install with an empty index reconnects. Obsidian itself is
+not launched in CI (its edits are file writes). Cortex health names Syncthing copies from
+rawsushies/cortex-ai-brain#1 (draft).
+
 ## Cortex integration status
 
 Connected through `src/main/cortex.js` (MCP client). Off until the user turns it
@@ -117,6 +128,13 @@ vault or a cited note through an `obsidian://` link (paths outside the vault ref
 | Acceptance | Complex instruction end to end | **Pass with stand-in providers** (CI ubuntu e2e, d0a81ff) | `test-e2e` "PHASE 4 ACCEPTANCE": Scout answers from Cortex, the agent plans, a command fails (exit 3), the agent recovers, writes and re-checks the brief, the file is read back, the verified outcome is filed in Cortex. On real Windows too (`test/agent.win.test.js` PHASE 4, windows-latest b97e1fc): Cortex knowledge, an unauthorized read refused by the AppContainer (DENIED EPERM), recovery, a sandboxed command saves the name, the real app is filled and pressed through UIA, verified from the app and the disk, outcome recalled from Cortex. Real model: the same chain (knowledge, agent loop, failover) verified against Groq in docs/REAL-PROVIDERS.md |
 
 ## Blocked or limited
+
+- Installer: bundles Cortex.exe (built from Cortex's PyInstaller recipe) and the local models (speech recognition,
+  voice at both qualities, embeddings; ~570 MB) so voice, memory and knowledge work offline from first start.
+  `scripts/ci/check-install.js` fails the build if any app file, model or Cortex is missing or Cortex can't
+  write + recall (verified on a Linux package build; Windows installer verified in CI).
+- Reference research: most documentation sites (Microsoft Learn, MCP, OpenAI, LangGraph, OWASP, NIST, Letta, Mem0,
+  LiveKit, Langfuse, OpenTelemetry…) are not reachable from this build environment; only GitHub pages were read.
 
 - Injection detection is weak on unseen attacks: on a fresh, untuned set the pattern guard flags 2/8 (0/6 false positives); Llama Prompt Guard 2 (Groq) flags 3/8, the two together 4/8. Detection is only a warning: the protection is deterministic (retrieved text is fenced as data, COre's action tags in it are broken, every action needs approval, commands run sandboxed), and the real-model test shows injected instructions not being obeyed.
 

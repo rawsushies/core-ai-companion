@@ -20,6 +20,15 @@ function smokeTarget(argv = process.argv) {
 
 // Checks that don't need a window: files the packaged app must contain and
 // native modules that must load.
+// Bundled with the installer (resources/): the Cortex knowledge engine and the local
+// models (speech recognition, voice at both qualities, memory embeddings).
+const BUNDLED = ['cortex/Cortex.exe', 'models/onnx-community/whisper-base/onnx/encoder_model_quantized.onnx', 'models/onnx-community/whisper-base/onnx/decoder_model_merged_q4.onnx',
+  'models/onnx-community/Kokoro-82M-v1.0-ONNX/onnx/model_q4.onnx', 'models/onnx-community/Kokoro-82M-v1.0-ONNX/onnx/model_quantized.onnx', 'models/Xenova/all-MiniLM-L6-v2/onnx/model_quantized.onnx'];
+function bundledChecks(resourcesPath, platform = process.platform) {
+  if (!resourcesPath || platform !== 'win32') return [];
+  return BUNDLED.map((rel) => ({ name: `bundled ${rel.split('/').slice(0, rel.startsWith('models/') ? 3 : 1).join('/')}${rel.endsWith('.onnx') ? ` ${path.basename(rel)}` : ''}`, ok: fs.existsSync(path.join(resourcesPath, rel)), detail: rel }));
+}
+
 function staticChecks(root, requireFn = require) {
   const checks = [];
   const file = (name, rel) => checks.push({ name, ok: fs.existsSync(path.join(root, rel)), detail: rel });
@@ -44,10 +53,10 @@ function staticChecks(root, requireFn = require) {
 }
 
 class SmokeTest {
-  constructor({ target, root, version, packaged, timeoutMs = 90_000, onDone }) {
+  constructor({ target, root, version, packaged, resourcesPath = '', timeoutMs = 90_000, onDone }) {
     this.target = target;
     this.started = Date.now();
-    this.report = { ok: false, version, packaged, platform: process.platform, checks: staticChecks(root) };
+    this.report = { ok: false, version, packaged, platform: process.platform, checks: [...staticChecks(root), ...(packaged ? bundledChecks(resourcesPath) : [])] };
     this.waiting = new Set(['overlay-ready', 'dock-loaded']);
     this.onDone = onDone;
     this.timer = setTimeout(() => this.finish(`timed out waiting for: ${[...this.waiting].join(', ')}`), timeoutMs);
@@ -75,4 +84,4 @@ class SmokeTest {
   }
 }
 
-module.exports = { smokeTarget, staticChecks, SmokeTest, FLAG };
+module.exports = { smokeTarget, staticChecks, bundledChecks, BUNDLED, SmokeTest, FLAG };

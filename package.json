@@ -102,6 +102,22 @@
     ],
     "releaseInfo": {
       "releaseNotesFile": "RELEASE_NOTES.md"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "vendor/cortex",
+        "to": "cortex",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/models",
+        "to": "models",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }
