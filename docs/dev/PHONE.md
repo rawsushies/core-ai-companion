@@ -47,3 +47,14 @@ network, and the phone clears it from the address bar after pairing.
 - End to end in the app: a Pixel 7 browser profile scanned the invitation URL, paired, sent a message, received the
   reply, and showed "Not paired" right after the phone was removed in Settings.
 - Not tested: a real phone on a real Wi-Fi, the Windows firewall prompt.
+
+## Missions from the phone (13.0)
+
+- The sync feed carries the current mission (goal, subgoals, how each was verified) and any request waiting for an
+  answer (mission card, escalated step), each with a hash of exactly what it approves and a 5-minute expiry.
+- `approve { id, hash, answer, bio }`: the answer applies only to that request (the hash must match). **Yes** needs
+  `bio: true`, which the phone app sets only after Android's fingerprint/face/screen-lock prompt succeeds
+  (BiometricConfirm, added to the Android build by `mobile/scripts/patch-android.js`). **No** never needs it.
+- `missionStop`: ends the mission and any desktop task at once (the same path as the emergency stop).
+- Known limit: the PC trusts the phone's `bio` flag; it cannot verify it cryptographically. A key held in the
+  Android keystore that only unlocks after biometric confirmation would close this and is planned.

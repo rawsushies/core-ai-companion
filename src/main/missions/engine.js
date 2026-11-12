@@ -103,7 +103,10 @@ class MissionEngine {
         sg.status = 'running';
         this._ev('subgoal', { index: i, text: sg.text, attempt });
         let r;
-        try { r = await this.d.runSubgoal(sg, { index: i, attempt, note, signal, goal }); } catch (err) { r = { status: 'failed', summary: err.message, steps: 0 }; }
+        // A stop ends the mission at once, even while a subgoal is still being set up (the
+        // subgoal sees the same signal and takes no further action).
+        const aborted = new Promise((res) => { if (signal.aborted) res({ status: 'stopped', summary: this.reason, steps: 0 }); else signal.addEventListener('abort', () => res({ status: 'stopped', summary: this.reason, steps: 0 }), { once: true }); });
+        try { r = await Promise.race([this.d.runSubgoal(sg, { index: i, attempt, note, signal, goal }), aborted]); } catch (err) { r = { status: 'failed', summary: err.message, steps: 0 }; }
         report.steps += Array.isArray(r.steps) ? r.steps.length : Number(r.steps) || 0; // the agent loop returns its steps as a list
         if (signal.aborted || r.status === 'stopped') return finish('stopped', { reason: this.reason || r.summary || 'stopped' });
         if (report.steps > budget.steps) return finish('limit', { reason: `the step budget (${budget.steps}) is used up`, at: i });

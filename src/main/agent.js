@@ -345,9 +345,15 @@ class AgentRunner {
   }
 
   // resume: a state saved by checkpoint() ({ goal, history, step, allowAll, verified }).
-  async run(goal, { resume = null } = {}) {
+  async run(goal, opts = {}) {
     if (this.running) throw new Error('The agent is already working on a task.');
     this.running = true;
+    this.goal = goal;
+    // Every way out (including a stop while still planning) clears the running flag.
+    try { return await this._run(goal, opts); } finally { this.running = false; }
+  }
+
+  async _run(goal, { resume = null } = {}) {
     this.ac = new AbortController();
     this.reason = null;
     const signal = this.ac.signal;
@@ -358,6 +364,9 @@ class AgentRunner {
     let changed = history.some((h) => h.changed);
     let first = resume && resume.step ? resume.step + 1 : 1;
     const report = (o) => { try { this.d.onStep(o); } catch {} };
+    // A model call that is slow to cancel never holds up a stop.
+    const yieldTo = (p) => Promise.race([p, new Promise((_, rej) => { const e = Object.assign(new Error('stopped'), { aborted: true }); if (signal.aborted) rej(e); else signal.addEventListener('abort', () => rej(e), { once: true }); })]);
+    const think = (args) => yieldTo(this.d.think(args));
     const save = (step, status = 'running') => { if (this.d.checkpoint) try { this.d.checkpoint({ goal, history, step, allowAll, status, plan, at: Date.now() }); } catch {} };
     const stopped = () => ({ status: 'stopped', reason: this.reason, steps: history });
     // Plan once (not when resuming a task that already has one).
@@ -368,7 +377,7 @@ class AgentRunner {
         let ui0 = null;
         if (this.d.uia) { try { ui0 = await this.d.uia.snapshot(); } catch {} }
         if (signal.aborted) return stopped();
-        plan = parsePlan(await this.d.think({ text: planPrompt(goal, shot0, this.d.experience || '', ui0 ? UIA.outline(ui0, { maxLines: 40 }) : ''), shot: shot0, signal }));
+        plan = parsePlan(await think({ text: planPrompt(goal, shot0, this.d.experience || '', ui0 ? UIA.outline(ui0, { maxLines: 40 }) : ''), shot: shot0, signal }));
       } catch (err) { if (signal.aborted) return stopped(); plan = null; }
       if (plan) report({ plan });
     }
@@ -393,7 +402,8 @@ class AgentRunner {
         if (this.d.policy && ui) this.d.policy.taint.add((ui.elements || []).map((e) => `${e.name || ''} ${e.value || ''}`).join('\n'), 'screen');
         const note = verifying ? `You said the task is done. Look at this fresh screenshot (and the last results) and confirm${plan && plan.doneWhen ? ` against: ${plan.doneWhen}` : ''}: reply done again if it really is finished, otherwise keep going.` : advice;
         advice = '';
-        const reply = await this.d.think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '', controls: ui ? UIA.outline(ui) : '', plan }), shot, signal });
+        let reply;
+        try { reply = await think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '', controls: ui ? UIA.outline(ui) : '', plan }), shot, signal }); } catch (err) { if (signal.aborted) return stopped(); throw err; }
         if (signal.aborted) return stopped();
         const ex = extractAction(reply);
         const v = ex.error ? ex : validateAction(ex.raw, shot, ui);
@@ -503,7 +513,7 @@ class AgentRunner {
       save(this.d.maxSteps, 'limit');
       return { status: 'limit', reason: `stopped after ${this.d.maxSteps} steps`, steps: history };
     } finally {
-      this.running = false;
+      // (run() clears the running flag.)
     }
   }
 }

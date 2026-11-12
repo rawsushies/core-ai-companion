@@ -114,6 +114,7 @@
         since = Math.max(since, e.seq || 0);
         addMsg(e.role === 'notice' ? 'system' : e.role, e.text, e.role === 'core' && e.author && e.author !== 'prime' ? { name: e.name, color: e.color } : {});
       }
+      renderMission(r);
       const s = r.status || {};
       setStatus(s.busy ? 'Thinking…' : s.speaking ? 'Speaking' : 'With your PC', '', s.busy ? 'thinking' : s.speaking ? 'speaking' : 'idle');
       if (Date.now() - (store.get('memoryAt', 0)) > 10 * 60e3) pullMemory();
@@ -127,6 +128,54 @@
     const visible = document.visibilityState === 'visible';
     syncTimer = setTimeout(syncPc, !visible ? 30000 : pcOnline ? 2000 : Math.min(30000, 3000 * failures));
   }
+
+  // Missions (13.0): the plan as a checklist, requests waiting for an answer, and Stop.
+  // Approving needs the phone's fingerprint/face (native BiometricConfirm); declining and
+  // stopping never do.
+  const bio = () => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BiometricConfirm) || null;
+  const answered = new Set();
+  function renderMission(r) {
+    const box = $('mission');
+    const m = r.mission;
+    const asks = (r.approvals || []).filter((a) => !answered.has(a.id));
+    box.hidden = !m && !asks.length && !r.agentRunning;
+    $('mission-stop').hidden = !r.agentRunning;
+    $('mission-goal').textContent = m ? m.goal : 'Desktop task';
+    $('mission-status').textContent = m ? (m.status === 'ask' ? 'needs you' : m.status) : r.agentRunning ? 'running' : '';
+    const ul = $('mission-steps');
+    ul.textContent = '';
+    const icon = { done: '✓', failed: '✗', running: '…', pending: '·', waiting: '?' };
+    for (const sg of (m && m.subgoals) || []) {
+      const li = document.createElement('li');
+      li.className = `step ${sg.status}`;
+      li.textContent = `${icon[sg.status] || '·'} ${sg.text}${sg.verified === 'deterministic' ? ' (checked)' : sg.verified === 'judged' ? ' (judged)' : ''}`;
+      ul.append(li);
+    }
+    const ap = $('approvals');
+    ap.textContent = '';
+    for (const a of asks) {
+      const card = document.createElement('div');
+      card.className = 'approval';
+      const t = document.createElement('div'); t.className = 'approval-label'; t.textContent = a.label;
+      const w = document.createElement('div'); w.className = 'approval-why'; w.textContent = a.why;
+      const row = document.createElement('div'); row.className = 'row';
+      const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'primary'; yes.textContent = bio() ? 'Approve' : 'Approve (needs fingerprint support)';
+      yes.disabled = !bio();
+      const no = document.createElement('button'); no.type = 'button'; no.className = 'ghost'; no.textContent = 'Decline';
+      const send = async (answer) => {
+        let ok = answer === 'no';
+        if (answer === 'yes') { try { const v = await bio().confirm({ title: 'Approve on your PC', subtitle: a.label.slice(0, 80) }); ok = !!(v && v.ok); } catch { ok = false; } }
+        if (!ok) return;
+        try { const res = await call('approve', { id: a.id, hash: a.hash, answer, bio: answer === 'yes' }); if (res.ok) { answered.add(a.id); card.remove(); } else addMsg('system', res.error || 'Not accepted'); } catch (err) { addMsg('system', `Not sent: ${err.message}`); }
+      };
+      yes.addEventListener('click', () => send('yes'));
+      no.addEventListener('click', () => send('no'));
+      row.append(yes, no);
+      card.append(t, w, row);
+      ap.append(card);
+    }
+  }
+  $('mission-stop').addEventListener('click', () => call('missionStop').catch(() => {}));
 
   async function pullMemory() {
     try {

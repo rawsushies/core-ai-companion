@@ -14,7 +14,8 @@
 //    messages can't be replayed. Anyone on the Wi-Fi without that key gets
 //    nothing; revoking a phone deletes its key.
 //  - Only private-network addresses are answered; requests are size- and
-//    rate-limited; the phone sends intents (a message, stop), never commands.
+//    rate-limited; the phone sends intents (a message, stop, an answer to one waiting
+//    request bound to its hash, stop the mission), never commands.
 //  - Known limit: the page itself is served over plain HTTP, so someone who
 //    controls your Wi-Fi at the moment you open it could tamper with the page.
 //    Use it on networks you trust.
@@ -82,7 +83,8 @@ const APP_ORIGINS = new Set(['http://localhost', 'https://localhost', 'capacitor
 class Companion {
   // opts: { port, host (optional address override), staticDir, naclFile, iconFile, devices: [{ id, name, key: Uint8Array, ctr, created, lastSeen }],
   //         saveDevices(list), confirmPair({ name, code }) -> Promise<bool>, onMessage(text, device),
-  //         onStop(device), onMedia(action, device), getMemory() -> [{ text }], getFeed(since) -> { events, status }, now() }
+  //         onStop(device), onMedia(action, device), getMemory() -> [{ text }], getFeed(since) -> { events, status, mission, approvals }, now(),
+  //         onApprove({ id, hash, answer, bio }, device) -> { ok, error }, onMissionStop(device) }
   constructor(opts) {
     this.o = opts;
     this.devices = new Map((opts.devices || []).map((d) => [d.id, { ...d }]));
@@ -239,6 +241,16 @@ class Companion {
       if (!text) return this._send(res, 200, seal({ ok: false, error: 'empty' }, d.key));
       this.o.onMessage(text, { id: d.id, name: d.name });
     } else if (m.op === 'stop') this.o.onStop({ id: d.id, name: d.name });
+    else if (m.op === 'approve') {
+      // An answer to one waiting request, bound to its hash (13.0 P3). 'yes' needs the phone's
+      // biometric confirmation; declining never does.
+      const id = String(m.id || '');
+      const answer = m.answer === 'yes' ? 'yes' : 'no';
+      if (!/^[\w-]{8,64}$/.test(id) || !/^[0-9a-f]{64}$/.test(String(m.hash || '')) || !this.o.onApprove) reply = { ok: false, error: 'bad request' };
+      else reply = this.o.onApprove({ id, hash: String(m.hash), answer, bio: m.bio === true }, { id: d.id, name: d.name }) || { ok: false };
+    } else if (m.op === 'missionStop') {
+      if (this.o.onMissionStop) this.o.onMissionStop({ id: d.id, name: d.name });
+    }
     else if (m.op === 'memory') reply = { ok: true, memory: this.o.getMemory ? this.o.getMemory() : [] };
     else if (m.op === 'media') {
       // Fixed media keys only (the same list as the music skill).

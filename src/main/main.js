@@ -196,7 +196,32 @@ const send = (win, channel, payload) => {
 };
 const toOverlay = (c, p) => send(overlay, c, p);
 const toPanel = (c, p) => send(panel, c, p);
-const toDock = (c, p) => send(dock, c, p);
+const toDock = (c, p) => { if (c === 'dock:agent-approve') notePending(p); return send(dock, c, p); };
+// Approvals waiting for an answer, mirrored to a paired phone (13.0 P3). Each carries a hash of
+// exactly what it approves, so a phone's answer can only apply to that action, and expires.
+const pendingApprovals = new Map();
+function notePending(p) {
+  if (!p) { for (const id of pendingApprovals.keys()) if (!agentApprovals.has(id)) pendingApprovals.delete(id); return; }
+  if (!p.id) return;
+  const hash = require('crypto').createHash('sha256').update(`${p.id}|${p.step}|${p.label}|${p.why}`).digest('hex');
+  pendingApprovals.set(p.id, { id: p.id, step: String(p.step || ''), label: String(p.label || '').slice(0, 600), why: String(p.why || '').slice(0, 300), hash, expires: Date.now() + 5 * 60000 });
+}
+// -> { ok, error }
+function answerFromPhone({ id, hash, answer, bio }, device) {
+  const p = pendingApprovals.get(String(id));
+  const a = agentApprovals.get(String(id));
+  if (!p || !a) return { ok: false, error: 'That request is no longer waiting.' };
+  if (p.hash !== String(hash)) return { ok: false, error: 'That answer does not match the request.' };
+  if (Date.now() > p.expires) return { ok: false, error: 'That request expired. Answer it on the PC.' };
+  if (answer === 'yes' && bio !== true) return { ok: false, error: 'Approving from the phone needs your fingerprint or face. You can decline or stop from here.' };
+  agentApprovals.delete(p.id);
+  pendingApprovals.delete(p.id);
+  toDock('dock:agent-approve', null);
+  toolAudit({ event: 'phone-approval', device: device.name, id: p.id, answer, step: p.step });
+  addTranscript('system', `${answer === 'yes' ? 'Approved' : 'Declined'} from ${device.name}: ${p.label.slice(0, 120)}`, { kind: 'progress' });
+  a.resolve(answer === 'yes' ? 'yes' : 'no');
+  return { ok: true };
+}
 
 // One timeline for everything (Meiosis): meta.author is who wrote it
 // ('prime' | 'scout' | 'forge' | 'sentinel'; entries from older versions have
@@ -961,7 +986,15 @@ function phoneFeed(since) {
     const c = e.author ? coreById(e.author) : null;
     return { seq: e.seq, role: e.role, text: String(e.text).slice(0, 8000), author: e.author, name: c && c.name, color: c && c.color };
   });
-  return { events, status: { busy: !!current, speaking: mainSpeaking } };
+  const m = missionLive;
+  return {
+    events,
+    status: { busy: !!current, speaking: mainSpeaking },
+    // 13.0 P3: the mission as a checklist, and what is waiting for an answer.
+    mission: m ? { goal: m.goal, status: missionEngine ? 'running' : m.status, subgoals: (m.subgoals || []).map((x) => ({ text: x.text.slice(0, 160), status: x.status, verified: x.evidence ? x.evidence.kind : null })), steps: m.steps || 0 } : null,
+    approvals: [...pendingApprovals.values()].filter((p) => agentApprovals.has(p.id) && Date.now() <= p.expires).map((p) => ({ id: p.id, hash: p.hash, step: p.step, label: p.label, why: p.why, expires: p.expires })),
+    agentRunning: !!((agentRunner && agentRunner.running) || missionEngine),
+  };
 }
 
 function ensureCompanion() {
@@ -989,6 +1022,8 @@ function ensureCompanion() {
     },
     onMessage: (text, device) => { handleUserText(text, { typed: true, remote: true }); toolAudit(`phone ${device.name}: message`); },
     onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
+    onApprove: (a, device) => answerFromPhone(a, device),
+    onMissionStop: (device) => { toolAudit({ event: 'phone-stop', device: device.name }); if (missionEngine) missionEngine.stop(`stopped from ${device.name}`); stopAgent(`stopped from ${device.name}`); addTranscript('system', `Stopped from ${device.name}.`, { kind: 'progress' }); },
     onMedia: (action) => {
       if (config.data.skills.music === false) return;
       const cmd = SK.musicCommand(action, process.platform);
@@ -2398,7 +2433,8 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
   if (remote) { addTranscript('system', 'The desktop agent can only be started at the PC.', { kind: 'error' }); return; }
   const driver = AG.driverFor(process.platform);
   if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
-  if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return mission ? { status: 'stopped', reason: 'another task is running', steps: [] } : undefined; }
+  for (let i = 0; i < 30 && agentRunner && agentRunner.running && agentRunner.ac && agentRunner.ac.signal.aborted; i++) await new Promise((r) => setTimeout(r, 100)); // a stopped task winding down
+  if (agentRunner && agentRunner.running) { addTranscript('system', `The agent is already working on a task${agentRunner.goal ? ` ("${String(agentRunner.goal).split('\n')[0].slice(0, 80)}"${agentRunner.ac && agentRunner.ac.signal.aborted ? ', stopping' : ''})` : ''}. Say stop first.`, { kind: 'error' }); return mission ? { status: 'stopped', reason: 'another task is running', steps: [] } : undefined; }
   if (fs.existsSync(stopFile())) { addTranscript('system', `Agent actions are halted: a STOP file is in COre's data folder (${stopFile()}). Delete it to allow tasks again.`, { kind: 'error' }); return; }
   if (mission) taskId = mission.taskId;
   if (!mission) addTranscript('user', resume ? '/do resume' : `/do ${goal}`);
@@ -2448,6 +2484,11 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
   const journal = mission ? mission.journal : new Journal(path.join(userData, 'missions', taskId, 'journal.jsonl'));
   if (mission) journal.append('subgoal-start', { text: goal.slice(0, 240) });
   else if (resume) journal.append('resume', { step: resume.step || 0 }); else journal.append('start', { id: taskId, goal, grant: grant ? { id: grant.id, folders: grant.folders, categories: grant.categories } : null });
+  // Context first (it can take a moment); a mission stopped meanwhile, or another task that
+  // started meanwhile, must not be overwritten by this one.
+  const experienceText = await agentExperience(goal).catch(() => '');
+  if (mission && mission.signal && mission.signal.aborted) { toOverlay('state', 'idle'); return { status: 'stopped', reason: 'the mission was stopped', steps: [] }; }
+  if (agentRunner && agentRunner.running) { addTranscript('system', 'Another task started meanwhile; this one did not.', { kind: 'error' }); return { status: 'stopped', reason: 'another task is running', steps: [] }; }
   agentRunner = new AG.AgentRunner({
     policy: agentPolicy,
     waitHands: mission && (config.data.agent || {}).waitForUser !== false ? waitForUserIdle : null,
@@ -2505,12 +2546,18 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
       toDock('dock:agent-approve', { id, step: 'Plan', label: `${plan.steps.length} steps: ${plan.steps.map((x, i) => `${i + 1}. ${x}`).join('  ')}`.slice(0, 400), why: plan.doneWhen ? `Done when: ${plan.doneWhen}` : 'Approve to let COre carry it out without asking each step.', forced: true });
     }) : null,
     uia: agentUia(),
-    experience: [instructions ? `Saved workflow to follow:\n${String(instructions).slice(0, 3000)}` : '', await agentExperience(goal)].filter(Boolean).join('\n'),
+    experience: [instructions ? `Saved workflow to follow:\n${String(instructions).slice(0, 3000)}` : '', experienceText].filter(Boolean).join('\n'),
   });
   let r;
   // The STOP file halts a step in progress too, not only the next one.
   const stopPoll = setInterval(() => { try { if (fs.existsSync(stopFile())) { if (missionEngine) missionEngine.stop('the STOP file'); stopAgent('the STOP file'); } } catch {} }, 250);
-  try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; } finally { clearInterval(stopPoll); }
+  // A mission stopped while this step was being set up never starts it; one stopped during
+  // it ends it at once.
+  const onMissionAbort = () => { if (agentRunner) agentRunner.stop('the mission was stopped'); };
+  if (mission && mission.signal) mission.signal.addEventListener('abort', onMissionAbort, { once: true });
+  try {
+    r = mission && mission.signal && mission.signal.aborted ? { status: 'stopped', reason: 'the mission was stopped', steps: [] } : await agentRunner.run(goal, { resume });
+  } catch (err) { r = { status: 'failed', reason: err.message }; } finally { clearInterval(stopPoll); if (mission && mission.signal) mission.signal.removeEventListener('abort', onMissionAbort); }
   try { journal.append(mission ? 'subgoal-end' : 'end', { status: r.status, reason: r.reason || '' }); } catch {}
   try { globalShortcut.unregister('Escape'); } catch {}
   { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }
@@ -2604,6 +2651,8 @@ async function startMission(goal, { standing = null, plan: givenPlan = null, sou
   const ag = config.data.agent || {};
   if (!standing) addTranscript('user', `/autopilot ${goal}`);
   if (!ag.enabled) { addTranscript('system', 'The desktop agent is off. Turn it on in Settings, Agent.', { kind: 'error' }); return null; }
+  // A step that was just stopped may still be winding down: give it a moment.
+  for (let i = 0; i < 30 && !missionEngine && agentRunner && agentRunner.running && agentRunner.ac && agentRunner.ac.signal.aborted; i++) await new Promise((r) => setTimeout(r, 100));
   if (missionEngine || (agentRunner && agentRunner.running)) { addTranscript('system', 'A task is already running. Say stop first.', { kind: 'error' }); return null; }
   const roots = agentFiles().roots;
   if (!roots.length) { addTranscript('system', 'Share a project folder first (Settings → Projects): a mission works only inside folders you grant.', { kind: 'error' }); return null; }
@@ -2644,7 +2693,7 @@ async function startMission(goal, { standing = null, plan: givenPlan = null, sou
       const m = /Verdict:\s*(yes|no)\b[\s-:]*(.*)/i.exec(reply || '');
       return { ok: !!m && /yes/i.test(m[1]), why: (m && m[2]) || String(reply || '').slice(0, 160) };
     },
-    runSubgoal: async (sg, { note, goal: g }) => startAgent(`${sg.text}${note ? `\n${note}` : ''}\n(Part of the mission: ${g})`, { mission: { grant, policy, journal, taskId } }),
+    runSubgoal: async (sg, { note, goal: g, signal }) => startAgent(`${sg.text}${note ? `\n${note}` : ''}\n(Part of the mission: ${g})`, { mission: { grant, policy, journal, taskId, signal } }),
     onEvent: (e) => {
       const L = missionLive;
       if (L && e.type === 'plan') L.subgoals = e.plan.map((x) => ({ text: x.text, checked: !!x.check, status: 'pending', attempts: 0, evidence: null }));
@@ -4017,6 +4066,7 @@ function wireIpc() {
     const a = agentApprovals.get(String(id));
     if (!a) return;
     agentApprovals.delete(String(id));
+    pendingApprovals.delete(String(id));
     a.resolve(['yes', 'all', 'no'].includes(answer) ? answer : 'no');
   });
   ipcMain.handle('settings:action', (e, name) => (fromSettings(e) ? settingsAction(String(name)) : null));

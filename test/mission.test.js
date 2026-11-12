@@ -134,3 +134,17 @@ test('learning: a verified mission becomes a playbook route; a near-identical go
   assert.strictEqual(planned, 0);
   assert.ok(r.subgoals.every((x) => x.evidence.kind === 'deterministic'));
 });
+
+test('a stop ends the mission at once, even while a subgoal is still starting', async () => {
+  const { W } = ws();
+  let release;
+  const eng = new E.MissionEngine({ think: async () => '1. Slow start | check: exists x.md', runSubgoal: () => new Promise((r) => { release = r; }) });
+  const p = eng.run({ id: 'm', goal: 'g', grant: { folders: [W] } });
+  await new Promise((r) => setTimeout(r, 30));
+  const t0 = Date.now();
+  eng.stop('from the phone');
+  const r = await p;
+  assert.strictEqual(r.status, 'stopped');
+  assert.ok(Date.now() - t0 < 100);
+  release({ status: 'done', steps: 1 });
+});

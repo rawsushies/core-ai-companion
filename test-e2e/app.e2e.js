@@ -483,6 +483,48 @@ test('emergency stop timing: a running mission halts within 1 s from every sourc
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('phone as remote body: the mission and its approval reach the phone; answers are bound to the request and need the biometric; the phone stops it', { skip: process.platform !== 'linux' }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: '\\[mission-plan\\]', reply: '1. Keep watching the screen | check: exists never-made.md' },
+    { match: '\\[agent-plan\\]', reply: '1. Watch\nDone when: never' },
+    { match: 'Task: Keep watching', reply: 'Watching. [[act {"type":"wait","ms":4000}]]' },
+  ]));
+  const r = await settings.evaluate(() => window.settingsApi.action('pairPhone'));
+  const u = new URL(r.pair.url);
+  const [pairId, secretB64] = u.hash.replace('#pair=', '').split('.');
+  const base = `${u.protocol}//${u.host}`;
+  const post = async (p, body) => { const res = await fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: res.status, body: await res.json() }; };
+  const deviceId = Buffer.from(nacl.randomBytes(18)).toString('base64url');
+  const key = nacl.randomBytes(32);
+  assert.strictEqual(C.open((await post('/pair', { pairId, deviceId, ...C.seal({ key: Buffer.from(key).toString('base64'), name: 'Mission phone' }, new Uint8Array(Buffer.from(secretB64, 'base64url'))) })).body, new Uint8Array(Buffer.from(secretB64, 'base64url'))).ok, true);
+  let ctr = 1;
+  const api = async (op, extra = {}) => C.open((await post('/api', { d: deviceId, ...C.seal({ op, ctr: ctr++, ts: Date.now(), ...extra }, key) })).body, key);
+  await send('/autopilot keep an eye on things from my phone');
+  let ask = null;
+  for (let i = 0; i < 40 && !ask; i++) { ask = ((await api('sync', { since: 0 })).approvals || [])[0]; if (!ask) await wait(250); }
+  assert.ok(ask && /Goal: keep an eye on things from my phone/.test(ask.label), 'the mission card reached the phone');
+  assert.strictEqual((await api('approve', { id: ask.id, hash: ask.hash, answer: 'yes' })).ok, false, 'yes without the biometric is refused');
+  assert.strictEqual((await api('approve', { id: ask.id, hash: 'f'.repeat(64), answer: 'yes', bio: true })).ok, false, 'an answer for another request is refused');
+  assert.strictEqual((await api('approve', { id: ask.id, hash: ask.hash, answer: 'yes', bio: true })).ok, true);
+  await dock.waitForFunction(() => /Approved from Mission phone/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'the card on the PC closed');
+  let feed = null;
+  for (let i = 0; i < 40 && !(feed && feed.mission && feed.mission.subgoals.length && feed.agentRunning); i++) { feed = await api('sync', { since: 0 }); await wait(250); }
+  assert.strictEqual(feed.mission.goal, 'keep an eye on things from my phone');
+  assert.strictEqual(feed.mission.subgoals[0].text, 'Keep watching the screen');
+  const t0 = Date.now();
+  await api('missionStop');
+  await dock.waitForFunction(() => { const t = document.getElementById('log').innerText; return /Mission stopped/.test(t.slice(t.lastIndexOf('/autopilot keep an eye on things from my phone'))); }, null, { timeout: 8000 });
+  const took = Date.now() - t0;
+  if (took >= 1500) console.log('LOG23:', (await logText()).slice(-1200));
+  assert.ok(took < 1500, `stopped from the phone in ${took} ms`);
+  await settings.evaluate((id) => window.settingsApi.action(`revokePhone:${id}`), deviceId);
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('desktop agent: tools write a file and run a command (always asked), results come back, /do undo restores', { skip: process.platform !== 'linux' }, async () => {
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
   fs.writeFileSync(script, JSON.stringify([
@@ -493,7 +535,7 @@ test('desktop agent: tools write a file and run a command (always asked), result
     { match: 'Step 1 of', reply: 'Writing. [[act {"type":"write","path":"notes.txt","text":"agent notes","why":"save notes"}]]' },
   ]));
   await send('/do write my notes');
-  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write notes\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  try { await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write notes\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 }); } catch (err) { console.log('LOG24:', (await logText()).slice(-1200)); throw err; }
   assert.ok(!(await dock.evaluate(() => document.getElementById('agent-all').hidden)), 'file steps can be allowed for the whole task');
   await dock.click('#agent-all');
   await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Run/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });

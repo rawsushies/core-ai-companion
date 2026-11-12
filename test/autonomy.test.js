@@ -165,3 +165,24 @@ test('hands lease: mouse and keyboard steps wait while the user is busy; tool st
   assert.strictEqual(r.status, 'done');
   assert.deepStrictEqual(order, ['write@busy', 'key@idle'], 'the file step ran while the user was busy; the key waited');
 });
+
+test('a stop while the agent is still planning ends the task and frees the agent at once', async () => {
+  const w = world();
+  let r0;
+  const r = new AG.AgentRunner({
+    plan: true, verify: false, settleMs: 0, maxSteps: 5,
+    policy: new Policy({ grant: createGrant({ goal: 'g', folders: [w.W] }, w.key), key: w.key }),
+    think: () => new Promise(() => {}), // a model that never answers (or is slow to cancel)
+    screenshot: async () => ({ width: 800, height: 600, displayWidth: 800, displayHeight: 600, scaleFactor: 1 }),
+    driver: { perform: async () => {} }, openApp: async () => {}, onStep: () => {}, approve: async () => 'no',
+  });
+  const p = r.run('g');
+  await new Promise((res) => setTimeout(res, 30));
+  assert.strictEqual(r.running, true);
+  const t0 = Date.now();
+  r.stop('test');
+  r0 = await p;
+  assert.strictEqual(r0.status, 'stopped');
+  assert.strictEqual(r.running, false, 'the agent is free again');
+  assert.ok(Date.now() - t0 < 100);
+});
