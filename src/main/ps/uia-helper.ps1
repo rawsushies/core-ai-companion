@@ -39,6 +39,27 @@ Add-Type -Namespace CoreUia -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int index);
 '@
 
+# MSAA (oleacc): role, checked state and default action of Win32 controls,
+# reliable even for owner-drawn framework buttons.
+try {
+  Add-Type -ReferencedAssemblies Accessibility -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CoreMsaa {
+  [DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object acc);
+  static Accessibility.IAccessible Get(IntPtr h) {
+    Guid g = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71"); object o;
+    if (AccessibleObjectFromWindow(h, 0xFFFFFFFC, ref g, out o) != 0) return null;
+    return o as Accessibility.IAccessible;
+  }
+  public static int Role(IntPtr h) { try { var a = Get(h); return a == null ? 0 : Convert.ToInt32(a.get_accRole(0)); } catch { return 0; } }
+  public static int State(IntPtr h) { try { var a = Get(h); return a == null ? 0 : Convert.ToInt32(a.get_accState(0)); } catch { return 0; } }
+  public static bool Default(IntPtr h) { try { var a = Get(h); if (a == null) return false; a.accDoDefaultAction(0); return true; } catch { return false; } }
+}
+'@
+  $script:msaa = $true
+} catch { $script:msaa = $false }
+
 $AE = [System.Windows.Automation.AutomationElement]
 $Walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $script:cache = @{}
@@ -68,6 +89,15 @@ function Get-Win32Kind($e) {
   $h = [IntPtr]$e.Current.NativeWindowHandle
   if ($h -eq [IntPtr]::Zero) { return $null }
   $cls = [string]$e.Current.ClassName
+  if ($script:msaa) {
+    switch ([CoreMsaa]::Role($h)) {
+      0x2B { return 'button' }   # ROLE_SYSTEM_PUSHBUTTON
+      0x2C { return 'check' }    # ROLE_SYSTEM_CHECKBUTTON
+      0x2D { return 'radio' }    # ROLE_SYSTEM_RADIOBUTTON
+      0x2A { return 'edit' }     # ROLE_SYSTEM_TEXT (editable)
+      0x29 { return 'text' }     # ROLE_SYSTEM_STATICTEXT
+    }
+  }
   if ($cls -match 'EDIT|RichEdit') { return 'edit' }
   if ($cls -match 'BUTTON') {
     # WM_GETDLGCODE tells push buttons, radio buttons and check boxes apart even
@@ -111,8 +141,11 @@ function Describe($e, $depth) {
     elseif ($k -eq 'button') { $o.type = 'Button'; $o.patterns = @('Invoke', 'Win32') }
     elseif ($k -eq 'check' -or $k -eq 'radio') {
       $o.type = $(if ($k -eq 'check') { 'CheckBox' } else { 'RadioButton' }); $o.patterns = @('Toggle', 'Win32')
-      $st = [int][CoreUia.Native]::SendMessage([IntPtr]$e.Current.NativeWindowHandle, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) # BM_GETCHECK
-      $o.toggle = $(if ($st -eq 1) { 'On' } else { 'Off' })
+      $hw = [IntPtr]$e.Current.NativeWindowHandle
+      $checked = $false
+      if ($script:msaa) { $checked = ([CoreMsaa]::State($hw) -band 0x10) -ne 0 }   # STATE_SYSTEM_CHECKED
+      if (-not $checked) { $checked = [int][CoreUia.Native]::SendMessage($hw, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) -eq 1 } # BM_GETCHECK
+      $o.toggle = $(if ($checked) { 'On' } else { 'Off' })
     }
     elseif ($k -eq 'text') { $o.type = 'Text'; try { $t = Get-Win32Text $e; if ($t) { $o.name = $t } } catch {} }
   }
@@ -243,7 +276,11 @@ function Handle($req) {
         return 'expanded'
       }
       $k = Get-Win32Kind $e
-      if ($k -in 'button', 'check', 'radio') { [void][CoreUia.Native]::SendMessage([IntPtr]$e.Current.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero); return $(if ($k -eq 'button') { 'invoked' } else { 'toggled' }) } # BM_CLICK
+      if ($k -in 'button', 'check', 'radio') {
+        $hw = [IntPtr]$e.Current.NativeWindowHandle
+        if (-not ($script:msaa -and [CoreMsaa]::Default($hw))) { [void][CoreUia.Native]::SendMessage($hw, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) } # MSAA default action, else BM_CLICK
+        return $(if ($k -eq 'button') { 'invoked' } else { 'toggled' })
+      }
       throw 'NO_PATTERN: this control has no press action; click its centre instead.'
     }
     'setvalue' {
