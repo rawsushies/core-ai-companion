@@ -70,9 +70,13 @@ function Get-Win32Kind($e) {
   $cls = [string]$e.Current.ClassName
   if ($cls -match 'EDIT|RichEdit') { return 'edit' }
   if ($cls -match 'BUTTON') {
+    # WM_GETDLGCODE tells push buttons, radio buttons and check boxes apart even
+    # when the style bits don't (owner-drawn / framework buttons).
+    $code = [int][CoreUia.Native]::SendMessage($h, 0x0087, [IntPtr]::Zero, [IntPtr]::Zero)
     $style = [CoreUia.Native]::GetWindowLong($h, -16) -band 0xF
-    if ($style -in 2, 3, 5, 6) { return 'check' }
-    if ($style -in 4, 9) { return 'radio' }
+    if (($code -band 0x40) -or $style -in 4, 9) { return 'radio' }
+    if ($code -band 0x30) { return 'button' }   # default / non-default push button
+    if (($code -band 0x2000) -or $style -in 2, 3, 5, 6) { return 'check' }
     return 'button'
   }
   if ($cls -match 'STATIC') { return 'text' }
