@@ -64,6 +64,19 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
     await keys.perform({ type: 'type', text: '900000' }); await key('enter'); await wait(600);
     shot('calc-2-typed.png');
     await key('ctrl+s'); await wait(3000);
+    // Saving a CSV asks whether to keep the format. Older LibreOffice: "Keep Current Format"
+    // (Enter keeps it, and the profile setting turns it off); 26.x: "Use Text CSV Format",
+    // which ignores that setting. Answer it like COre's Calc profile does: find the button.
+    for (let i = 0; i < 5; i++) {
+      let snap = null;
+      try { snap = await uia.snapshot({ target: 'foreground' }); } catch {}
+      const btn = snap && (snap.elements || []).find((e) => /Button/i.test(e.type) && /Use Text CSV Format|Keep Current Format/i.test(String(e.name || '')));
+      if (!btn) { await wait(600); continue; }
+      console.log('format question answered:', btn.name);
+      try { await uia.invoke(btn.id); } catch { const c = btn.bounds; if (c) await keys.perform({ type: 'click', button: 'left' }, { x: c.x + Math.round(c.w / 2), y: c.y + Math.round(c.h / 2) }); }
+      await wait(2000);
+      break;
+    }
     shot('calc-3-saved.png');
 
     await wait(1500);
