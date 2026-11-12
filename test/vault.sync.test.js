@@ -17,11 +17,12 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { Memory } = require('../src/main/memory');
 const { CortexClient } = require('../src/main/cortex');
 const { MemoryGateway } = require('../src/main/memgate');
-const { Syncthing, findConflicts, formatStatus } = require('../src/main/vaultsync');
+const { findConflicts, formatStatus } = require('../src/main/vaultsync');
+const { Device, until } = require('./helpers/syncthing');
 const { noteUri } = require('../src/main/obsidian');
 
 const CORTEX_DIR = process.env.CORTEX_DIR || path.join(__dirname, '..', '..', 'rawsushies', 'cortex-ai-brain');
@@ -29,42 +30,7 @@ const PY = process.platform === 'win32' ? 'python' : 'python3';
 const has = (cmd, args) => { try { return spawnSync(cmd, args, { encoding: 'utf8' }).status === 0; } catch { return false; } };
 const skip = !has('syncthing', ['--version']) ? 'syncthing not installed' : !fs.existsSync(path.join(CORTEX_DIR, 'run.py')) ? 'Cortex checkout not found (set CORTEX_DIR)' : !has(PY, ['--version']) ? 'Python not available' : false;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(what, f, ms = 90000) {
-  const end = Date.now() + ms;
-  for (;;) {
-    let v; try { v = await f(); } catch { v = null; }
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`timed out waiting for: ${what}`);
-    await wait(500);
-  }
-}
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
-
-// One Syncthing device, local only (no discovery, relays or NAT), GUI/REST on loopback.
-class Device {
-  constructor(root, name, gui, listen) { Object.assign(this, { home: path.join(root, `st-${name}`), name, gui, listen }); }
-  generate() {
-    const r = spawnSync('syncthing', ['generate', `--home=${this.home}`], { encoding: 'utf8', env: { ...process.env, STNODEFAULTFOLDER: '1' } });
-    this.id = /Device ID: (\S+)/.exec(`${r.stdout}${r.stderr}`)[1];
-    let x = fs.readFileSync(path.join(this.home, 'config.xml'), 'utf8');
-    x = x.replace(/<listenAddress>[^<]*<\/listenAddress>/, `<listenAddress>tcp://127.0.0.1:${this.listen}</listenAddress>`)
-      .replace(/(<gui\b[\s\S]*?<address>)[^<]*(<\/address>)/, `$1127.0.0.1:${this.gui}$2`);
-    for (const k of ['globalAnnounceEnabled', 'localAnnounceEnabled', 'relaysEnabled', 'natEnabled', 'startBrowser', 'crashReportingEnabled']) x = x.replace(new RegExp(`<${k}>true</${k}>`), `<${k}>false</${k}>`);
-    x = x.replace(/<urAccepted>[^<]*<\/urAccepted>/, '<urAccepted>-1</urAccepted>');
-    fs.writeFileSync(path.join(this.home, 'config.xml'), x);
-    this.api = new Syncthing({ address: `127.0.0.1:${this.gui}`, apiKey: /<apikey>([^<]+)<\/apikey>/.exec(x)[1] });
-  }
-  async start() {
-    this.proc = spawn('syncthing', ['serve', `--home=${this.home}`, '--no-browser', '--no-restart', '--no-upgrade'], { stdio: 'ignore', env: { ...process.env, STNODEFAULTFOLDER: '1', STNOUPGRADE: '1' } });
-    await until(`${this.name} REST up`, () => this.api.get('/rest/system/ping'), 30000);
-  }
-  async stop() { if (!this.proc) return; const p = this.proc; this.proc = null; p.kill('SIGTERM'); await new Promise((r) => { p.once('exit', r); setTimeout(r, 5000); }); }
-  async share(other, vault) {
-    await this.api.request('POST', '/rest/config/devices', { deviceID: other.id, name: other.name, addresses: [`tcp://127.0.0.1:${other.listen}`] });
-    await this.api.request('POST', '/rest/config/folders', { id: 'vault', label: 'Knowledge vault', path: vault, type: 'sendreceive', devices: [{ deviceID: this.id }, { deviceID: other.id }], fsWatcherEnabled: true, fsWatcherDelayS: 1, rescanIntervalS: 3600 });
-  }
-  scan() { return this.api.request('POST', '/rest/db/scan?folder=vault').catch(() => {}); }
-}
 
 function cortexFor(vault, localDir) {
   return new CortexClient({ cfg: { command: PY, args: [path.join(CORTEX_DIR, 'run.py'), 'mcp'], vault, env: { CORTEX_LOCAL_DIR: localDir, CORTEX_AUTO_IMPORT: 'off' } }, timeoutMs: 30000 });

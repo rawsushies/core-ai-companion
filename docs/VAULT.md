@@ -60,5 +60,11 @@ servers each with its own local index, real files. It proves: COre memory appear
 Obsidian-style edit and a note created outside COre are indexed and recalled; device B receives the knowledge and
 its Cortex finds it; a change on B returns to A; changes made while B was offline synchronize after reconnection
 while COre keeps working; conflicting edits keep both versions and are reported; a fresh install with an empty
-index reconnects to the vault and recalls. Obsidian itself is not launched in CI; its edits are file writes, which
-is what Obsidian does.
+index reconnects to the vault and recalls. In that test, Obsidian edits are file writes, which is how Obsidian saves.
+
+The real Obsidian is covered separately on Windows CI: `test/obsidian.win.test.js` installs Obsidian, lets COre
+create the vault and add it to Obsidian's vault list, launches Obsidian and checks (through UI Automation) that it
+opened the COre vault on the note COre wrote (Obsidian 1.15.0: window "Tower - COre Vault - Obsidian").
+`test-e2e/installed.e2e.js` drives two installed copies of COre: first launch, bundled Cortex, vault, Obsidian
+list, remember and recall, and the knowledge travelling both ways over real Syncthing (verified on a Linux package
+build; the Windows installer run is the `installed-windows` CI job). Typing inside Obsidian is not automated.

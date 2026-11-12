@@ -1,0 +1,3 @@
+# Build tools for the bundled Cortex.exe (scripts/ci/bundle.sh). Pinned for reproducible builds;
+# CI caches the downloads (actions/setup-python cache: pip).
+pyinstaller==6.22.3

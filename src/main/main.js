@@ -1102,6 +1102,8 @@ function setupVault({ force = false, announce = true, freshInstall = false } = {
   const made = O.ensureVault(vault);
   let obsidian = 'not installed';
   if (O.obsidianInstalled()) {
+    // An Obsidian that was never opened has no settings folder yet: create it, so the vault list starts with ours.
+    try { fs.mkdirSync(path.dirname(O.obsidianConfigPath()), { recursive: true }); } catch {}
     obsidian = state.get('obsidianRegistered') === vault && !force ? 'already' : O.registerVault(vault);
     if (obsidian === 'added' || obsidian === 'already') state.set('obsidianRegistered', vault);
   }

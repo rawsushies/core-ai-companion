@@ -66,6 +66,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/ci/bundle-requirements.txt
       - name: Bundle Cortex.exe and the local AI models
         shell: bash
         run: bash scripts/ci/bundle.sh
@@ -96,6 +98,47 @@ jobs:
             dist/COre-Setup-*.exe.blockmap
             dist/latest.yml
           retention-days: 7
+
+  # The installed product, end to end: the installer CI just built, installed silently, first
+  # launch -> bundled Cortex -> vault -> real Obsidian -> recall, and a second installation
+  # joined by real Syncthing (test-e2e/installed.e2e.js).
+  installed-windows:
+    needs: package-windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-installer-${{ github.sha }}
+          path: installer
+      - name: Install Obsidian and Syncthing
+        run: choco install obsidian syncthing -y --no-progress
+      - name: Install COre silently, plus a second installation (another device)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem installer\COre-Setup-*.exe | Select-Object -First 1
+          $a = Join-Path $env:RUNNER_TEMP 'core-A'; $b = Join-Path $env:RUNNER_TEMP 'core-B'
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '/S', "/D=$a" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+          Copy-Item -Recurse $a $b
+          "CORE_EXE_A=$a\COre.exe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "CORE_EXE_B=$b\COre.exe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Installed-app acceptance
+        run: node --test test-e2e/installed.e2e.js
+        env:
+          INSTALLED_EVIDENCE: ${{ runner.temp }}/installed-evidence.txt
+      - name: Evidence
+        if: always()
+        shell: bash
+        run: cat "$RUNNER_TEMP/installed-evidence.txt" 2>/dev/null || echo "no evidence file"
 
   # Office-suite scenarios on real Windows. Microsoft Office cannot be installed
   # on CI without a license, so this uses LibreOffice (Calc), a real office app.
