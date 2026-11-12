@@ -66,7 +66,7 @@ test('PHASE 2 ACCEPTANCE: real desktop + project + both memory systems, sourced,
     const perf = {
       windows: await timed(() => uia.windows()),
       windowsWithDialogs: await timed(() => uia.windows({ owned: true })),
-      snapshot: await timed(() => uia.snapshot({ target: ws.find((x) => x.name === 'Lakeside Budget.xlsx - Planner').id })),
+      snapshot: await (async () => { const fresh = await uia.windows(); const id = fresh.find((x) => x.name === 'Lakeside Budget.xlsx - Planner').id; return timed(() => uia.snapshot({ target: id })); })(), // ids are valid until the next listing
     };
     let d = null;
     perf.situation = await timed(async () => { d = await sit.describe('what am I working on?'); });
