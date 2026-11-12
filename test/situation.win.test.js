@@ -60,7 +60,19 @@ test('PHASE 2 ACCEPTANCE: real desktop + project + both memory systems, sourced,
     console.log('windows:', JSON.stringify(ws.map((w) => ({ name: w.name, cls: w.cls, fg: w.foreground, state: w.state, modal: w.modal, dialog: w.dialog }))));
 
     const sit = new Situation({ uia, gateway: gate, memory });
-    const d = await sit.describe('what am I working on?');
+    await sit.describe('warm up'); // first call starts PowerShell and Cortex
+    // Responsiveness budgets on real Windows (warm): measured and logged every run.
+    const timed = async (f) => { const t = Date.now(); await f(); return Date.now() - t; };
+    const perf = {
+      windows: await timed(() => uia.windows()),
+      windowsWithDialogs: await timed(() => uia.windows({ owned: true })),
+      snapshot: await timed(() => uia.snapshot({ target: ws.find((x) => x.name === 'Lakeside Budget.xlsx - Planner').id })),
+    };
+    let d = null;
+    perf.situation = await timed(async () => { d = await sit.describe('what am I working on?'); });
+    console.log('perf (ms):', JSON.stringify(perf));
+    assert.ok(perf.windows < 3000 && perf.snapshot < 3000, `UI Automation reads stay interactive: ${JSON.stringify(perf)}`);
+    assert.ok(perf.situation < 8000, `a full situation (desktop + both memories) in under 8 s: ${perf.situation} ms`);
     console.log('facts:', JSON.stringify(d.facts));
     const text = d.facts.map((f) => `[${f.source}] ${f.text}`).join('\n');
 
