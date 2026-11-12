@@ -113,7 +113,7 @@ vault files directly.
 
 ## Blocked or limited
 
-- Injection guard on held-out examples: 4/6 flagged, 1/4 benign flagged (see benchmarks); every retrieved text is fenced as data regardless.
+- Injection detection is weak on unseen attacks: on a fresh, untuned set the pattern guard flags 2/8 (0/6 false positives); Llama Prompt Guard 2 (Groq) flags 3/8, the two together 4/8. Detection is only a warning: the protection is deterministic (retrieved text is fenced as data, COre's action tags in it are broken, every action needs approval, commands run sandboxed), and the real-model test shows injected instructions not being obeyed.
 
 - Real providers: Groq verified; Gemini, OpenRouter, Claude and Jev not yet run (need their keys). Groq's free tier rate-limits long agent runs (COre waits and retries).
 - Node package managers cannot run inside the Windows AppContainer (libuv named pipes are denied); they run with Job limits only.
