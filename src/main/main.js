@@ -1065,7 +1065,7 @@ function startMemoryEngine() {
 const { Opportunities } = require('./opportunities');
 function opportunities() {
   return new Opportunities({
-    agentTask: readAgentTask,
+    agentTask: () => ((agentRunner && agentRunner.running) || missionEngine ? null : readAgentTask()), // a task in progress is not "interrupted"
     cortex: gateway().cortex,
     cortexOn: () => gateway().cortexOn(),
     automationHistory,
@@ -2136,9 +2136,17 @@ async function runWorkflow(s) {
   addTranscript('system', `Workflow: ${s.name} (${s.schedule}).`, { kind: 'progress' });
   noteEpisode(`Ran workflow ${s.name}`);
   if (s.agent) {
+    // A scheduled mission runs on its own only under a standing grant you approved (/mission allow NAME).
+    const standing = (state.get('standingGrants') || {})[s.name];
+    if (standing && (config.data.agent || {}).enabled) {
+      const E = require('./missions/engine');
+      const plan = /\| check:/.test(s.body || '') ? E.parseMissionPlan(s.body) : null;
+      startMission(`${s.description || s.name}`.slice(0, 500), { standing, plan: plan && plan.length ? plan : null, source: s.name }).catch((err) => addTranscript('system', `Scheduled mission ${s.name} failed: ${err.message}`, { kind: 'error' }));
+      return;
+    }
     // A scheduled desktop workflow runs unattended only if you allowed that; approvals still apply.
     if ((config.data.agent || {}).background === true && (config.data.agent || {}).enabled) { startAgent(`${s.name}: ${s.description}`.slice(0, 500), { instructions: s.body }); return; }
-    addTranscript('system', `Workflow ${s.name} wants to operate the desktop. Start it with /skill ${s.name} (or allow background desktop tasks in Settings, Agent).`, { kind: 'progress' });
+    addTranscript('system', `Workflow ${s.name} wants to operate the desktop. Start it with /skill ${s.name}, or let it run on its own as a mission with /mission allow ${s.name} (you approve its folders and limits once, for 30 days).`, { kind: 'progress' });
     toOverlay('attention', { level: 'info', title: `Workflow ${s.name} is ready` });
     return;
   }
@@ -2548,6 +2556,32 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
 }
 
 // ---------------------------------------------------------------- missions (13.0 autopilot)
+// Standing grants: "/mission allow NAME" lets a scheduled desktop playbook run as a mission on
+// its own, inside folders and limits you approve once (30 days); "/mission revoke NAME" ends it.
+async function standingGrant(op, name) {
+  const grants = { ...(state.get('standingGrants') || {}) };
+  if (op === 'revoke') { delete grants[name]; state.set('standingGrants', grants); addTranscript('system', `${name} no longer runs on its own.`); return; }
+  reloadPlaybooks();
+  const s = playbooks.find((p) => p.name === name);
+  if (!s || !s.agent) { addTranscript('system', `There is no desktop playbook called ${name}. /skill lists them.`); return; }
+  const ag = config.data.agent || {};
+  const roots = agentFiles().roots;
+  if (!roots.length) { addTranscript('system', 'Share a project folder first (Settings → Projects).', { kind: 'error' }); return; }
+  const POL = require('./policy');
+  const key = POL.loadKey(app.getPath('userData'));
+  const g = POL.createGrant({ goal: `${s.description || s.name}`.slice(0, 500), folders: roots, categories: (ag.grantCategories || []).filter((c) => POL.GRANTABLE.includes(c)), budget: { steps: Math.max(10, Math.min(300, Number(ag.missionSteps) || 120)), minutes: Math.max(5, Math.min(240, Number(ag.missionMinutes) || 60)) }, expiresAt: Date.now() + 30 * 864e5, approvedBy: `user (standing: ${name})` }, key);
+  const ok = await new Promise((resolve) => {
+    const id = require('crypto').randomUUID();
+    agentApprovals.set(id, { resolve });
+    toDock('dock:agent-approve', { id, step: 'Standing mission', label: [`Playbook: ${name}${s.schedule ? ` (${s.schedule})` : ''}`, ...POL.describeGrant(g)].join('  ·  ').slice(0, 600), why: 'It will run on its schedule without asking, inside these limits, for 30 days. /mission revoke ends it.', forced: true });
+  });
+  toDock('dock:agent-approve', null);
+  if (ok === 'no') { addTranscript('system', 'Not allowed.'); return; }
+  grants[name] = g;
+  state.set('standingGrants', grants);
+  addTranscript('system', `${name} will run on its own${s.schedule ? ` (${s.schedule})` : ''} until ${new Date(g.expiresAt).toLocaleDateString()}. /mission revoke ${name} ends it.`);
+}
+
 // "/autopilot GOAL": you approve one grant (folders, what may happen without asking, budget);
 // the mission engine plans checked subgoals and runs each through the same agent loop and
 // policy as /do, verifies them from disk (or has Sentinel judge when nothing on disk shows
@@ -2564,9 +2598,9 @@ async function waitForUserIdle({ signal, label } = {}) {
   const t0 = Date.now();
   while (busy() && !(signal && signal.aborted) && Date.now() - t0 < 10 * 60000) await new Promise((r) => setTimeout(r, 500));
 } // what the command center (and the phone) show: { id, goal, status, subgoals, steps, startedAt }
-async function startMission(goal) {
+async function startMission(goal, { standing = null, plan: givenPlan = null, source = '' } = {}) {
   const ag = config.data.agent || {};
-  addTranscript('user', `/autopilot ${goal}`);
+  if (!standing) addTranscript('user', `/autopilot ${goal}`);
   if (!ag.enabled) { addTranscript('system', 'The desktop agent is off. Turn it on in Settings, Agent.', { kind: 'error' }); return null; }
   if (missionEngine || (agentRunner && agentRunner.running)) { addTranscript('system', 'A task is already running. Say stop first.', { kind: 'error' }); return null; }
   const roots = agentFiles().roots;
@@ -2574,14 +2608,23 @@ async function startMission(goal) {
   const POL = require('./policy');
   const userData = app.getPath('userData');
   const polKey = POL.loadKey(userData);
-  const grant = POL.createGrant({ goal, folders: roots, categories: (ag.grantCategories || []).filter((c) => POL.GRANTABLE.includes(c)), budget: { steps: Math.max(10, Math.min(300, Number(ag.missionSteps) || 120)), minutes: Math.max(5, Math.min(240, Number(ag.missionMinutes) || 60)) }, expiresAt: Date.now() + 12 * 3600e3 }, polKey);
+  let grant;
+  let ok = 'yes';
+  if (standing) {
+    // A standing grant the user approved earlier (/mission allow NAME): checked, never widened.
+    const v = POL.verifyGrant(standing, polKey);
+    if (!v.ok) { addTranscript('system', `The scheduled mission ${source} did not run: ${v.reason}. Approve it again with /mission allow ${source}.`, { kind: 'error' }); return null; }
+    grant = standing;
+  } else {
+  grant = POL.createGrant({ goal, folders: roots, categories: (ag.grantCategories || []).filter((c) => POL.GRANTABLE.includes(c)), budget: { steps: Math.max(10, Math.min(300, Number(ag.missionSteps) || 120)), minutes: Math.max(5, Math.min(240, Number(ag.missionMinutes) || 60)) }, expiresAt: Date.now() + 12 * 3600e3 }, polKey);
   // One approval for the whole mission.
-  const ok = await new Promise((resolve) => {
+  ok = await new Promise((resolve) => {
     const id = require('crypto').randomUUID();
     agentApprovals.set(id, { resolve });
     toDock('dock:agent-approve', { id, step: 'Mission', label: POL.describeGrant(grant).join('  ·  ').slice(0, 600), why: 'Approve once: COre works through it on its own and asks only at these limits. Esc or Stop ends it.', forced: true });
   });
   toDock('dock:agent-approve', null);
+  }
   if (ok === 'no') { addTranscript('system', 'Mission not started.'); return null; }
   const taskId = `m-${Date.now().toString(36)}`;
   const { Journal } = require('./missions/journal');
@@ -2612,7 +2655,7 @@ async function startMission(goal) {
   // Learned routes: a nearly identical goal that worked before is reused (still verified step by step).
   missionLive = { id: taskId, goal, status: 'running', subgoals: [], steps: 0, startedAt: Date.now(), grant: { folders: grant.folders, categories: grant.categories, budget: grant.budget } };
   let learned = null;
-  try { learned = E.findRoute(PB.loadSkills(playbookDir()), goal); } catch {}
+  try { learned = givenPlan ? { skill: { name: source }, sim: 1, plan: givenPlan } : E.findRoute(PB.loadSkills(playbookDir()), goal); } catch {}
   if (learned) { addTranscript('system', `Reusing what worked before ("${learned.skill.name}", ${learned.plan.length} steps). Each step is still checked.`, { kind: 'progress' }); journal.append('route', { playbook: learned.skill.name, similarity: Math.round(learned.sim * 100) / 100 }); }
   let r;
   try { r = await missionEngine.run({ id: taskId, goal, grant, plan: learned ? learned.plan : null }); } catch (err) { r = { status: 'failed', reason: err.message, subgoals: [], steps: 0, ms: 0, goal }; }
@@ -3467,8 +3510,9 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     { const tu = /^\/tutorials?\b\s*(.*)$/i.exec(text); if (tu) { addTranscript('user', text); tutorialCommand(tu[1]); return; } }
     if (!remote && tutorialObserve(text, !typed)) return;
     { const ap = /^\/(autopilot|mission)\s+(.+)$/is.exec(text); if (ap) {
-      if (/^undo$/i.test(ap[2].trim())) { addTranscript('user', text); const m = state.get('lastMission'); if (!m) addTranscript('system', 'No mission to undo.'); else { const n = agentFiles().rollback(m.id); addTranscript('system', n ? `Undone: ${n} file${n === 1 ? '' : 's'} from the mission "${m.goal.slice(0, 80)}" put back.` : 'Nothing to undo.'); } return; }
+      if (/^undo$/i.test(ap[2].trim())) { addTranscript('user', text); const m = state.get('lastMission'); if (!m) addTranscript('system', 'No mission to undo.'); else { const n = agentFiles().rollback(m.id); if (missionLive && missionLive.id === m.id) { missionLive.changed = 0; state.set('missionLive', missionLive); } addTranscript('system', n ? `Undone: ${n} file${n === 1 ? '' : 's'} from the mission "${m.goal.slice(0, 80)}" put back.` : 'Nothing to undo.'); } return; }
       if (/^stop$/i.test(ap[2].trim())) { addTranscript('user', text); if (missionEngine) missionEngine.stop('you asked'); stopAgent('you asked'); return; }
+      { const al = /^(allow|revoke)\s+(\S+)$/i.exec(ap[2].trim()); if (al) { addTranscript('user', text); standingGrant(al[1].toLowerCase(), al[2]).catch((err) => addTranscript('system', `Could not ${al[1]}: ${err.message}`, { kind: 'error' })); return; } }
       startMission(ap[2].trim().slice(0, 500)).catch((err) => addTranscript('system', `Mission failed: ${err.message}`, { kind: 'error' })); return;
     } }
     if (/^\/do\s+\S/i.test(text)) { startAgent(text.replace(/^\/do\s+/i, '').slice(0, 500), { remote }); return; }

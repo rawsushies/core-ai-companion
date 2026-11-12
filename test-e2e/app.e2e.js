@@ -516,6 +516,26 @@ test('autopilot: one approval, a planned mission runs its subgoals with no furth
   assert.match(await logText(), /Reusing what worked before \("mission-[^"]+", 2 steps\)/);
   await send('/mission undo');
   await dock.waitForFunction(() => (document.getElementById('log').innerText.match(/Undone: 2 files from the mission/g) || []).length === 2, null, { timeout: 8000 });
+  // Standing grant: the learned route runs on its schedule with no card, only after you allow it once.
+  const route = /Saved this mission's route as "([^"]+)"/.exec(await logText())[1];
+  await send(`/mission allow ${route}`);
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Standing mission|Playbook: mission-/.test(document.getElementById('agent-label').textContent), null, { timeout: 10000 });
+  assert.match(await dock.textContent('#agent-label'), /expires/);
+  await dock.click('#agent-yes');
+  await dock.waitForFunction((r) => document.getElementById('log').innerText.includes(`${r} will run on its own`), route, { timeout: 8000 });
+  const cc0 = app.windows().find((p) => p.url().includes('/command/'));
+  const fire = async () => { const c = cc0 || app.windows().find((p) => p.url().includes('/command/')); if (c) return c.evaluate((n) => window.center.action('runWorkflow', n), route); await send('/center'); };
+  if (!cc0) { await send('/center'); for (let i = 0; i < 40 && !app.windows().find((p) => p.url().includes('/command/')); i++) await wait(250); }
+  await fire();
+  await dock.waitForFunction((r) => { const t = document.getElementById('log').innerText; const i = t.lastIndexOf(`Workflow: ${r}`); return i >= 0 && /Mission complete: make the meeting minutes and a summary/.test(t.slice(i)); }, route, { timeout: 60000 });
+  assert.match((await logText()).slice((await logText()).lastIndexOf(`Workflow: ${route}`)), /Reusing what worked before/);
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'a standing mission runs without a card');
+  assert.ok(fs.existsSync(path.join(project, 'minutes.md')), 'the scheduled mission did its work');
+  await send('/mission undo');
+  await send(`/mission revoke ${route}`);
+  await dock.waitForFunction((r) => document.getElementById('log').innerText.includes(`${r} no longer runs on its own`), route, { timeout: 8000 });
+  await fire();
+  await dock.waitForFunction((r) => document.getElementById('log').innerText.includes(`let it run on its own as a mission with /mission allow ${r}`), route, { timeout: 8000 });
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
@@ -590,7 +610,8 @@ test('command center: shows cores, tasks, playbooks, memory, devices and the act
   // Missions: the last /autopilot mission as a checklist with its evidence, plus the policy counts.
   await cc.waitForFunction(() => /2\/2 verified/.test(document.getElementById('mission').textContent), null, { timeout: 8000 }); // the prebuilt window refreshes on show
   const mission = await cc.textContent('#mission');
-  assert.match(mission, /make the meeting minutes and a short summary/);
+  assert.match(mission, /make the meeting minutes and a summary/, 'the last mission (the scheduled one)');
+  assert.doesNotMatch(mission, /Undo mission/, 'undone from the chat: nothing left to undo');
   assert.match(mission, /2\/2 verified · [1-9]\d* steps/);
   assert.doesNotMatch(mission, /Stop mission/, 'a finished mission offers no stop');
   assert.match(mission, /✓ Write minutes\.md[\s\S]*checked on disk/);

@@ -48,6 +48,11 @@ Every action passes one deterministic gate, `src/main/policy` (no model involved
 4. A subgoal that fails is retried once with what went wrong; then the mission stops and asks you.
 5. The report lists every subgoal with its evidence. `/mission undo` puts back every file the mission changed;
    `/mission stop`, Esc, Stop and the emergency hotkey end it.
+6. **Learning**: a verified mission is saved as a playbook route; a nearly identical goal reuses it (still checked
+   step by step). **Hands lease**: mouse and keyboard steps wait while you use the PC.
+7. **Standing missions**: `/mission allow NAME` lets a scheduled desktop playbook run on its own, under a grant you
+   approve once (30 days, signed, never widened). `/mission revoke NAME` ends it. The command center's Missions
+   card shows the plan, the evidence for each step, and Stop/Undo.
 
 ## Actions
 
