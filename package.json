@@ -1,7 +1,7 @@
 {
   "name": "core-companion",
   "productName": "COre",
-  "version": "12.1.0",
+  "version": "12.1.1",
   "private": true,
   "description": "COre: a black liquid orb desktop companion that talks through Claude Code (no API key) or a free local model.",
   "main": "boot.js",

@@ -120,6 +120,8 @@ let dockHeight = 60;
 let currentPipeline = null;
 let memory = null;
 const latency = new (require('./latency').Latency)(); // turn timings (src/main/latency.js)
+const { Tutorial, fill: fillTutorial } = require('./tutorial'); // lessons COre teaches (src/main/tutorial.js)
+let tutorial = null; // created once state is loaded (tutorialHost())
 // Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
 const { CortexClient } = require('./cortex');
 const { MemoryGateway, isDecision } = require('./memgate');
@@ -205,7 +207,7 @@ function addTranscript(role, text, meta = {}) {
   state.set('transcript', transcript.slice(-100));
   toPanel('transcript:add', entry);
   // Prime's own replies reach the dock as a live stream instead.
-  if (role !== 'core' || (meta.author && meta.author !== 'prime')) {
+  if (role !== 'core' || (meta.author && meta.author !== 'prime') || meta.direct) {
     toDock('dock:message', { role: role === 'notice' ? 'system' : role, text, author: meta.author, kind: meta.kind, to: meta.to, files: meta.files });
   }
 }
@@ -1524,6 +1526,7 @@ function createTrayMenu() {
     { label: 'New conversation', click: resetConversation },
     { label: 'Call helpers back', click: mergeAllClones },
     { label: 'Show me around (tour)', click: runTour },
+    { label: 'Tutorials', click: () => { setDockVisible(true); tutorialCommand(''); } },
     {
       label: 'Play a game',
       submenu: [
@@ -2650,6 +2653,66 @@ function onReminder(r, missed) {
 
 // A short greeting on the first launch of the day. Built in, so it costs no
 // Claude usage and works offline.
+// ---------------------------------------------------------------- tutorials (hosted by COre)
+// COre teaches each lesson in the chat with its voice and gestures. A step with a task
+// waits until the user does it (handleUserText reports what they typed or said);
+// other steps move on by themselves after COre has said them.
+let tutorialTimer = null;
+function tutorialHost() {
+  if (!tutorial) tutorial = new Tutorial({ progress: state.get('tutorial') || {}, save: (p) => state.set('tutorial', p) });
+  return tutorial;
+}
+function tutorialVars() {
+  const hk = config.data.hotkeys;
+  return { listen: prettyKey(hk.listen), listenScreen: prettyKey(hk.listenWithScreen) };
+}
+function presentTutorialStep(c) {
+  clearTimeout(tutorialTimer);
+  if (!c) return;
+  if (c.finished) {
+    const n = tutorialHost().next();
+    addTranscript('system', `Lesson complete: ${c.finished.title}. ${n ? `Next: ${n.title} (/tutorial ${n.id}).` : 'You have finished every lesson.'}`, { kind: 'tutorial' });
+    return;
+  }
+  const vars = tutorialVars();
+  const say = fillTutorial(c.step.say, vars);
+  const task = c.step.task ? `\n\n**Try it:** ${fillTutorial(c.step.task.hint, vars)}` : '';
+  addTranscript('core', `${say}${task}\n\n_${c.lesson.title} · step ${c.index + 1} of ${c.total} · say next to skip, stop to leave_`, { direct: true, kind: 'tutorial' });
+  const p = makeVoicePipeline({ speak: true });
+  if (c.step.gesture) p.push({ type: 'gesture', name: 'gesture', gesture: c.step.gesture });
+  p.push({ type: 'say', text: say.replace(/\/(\w+)/g, '$1') });
+  p.push({ type: 'end' });
+  if (!c.step.task) {
+    const at = c;
+    tutorialTimer = setTimeout(() => { const now = tutorialHost().current(); if (now && now.lesson === at.lesson && now.index === at.index) presentTutorialStep(tutorialHost().advance()); }, 2500 + say.length * 55);
+  }
+}
+// /tutorial [lesson | next | stop | reset]
+function tutorialCommand(arg) {
+  const t = tutorialHost();
+  const a = String(arg || '').trim().toLowerCase();
+  if (a === 'stop') { clearTimeout(tutorialTimer); addTranscript('system', t.stop() ? 'Tutorial paused. Type /tutorial to pick up where you left off.' : 'No tutorial is running.', { kind: 'tutorial' }); return; }
+  if (a === 'reset') { clearTimeout(tutorialTimer); t.reset(); addTranscript('system', 'Tutorial progress cleared.', { kind: 'tutorial' }); return; }
+  if (a === 'list' || a === 'menu' || (!a && !t.running && t.done.size && !t.next())) { addTranscript('system', t.menu(), { kind: 'tutorial' }); return; }
+  if (a === 'next' || a === 'skip') { if (t.running) presentTutorialStep(t.advance()); else addTranscript('system', 'No tutorial is running. Type /tutorial to start one.', { kind: 'tutorial' }); return; }
+  if (!a && t.running) { presentTutorialStep(t.current()); return; } // resume
+  if (a && !Tutorial.lesson(a)) { addTranscript('system', `There is no lesson called ${arg}.\n${t.menu()}`, { kind: 'tutorial' }); return; }
+  if (!a) addTranscript('system', t.menu(), { kind: 'tutorial' });
+  presentTutorialStep(t.start(a || null));
+}
+// Called with everything the user sends while a lesson runs. true = handled (do not
+// pass to the brain).
+function tutorialObserve(text, voice) {
+  const t = tutorial;
+  if (!t || !t.running) return false;
+  const r = t.observe({ text, voice });
+  if (!r) return false;
+  if (r.control) { addTranscript('user', text); tutorialCommand(r.control); return true; }
+  const at = t.current();
+  waitPrimeIdle(30000).then(() => setTimeout(() => { const now = t.current(); if (now && at && now.lesson === at.lesson && now.index === at.index) presentTutorialStep(t.advance()); }, 700));
+  return false;
+}
+
 // First-run tour: a short guided introduction with gestures and shapes.
 function runTour() {
   state.set('onboarded', true);
@@ -2670,7 +2733,7 @@ function runTour() {
     p.push({ type: 'say', text });
   }
   p.push({ type: 'end' });
-  addTranscript('system', `Quick tour: talk with ${prettyKey(hk.listen)} (or hold the orb), type below, ${prettyKey(hk.listenWithScreen)} to talk about your screen. Pet, tickle, poke or toss me. Settings live in the tray menu.`);
+  addTranscript('system', `Quick tour: talk with ${prettyKey(hk.listen)} (or hold the orb), type below, ${prettyKey(hk.listenWithScreen)} to talk about your screen. Pet, tickle, poke or toss me. Settings live in the tray menu. Type /tutorial and I'll teach you the rest, one short lesson at a time.`);
 }
 
 const GREETINGS = {
@@ -3277,6 +3340,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // Meiosis routing: decide the recipient before touching Prime's turn, so
   // talking to a specialist never interrupts what COre itself is saying.
   if (!internal && !chain) {
+    { const tu = /^\/tutorials?\b\s*(.*)$/i.exec(text); if (tu) { addTranscript('user', text); tutorialCommand(tu[1]); return; } }
+    if (!remote && tutorialObserve(text, !typed)) return;
     if (/^\/do\s+\S/i.test(text)) { startAgent(text.replace(/^\/do\s+/i, '').slice(0, 500), { remote }); return; }
     if (agentRunner && agentRunner.running && typed) stopAgent('you sent a message');
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }

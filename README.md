@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-12.1.0-3dff85?labelColor=05070a&style=flat-square" alt="version 12.1.0">
+  <img src="https://img.shields.io/badge/version-12.1.1-3dff85?labelColor=05070a&style=flat-square" alt="version 12.1.1">
   <img src="https://img.shields.io/badge/Windows-desktop-7dffb0?labelColor=05070a&style=flat-square" alt="Windows desktop">
   <img src="https://img.shields.io/badge/Android-companion-7dffb0?labelColor=05070a&style=flat-square" alt="Android companion">
   <img src="https://img.shields.io/badge/runs-locally-86a595?labelColor=05070a&style=flat-square" alt="runs locally">
@@ -133,13 +133,17 @@ Verified against the live APIs: [docs/REAL-PROVIDERS.md](docs/REAL-PROVIDERS.md)
 
 ## Install
 
-**Windows:** download `COre-Setup-12.1.0.exe` from [Releases](https://github.com/rawsushies/core-ai-companion/releases)
+**Windows:** download `COre-Setup-12.1.1.exe` from [Releases](https://github.com/rawsushies/core-ai-companion/releases)
 and run it. It includes everything: Cortex, the speech and voice models, the memory model. COre works offline
-from the first start and updates itself from published releases. **Android:** `COre-android-12.1.0.apk` from the
+from the first start and updates itself from published releases. **Android:** `COre-android-12.1.1.apk` from the
 same release; pair it in Settings → Phone.
 
 For the Claude brain, install [Claude Code](https://docs.claude.com/en/docs/claude-code) and log in once; or add
 a free Gemini/Groq/OpenRouter key in Settings → Brain.
+
+**Learning COre:** type `/tutorial` (or tray menu → Tutorials). COre teaches five short lessons itself, in the chat
+with its voice: talking with it, memory, the knowledge vault, desktop tasks and settings. Each step waits until
+you have tried it; say *next* to skip or *stop* to leave, and it remembers where you were.
 
 <details>
 <summary>If your antivirus removes COre</summary>

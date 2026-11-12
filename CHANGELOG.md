@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 12.1.1 — Tutorials hosted by COre
+
+- **Tutorials** (`/tutorial`, tray menu → Tutorials): COre teaches five short lessons itself, in the chat with its
+  voice and gestures: talking with COre, memory, the knowledge vault and Obsidian, desktop tasks, and settings.
+- Steps with a task wait until you have tried it (a message, a voice turn, a command); the others move on once
+  COre has said them. Say *next* to skip a step and *stop* to leave; progress is kept across restarts.
+- `/tutorial` shows the lessons with progress; `/tutorial <lesson>` starts one; `/tutorial reset` starts over.
+  The first-run tour ends by offering the tutorials.
+
 ## 12.1.0 — Faster responses, one interface design, verified installer
 
 ### Responsiveness
