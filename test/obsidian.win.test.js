@@ -37,9 +37,11 @@ test('OBSIDIAN: COre sets up the vault and the real Obsidian opens it', { skip: 
     for (let i = 0; i < 90 && !w; i++) { await wait(1000); w = (await uia.windows()).find((x) => /COre Vault/i.test(x.name) && /Obsidian/i.test(x.name)); }
     console.log('windows:', JSON.stringify((await uia.windows()).map((x) => x.name)));
     assert.ok(w, 'Obsidian opened the COre vault');
-    const snap = await uia.snapshot({ target: w.id, depth: 25, max: 600 });
-    const text = snap.elements.map((e) => `${e.name || ''} ${e.value || ''}`).join(' ');
-    console.log('Obsidian shows:', text.slice(0, 600));
+    // The title names the open note and vault ("Tower - COre Vault - Obsidian"); the control
+    // tree is extra evidence only (Electron's can be slow or empty to UI Automation).
+    let text = '';
+    try { const fresh = (await uia.windows()).find((x) => x.name === w.name); const snap = await uia.snapshot({ target: fresh.id, depth: 25, max: 600 }); text = snap.elements.map((e) => `${e.name || ''} ${e.value || ''}`).join(' '); } catch (err) { console.log('control tree not read:', err.message); }
+    console.log('Obsidian title:', w.name, '| shows:', text.slice(0, 400));
     assert.match(`${w.name} ${text}`, /Tower|Welcome to COre/, 'a vault note is shown');
   } finally {
     uia.dispose();
