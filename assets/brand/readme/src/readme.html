@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>COre README art</title>
+<link rel="stylesheet" href="../../../../src/renderer/fonts/fonts.css">
+<style>
+  :root { --void:#05070a; --smoke:#0b1f15; --emerald:#3dff85; --mint:#7dffb0; --ink:#e8fff1; --muted:#86a595; --line:#1d3327; --edge:#1f6b42; --surface-line:#18382a; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #111; font-family: 'COre Sans', Inter, sans-serif; color: var(--ink); padding: 30px; display: flex; flex-direction: column; gap: 30px; align-items: flex-start; }
+  .art { position: relative; overflow: hidden; background: var(--void); width: 1500px; }
+  .art::before { content: ""; position: absolute; inset: 0; background: radial-gradient(55% 75% at 78% 50%, rgba(61,255,133,0.09), transparent 70%); pointer-events: none; }
+  .orb { position: absolute; mix-blend-mode: screen; pointer-events: none; }
+  h1, h2, .display { font-family: 'COre Display', 'COre Sans', sans-serif; font-weight: 600; letter-spacing: -0.035em; line-height: 1.0; }
+  .accent { color: var(--emerald); }
+  .muted { color: var(--muted); }
+  .mono { font-family: 'COre Mono', monospace; }
+  .kicker { font: 14px/1 'COre Mono', monospace; color: var(--emerald); letter-spacing: 0.04em; text-transform: uppercase; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 600 20px/1 'COre Display', sans-serif; letter-spacing: -0.03em; }
+  .mark { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); }
+  .copy { position: absolute; left: 80px; top: 50%; transform: translateY(-50%); width: 640px; }
+  .copy h2 { font-size: 58px; margin: 14px 0 16px; }
+  .copy p { font-size: 20px; line-height: 1.45; color: var(--muted); }
+  .card { background: var(--smoke); border: 1px solid var(--surface-line); border-radius: 16px; padding: 14px 16px; }
+  .k { font: 12px 'COre Mono', monospace; color: var(--emerald); }
+
+  /* hero */
+  #hero { height: 500px; }
+  #hero .copy { width: 960px; }
+  #hero h1 { font-size: 80px; margin: 26px 0 22px; }
+  #hero p { font-size: 22px; line-height: 1.45; color: var(--muted); max-width: 640px; }
+  #hero .orb { right: 120px; top: -70px; width: 640px; }
+  .float { position: absolute; display: flex; align-items: center; gap: 10px; padding: 10px 14px; font: 14px 'COre Mono', monospace; }
+  .float b { color: var(--mint); font-weight: 400; }
+  .float i { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 10px rgba(61,255,133,.8); }
+
+  /* speed */
+  #speed { height: 500px; }
+  .bars { position: absolute; right: 80px; top: 130px; width: 640px; display: flex; flex-direction: column; gap: 40px; }
+  .metric .lbl { display: flex; justify-content: space-between; font-size: 17px; margin-bottom: 9px; }
+  .metric .lbl span:last-child { font: 15px 'COre Mono', monospace; color: var(--muted); }
+  .track { position: relative; height: 34px; border: 1px solid var(--line); border-radius: 10px; }
+  .track .old, .track .new { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 9px; display: flex; align-items: center; padding-left: 12px; font: 13px 'COre Mono', monospace; }
+  .track .old { background: transparent; border-right: 1px dashed var(--muted); color: var(--muted); justify-content: flex-end; padding-right: 10px; }
+  .track .new { background: linear-gradient(90deg, #1f6b42, var(--emerald)); color: var(--void); font-weight: 600; }
+  .human { position: absolute; top: -8px; bottom: -8px; width: 0; border-left: 1px solid var(--mint); }
+  .human::after { content: attr(data-l); position: absolute; bottom: -20px; left: -40px; width: 80px; text-align: center; font: 11px 'COre Mono', monospace; color: var(--mint); }
+  .src { margin-top: 2px; font: 12px 'COre Mono', monospace; color: var(--muted); }
+
+  /* memory */
+  #memory { height: 500px; }
+  .diagram { position: absolute; right: 70px; top: 50px; width: 690px; height: 400px; }
+  .node { position: absolute; width: 190px; padding: 12px 14px; text-align: left; }
+  .node .t { font: 600 18px/1.2 'COre Display', sans-serif; letter-spacing: -0.02em; }
+  .node .s { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+  .node.vault { left: 250px; top: 140px; width: 200px; border-color: var(--edge); }
+  .node.vault .files { margin-top: 8px; font: 12px/1.6 'COre Mono', monospace; color: var(--mint); }
+  .node.core { left: 0; top: 30px; } .node.obs { left: 0; top: 250px; } .node.cortex { left: 500px; top: 30px; } .node.devices { left: 500px; top: 250px; }
+  svg.links { position: absolute; inset: 0; width: 100%; height: 100%; }
+  svg.links path { fill: none; stroke: var(--edge); stroke-width: 1.5; stroke-dasharray: 5 5; }
+
+  /* desktop */
+  #desktop { height: 500px; }
+  .panel { position: absolute; right: 90px; top: 50px; width: 520px; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .ph { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .ph .n { font: 600 16px 'COre Display', sans-serif; letter-spacing: -0.03em; }
+  .ph .st { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .ph .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); }
+  .pb { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .b { max-width: 88%; padding: 9px 13px; border-radius: 13px; font-size: 15px; line-height: 1.45; }
+  .b.core { background: var(--smoke); border: 1px solid var(--surface-line); align-self: flex-start; }
+  .b.user { background: var(--void); border: 1px solid var(--edge); align-self: flex-end; }
+  .approve { margin: 0 14px 14px; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 14px; background: var(--void); }
+  .approve .l { font-size: 15px; } .approve .l b { font: 600 12px 'COre Mono', monospace; color: var(--emerald); margin-right: 6px; }
+  .approve .w { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .btns { display: flex; gap: 8px; margin-top: 10px; }
+  .btn { padding: 7px 14px; border-radius: 10px; font-size: 13.5px; border: 1px solid var(--line); background: var(--void); }
+  .btn.p { background: var(--emerald); color: var(--void); border: 0; font-weight: 600; }
+  .wall { position: absolute; right: 0; top: 0; bottom: 0; width: 820px; background: radial-gradient(70% 90% at 70% 40%, #1b2a3a 0%, #0d141c 55%, var(--void) 100%); }
+  .wall::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, var(--void), transparent 30%); }
+</style>
+</head>
+<body>
+
+<section class="art" id="hero">
+  <img class="orb" src="../../renders/orb-speaking.jpg" alt="">
+  <div class="copy">
+    <div class="brand"><img class="mark" src="../../icon-128.png" alt="">COre <span class="accent mono" style="font-size:16px">12</span></div>
+    <h1>Smoke that listens.<br><span class="accent">Answers in a breath.</span></h1>
+    <p>A companion that lives on your desktop, works your apps one approved step at a time, and remembers everything in a vault you own.</p>
+  </div>
+  <div class="float card" style="right:110px; top:330px"><i></i>heard you <b>200 ms</b></div>
+  <div class="float card" style="right:330px; top:410px"><i></i>Projects/Tower.md <b>recalled</b></div>
+</section>
+
+<section class="art" id="speed">
+  <img class="orb" src="../../renders/orb-point.jpg" alt="" style="left:-120px; top:40px; width:520px; opacity:.55">
+  <div class="copy" style="width:560px">
+    <div class="kicker">Conversation speed</div>
+    <h2>It reacts before<br>you <span class="accent">miss it.</span></h2>
+    <p>Recognition starts the moment you pause. Replies start with a word that is already spoken. People leave about 200 ms between turns; so does COre.</p>
+  </div>
+  <div class="bars">
+    <div class="metric"><div class="lbl"><span>You stop talking → COre reacts</span><span>600 → 200 ms</span></div>
+      <div class="track"><div class="old" style="width:40%">12.0</div><div class="new" style="width:13.3%">12.1</div><div class="human" style="left:13.3%" data-l="human ~200"></div></div></div>
+    <div class="metric"><div class="lbl"><span>You stop talking → first word</span><span>2.7 → 1.5 s</span></div>
+      <div class="track"><div class="old" style="width:90%">12.0</div><div class="new" style="width:51.6%">12.1</div></div></div>
+    <div class="src">measured with the real voice, recognizer and brain · docs/LATENCY.md</div>
+  </div>
+</section>
+
+<section class="art" id="memory">
+  <img class="orb" src="../../renders/orb-idle.jpg" alt="" style="left:-140px; top:60px; width:480px; opacity:.5">
+  <div class="copy" style="width:560px">
+    <div class="kicker">One vault, everywhere</div>
+    <h2>Your memory is<br>a folder <span class="accent">you own.</span></h2>
+    <p>Plain Markdown notes. COre writes, Obsidian edits, Cortex indexes, Syncthing carries them to your other devices. No account, no cloud lock-in.</p>
+  </div>
+  <div class="diagram">
+    <svg class="links" viewBox="0 0 690 400"><path d="M190 80 C 240 80, 230 180, 250 190"/><path d="M190 300 C 240 300, 230 230, 250 220"/><path d="M450 190 C 480 180, 470 80, 500 80"/><path d="M450 220 C 480 230, 470 300, 500 300"/></svg>
+    <div class="node card core"><div class="t">COre</div><div class="s">remembers decisions as you talk</div></div>
+    <div class="node card obs"><div class="t">Obsidian</div><div class="s">you read and edit the same notes</div></div>
+    <div class="node card vault"><div class="k">COre Vault</div><div class="t">Markdown</div><div class="files">Projects/Tower.md<br>Lessons.md<br>Welcome to COre.md</div></div>
+    <div class="node card cortex"><div class="t">Cortex</div><div class="s">indexes it locally, finds the right note</div></div>
+    <div class="node card devices"><div class="t">Your devices</div><div class="s">Syncthing, free and peer to peer</div></div>
+  </div>
+</section>
+
+<section class="art" id="desktop">
+  <div class="wall"></div>
+  <img class="orb" src="../../renders/orb-thumbsup.jpg" alt="" style="right:560px; top:120px; width:360px; opacity:.9">
+  <div class="copy" style="width:540px">
+    <div class="kicker">Works your desktop</div>
+    <h2>Asks first.<br><span class="accent">Then does it.</span></h2>
+    <p>It reads your apps through Windows UI Automation, plans, acts one step at a time with your OK, and checks the result. The chat has no window: your screen shows through.</p>
+  </div>
+  <div class="panel">
+    <div class="ph"><img class="mark" src="../../icon-128.png" alt="" style="width:28px;height:28px"><div><div class="n">COre</div><div class="st">working on your desktop</div></div></div>
+    <div class="pb">
+      <div class="b user">Add the glass row to the Tower budget and save it.</div>
+      <div class="b core">On it. Calc is open on budget.csv; I'll add row 3.</div>
+    </div>
+    <div class="approve"><div class="l"><b>Step 2</b>Type "Glass", Tab, "900000", Enter</div><div class="w">then Ctrl+S, and I read the file back to check</div>
+      <div class="btns"><span class="btn p">Allow</span><span class="btn">Allow all for this task</span><span class="btn">Stop</span></div></div>
+  </div>
+</section>
+
+</body>
+</html>

@@ -99,7 +99,7 @@ Status: draft, 2026-11-12. Follows the 12.0.0 release.
 - **Docs:** user docs in `docs/`, developer docs in `docs/dev/`, finished audits and research in
   `docs/dev/archive/`. ROADMAP stays the single progress page; CHANGELOG has no leftover "Unreleased" parts.
 - **Housekeeping:**
-  - remove unused files (e.g. `assets/v0.2-preview.png`)
+  - remove unused files (done: `assets/v0.2-preview.png`)
   - move the two promo videos (~27 MB) out of the source tree into the brand kit's release assets
   - `vendor/` stays build-only
 

@@ -23,6 +23,7 @@ function smokeTarget(argv = process.argv) {
 // Bundled with the installer (resources/): the Cortex knowledge engine and the local
 // models (speech recognition, voice at both qualities, memory embeddings).
 const BUNDLED = ['cortex/Cortex.exe', 'models/onnx-community/whisper-base/onnx/encoder_model_quantized.onnx', 'models/onnx-community/whisper-base/onnx/decoder_model_merged_q4.onnx',
+  'models/onnx-community/moonshine-base-ONNX/onnx/encoder_model_quantized.onnx', 'models/onnx-community/moonshine-base-ONNX/onnx/decoder_model_merged_quantized.onnx',
   'models/onnx-community/Kokoro-82M-v1.0-ONNX/onnx/model_q4.onnx', 'models/onnx-community/Kokoro-82M-v1.0-ONNX/onnx/model_quantized.onnx', 'models/Xenova/all-MiniLM-L6-v2/onnx/model_quantized.onnx'];
 function bundledChecks(resourcesPath, platform = process.platform) {
   if (!resourcesPath || platform !== 'win32') return [];

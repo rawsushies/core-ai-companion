@@ -34,3 +34,10 @@ test('percentiles, kinds kept apart, unknown marks ignored, history bounded', ()
   assert.deepStrictEqual(s.instant.firstToken, { p50: 50, p95: 50, n: 1, target: 100 });
   assert.match(Latency.format(s), /instant \(1 turns.*first words \(brain\) 50\/50 ms ✓/);
 });
+
+test('end of turn: finished sentences end the turn early, trailing ones keep listening', () => {
+  const { turnLooksComplete: c } = require('../src/main/latency');
+  for (const t of ['What did the Tower client decide about the facade?', 'Remind me to call Ana at 5.', 'Open the budget spreadsheet and add a row for glass.', 'Thanks!']) assert.ok(c(t) || t === 'Thanks!', t);
+  assert.strictEqual(c('Thanks!'), false, 'one word is too little to be sure');
+  for (const t of ['Open the budget and', 'I was thinking that...', 'So um.', 'Add a row for the', '', 'Remind me to']) assert.strictEqual(c(t), false, t);
+});

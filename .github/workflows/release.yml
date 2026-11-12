@@ -76,6 +76,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/ci/bundle-requirements.txt
       - name: Bundle Cortex.exe and the local AI models
         shell: bash
         run: bash scripts/ci/bundle.sh

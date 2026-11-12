@@ -8,6 +8,7 @@
   const CALIB_CHUNKS = 3;
   const START_CHUNKS = 2;
   const SILENCE_CHUNKS = 6; // 600 ms of quiet ends the utterance
+  const REACT_CHUNKS = 2; // after 200 ms of quiet COre shows it heard you (people react in ~200-300 ms)
   const PREROLL_CHUNKS = 3;
   const NO_SPEECH_MS = 7000;
   const MAX_MS = 25000;
@@ -84,8 +85,16 @@
         return;
       }
       this.chunks.push(block);
+      const wasQuiet = this.quiet;
       this.quiet = e < stopThr ? this.quiet + 1 : 0;
       if (e >= stopThr) this.lastVoiceAt = Date.now(); // your last word, for latency measurement
+      if (!this.meta.hold) {
+        // The moment you go quiet, hand the audio so far to speech recognition, so it runs
+        // during the end-of-turn wait instead of after it; react visibly after REACT_CHUNKS.
+        if (this.quiet === 1) this.hooks.onPause && this.hooks.onPause(this._joined(), this.lastVoiceAt || Date.now());
+        if (this.quiet === REACT_CHUNKS) this.hooks.onReact && this.hooks.onReact();
+        if (this.quiet === 0 && wasQuiet > 0) this.hooks.onResume && this.hooks.onResume(); // you kept talking
+      }
       // Hold-to-talk and toggle mode end only when you let go / press again.
       if ((!this.meta.hold && this.quiet >= SILENCE_CHUNKS) || elapsed > (this.meta.hold ? 60000 : MAX_MS)) this.stop();
     }
@@ -94,14 +103,19 @@
     stop() {
       if (!this.active) return;
       if (!this.speech || !this.chunks.length) return this.cancel('silence');
-      const total = this.chunks.reduce((n, c) => n + c.length, 0);
-      const audio = new Float32Array(total);
-      let o = 0;
-      for (const c of this.chunks) { audio.set(c, o); o += c.length; }
+      const audio = this._joined();
       this.active = false;
       this._close();
       this.hooks.onLevel(0);
       this.hooks.onAudio(audio, { ...this.meta, speechEndAt: this.lastVoiceAt || Date.now() });
+    }
+
+    _joined() {
+      const total = this.chunks.reduce((n, c) => n + c.length, 0);
+      const audio = new Float32Array(total);
+      let o = 0;
+      for (const c of this.chunks) { audio.set(c, o); o += c.length; }
+      return audio;
     }
 
     cancel(reason) {

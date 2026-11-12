@@ -89,4 +89,14 @@ class Latency {
   }
 }
 
-module.exports = { Latency, MARKS, TARGETS, pct };
+// End of turn: is this transcript a finished sentence? (ends with . ? or !, at least two
+// words, and does not trail off with "and", "so", "um" or an ellipsis). Used to stop
+// listening without the full silence wait.
+function turnLooksComplete(t) {
+  const s = String(t || '').trim();
+  if (!/[.?!]["')\]]?$/.test(s) || /\.\.\.["')\]]?$|…$/.test(s)) return false;
+  const words = s.replace(/[.?!"')\]]+$/, '').split(/\s+/).filter(Boolean);
+  return words.length >= 2 && !/^(and|but|so|or|um+|uh+|because|the|a|an|to|of|with|like|then)$/i.test(words[words.length - 1]);
+}
+
+module.exports = { Latency, MARKS, TARGETS, pct, turnLooksComplete };

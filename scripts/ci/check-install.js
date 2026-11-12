@@ -49,6 +49,12 @@ try { console.log(fs.readFileSync(path.join(res, 'cortex', 'SOURCE.txt'), 'utf8'
       const c = await gate.context('lobby terrazzo installer');
       if (!/terrazzo/.test(c.text)) throw new Error('recall did not find the note');
       console.log('bundled Cortex: MCP write + recall OK');
+      // Syncthing conflict copies are recognised by this Cortex build (rawsushies/cortex-ai-brain#1).
+      fs.writeFileSync(path.join(tmp, 'vault', 'Projects', 'Install Check.sync-conflict-20261112-101500-ABCDEFG.md'), '# Install Check\n\n- lobby: granite (edited on the laptop)\n');
+      let health = '';
+      for (let i = 0; i < 10 && !/sync-conflict/.test(health); i++) { await new Promise((r) => setTimeout(r, 1000)); health = String(await cortex.call('brain_health', {})); }
+      if (!/Install Check\.sync-conflict-20261112-101500-ABCDEFG\.md/.test(health)) throw new Error('Syncthing conflict copy not reported by brain_health');
+      console.log('bundled Cortex: Syncthing conflict copy reported by brain_health');
     } catch (err) { fail.push(`bundled Cortex does not work: ${err.message}`); } finally { cortex.dispose(); }
   }
   if (fail.length) { console.error(`INSTALL CHECK FAILED:\n- ${fail.join('\n- ')}`); process.exit(1); }

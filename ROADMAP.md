@@ -8,7 +8,7 @@ real-world validation.
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
 **Overall estimated completion: 93%** (planning baseline 38%; recalculated from
-verified acceptance criteria below, last update 2026-11-12).
+verified acceptance criteria below, last update 2026-11-12; unchanged by the 12.1 audit, which verified items already counted as pending work in the knowledge layer: 5 of 6 criteria verified, typing inside Obsidian untested).
 
 ## Memory architecture status
 
@@ -24,24 +24,29 @@ verified acceptance criteria below, last update 2026-11-12).
 
 COre ↔ memory gateway ↔ Obsidian-compatible Markdown vault (the one source of truth) ↔ Cortex (local index,
 retrieval, history); Syncthing carries the vault between devices. Details: [docs/VAULT.md](docs/VAULT.md).
-**Acceptance 8/8 with real files, two real Cortex servers and two real Syncthing devices** (`test/vault.sync.test.js`,
-CI Linux): COre memory → Markdown note; Obsidian-style edit and outside note indexed and recalled; device B
-receives it; B's change returns; offline changes meet after reconnection; conflicts keep both versions and are
-reported (`/vault`, `/suggest`, recall warns); a fresh install with an empty index reconnects. Obsidian itself is
-not launched in CI (its edits are file writes). Cortex health names Syncthing copies from
-rawsushies/cortex-ai-brain#1 (draft).
+Evidence, by what it proves (only verified items count):
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| COre memory → Markdown note; outside edits indexed and recalled; two devices both ways; offline; conflicts keep both versions; fresh index reconnects | **Verified 8/8** (CI Linux, real Syncthing ×2, real Cortex ×2) | `test/vault.sync.test.js` |
+| Cortex reports Syncthing conflict copies | **Verified** in Cortex (merged rawsushies/cortex-ai-brain#1) and in the vault test on CI | `tests/test_cloud.py` (Cortex), `test/vault.sync.test.js` step 7 |
+| Real Obsidian opens the vault COre set up and shows its note | **Verified on Windows CI** (Obsidian 1.15.0, window "Tower - COre Vault - Obsidian") | `test/obsidian.win.test.js` |
+| Installed app: first launch → bundled Cortex → vault → Obsidian list → remember and recall; second installation via Syncthing both ways | **Verified on Windows CI** (silent install of the real installer, two installations, Obsidian 1.15.0, real Syncthing; run 43201591563, 7/7 steps) and on a Linux package build | `test-e2e/installed.e2e.js` |
+| Bundled Cortex.exe recognises Syncthing conflicts | **Verified on Windows CI** (installed Cortex.exe built reproducibly from cortex-ai-brain 87ca537 with pinned PyInstaller; brain_health reports the conflict copy; run 43201591563) | `scripts/ci/check-install.js` |
+| Editing in the Obsidian app itself (typing a note) | Not tested: edits are simulated as file writes, which is how Obsidian saves | — |
 
 ## Cortex integration status
 
-Connected through `src/main/cortex.js` (MCP client). Off until the user turns it
-on (Settings, Privacy). History import stays off (`CORTEX_AUTO_IMPORT=off`);
+Connected through `src/main/cortex.js` (MCP client). The installer bundles Cortex.exe; a new install turns it on
+at first start with a local vault (existing installs keep their choice; Settings, Privacy). History import stays off (`CORTEX_AUTO_IMPORT=off`);
 Cortex's own consent gate (`import_history`) is never touched. COre never writes
 vault files directly.
 
 Obsidian: the vault is plain Markdown that Obsidian opens as-is (Cortex writes
 atomically and re-indexes edits made in Obsidian). `/obsidian [note]` opens the
 vault or a cited note through an `obsidian://` link (paths outside the vault refused;
-`test/obsidian.test.js`). Not yet tried against an installed Obsidian.
+`test/obsidian.test.js`). First start adds the vault to Obsidian's vault list; verified against the real
+Obsidian on Windows CI (see the table above).
 
 ## Phase status
 
@@ -146,4 +151,4 @@ vault or a cited note through an `obsidian://` link (paths outside the vault ref
 ## Next execution target
 
 1. Re-run OpenRouter when its daily cap resets (`npm run validate:providers -- --provider openrouter --no-jev --merge --out docs/REAL-PROVIDERS.md`).
-2. On the user's Windows PC: Claude CLI brain, voice and presence, Obsidian `/obsidian` link, Microsoft Office apps.
+2. On the user's Windows PC: Claude CLI brain, real microphone latency and barge-in feel, presence, typing in Obsidian, Microsoft Office apps.

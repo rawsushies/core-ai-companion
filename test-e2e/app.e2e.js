@@ -645,7 +645,7 @@ test('no renderer errors were thrown', () => {
   assert.deepStrictEqual(errors, []);
 });
 
-test('Jev decides every turn: one typed request, confident answers steer the model choice', async () => {
+test('Jev decides non-trivial turns (plain chat is decided locally at once): confident answers steer the model choice', async () => {
   const before = fake.decisions.length;
   assert.ok(before > 0, 'earlier user turns already asked Jev');
   const q = fake.decisions[before - 1];
@@ -657,7 +657,7 @@ test('Jev decides every turn: one typed request, confident answers steer the mod
   const backup = Object.keys(crit).find((k) => /custom OpenAI-compatible/.test(crit[k]));
   fake.jevAnswers = { task: sure('question', 'chat'), complexity: sure('simple', 'complex'), effort: sure('low', 'high'), specialist: sure('none', 'scout'), acts_on_system: { noul: 0.05 }, underspecified: { noul: 0.05 }, model: sure(backup, backup === 'm0' ? 'm1' : 'm0') };
   const chats = fake.chats.length;
-  await send('what is the tallest mountain in the alps');
+  await send('compare the tallest mountains in the alps and the pyrenees in detail and explain why they differ so much in height');
   await dock.waitForFunction(() => /From the backup brain\./.test(document.getElementById('log').innerText), null, { timeout: 15000 });
   assert.strictEqual(fake.chats.length, chats + 1, 'Jev picked the backup model and it answered');
   fake.jevAnswers = null;
@@ -805,4 +805,48 @@ test('chat still works after everything above', async () => {
     const i = items.findIndex((m) => m.innerText.includes('one more message please'));
     return i >= 0 && items.slice(i + 1).some((m) => m.classList.contains('core') && /Smoke says hi/.test(m.innerText));
   }, null, { timeout: 15000 });
+});
+
+// Invisible design: every window lets the screen show through, so every piece of text must
+// either sit on a solid surface or carry the dark halo. Checked over a light, a dark and a
+// busy wallpaper; screenshots go to test-e2e/out/ for a human look.
+async function unreadable(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    const solid = (el) => { const m = /rgba?\(([^)]+)\)/.exec(getComputedStyle(el).backgroundColor); if (!m) return false; const a = m[1].split(',').map(Number); return a.length < 4 || a[3] >= 0.9; };
+    for (const el of document.querySelectorAll('body *')) {
+      if (['SCRIPT', 'STYLE', 'OPTION', 'SELECT', 'TEXTAREA', 'INPUT', 'svg', 'path'].includes(el.tagName)) continue;
+      if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      if (!r.width || !r.height || cs.visibility === 'hidden' || Number(cs.opacity) === 0) continue;
+      let ok = cs.textShadow && cs.textShadow !== 'none';
+      for (let n = el; !ok && n && n !== document.documentElement; n = n.parentElement) ok = solid(n);
+      if (!ok) bad.push(`${el.tagName.toLowerCase()}.${String(el.className).trim().replace(/\s+/g, '.')}: "${el.textContent.trim().slice(0, 30)}"`);
+    }
+    return bad;
+  });
+}
+const WALLPAPERS = { light: '#f4f4f0', dark: '#06080b', busy: 'repeating-linear-gradient(45deg, #ffffff 0 14px, #d8343c 14px 28px, #101418 28px 42px, #4aa3ff 42px 56px)' };
+test('invisible design: settings, command center, monitor and chat stay readable over any wallpaper', async () => {
+  const out = path.join(ROOT, 'test-e2e', 'out');
+  fs.mkdirSync(out, { recursive: true });
+  await send('/center');
+  let center = null;
+  for (let i = 0; i < 80 && !center; i++) { center = app.windows().find((p) => p.url().includes('/command/')); if (!center) await wait(250); }
+  const pages = { chat: dock, settings, center };
+  const mon = app.windows().find((p) => p.url().includes('/monitor/index.html'));
+  if (mon) pages.monitor = mon;
+  const problems = [];
+  for (const [name, page] of Object.entries(pages)) {
+    if (!page) { problems.push(`${name}: window not found`); continue; }
+    const bad = await unreadable(page);
+    if (bad.length) problems.push(`${name}: ${bad.slice(0, 6).join('; ')}`);
+    for (const [wp, bg] of Object.entries(WALLPAPERS)) {
+      await page.evaluate((bg) => { document.body.classList.add('wallpaper-test'); document.body.style.background = bg; }, bg);
+      await page.screenshot({ path: path.join(out, `${name}-${wp}.png`) });
+    }
+    await page.evaluate(() => { document.body.classList.remove('wallpaper-test'); document.body.style.background = ''; });
+  }
+  assert.deepStrictEqual(problems, [], `text without a solid backing or halo:\n${problems.join('\n')}`);
 });

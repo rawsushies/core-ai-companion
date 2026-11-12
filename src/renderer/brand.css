@@ -1,0 +1,98 @@
+/* COre design system: the "invisible" look of the chat, shared by every window.
+   Brand kit only (docs/BRAND.md).
+
+   - The window has no fill: your screen shows through.
+   - The frame and dividers are solid lines; text that sits directly on the screen
+     carries a dark halo, so it stays readable over any wallpaper.
+   - Anything you read at length or operate (fields, lists, cards, buttons) sits on
+     a solid Smoke surface with a solid edge.
+   - One Emerald accent per view. Inter Display for headings, Inter for body,
+     JetBrains Mono for commands and numbers. */
+:root {
+  --void: #05070a;
+  --smoke: #0b1f15;
+  --emerald: #3dff85;
+  --mint: #7dffb0;
+  --ink: #e8fff1;
+  --muted: #86a595;
+  --line: #1d3327;          /* solid divider: Smoke lifted toward Muted */
+  --surface: #0b1f15;       /* solid backing for text you read and controls you use */
+  --surface-line: #18382a;
+  --edge: #1f6b42;          /* Emerald-tinted edge: selected, focused, yours */
+  --danger: #ff8f99;
+  --warn: #ffd166;
+  --halo: 0 0 2px #05070a, 0 0 5px #05070a, 0 1px 8px #05070a;
+  --sans: "COre Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --display: "COre Display", "COre Sans", "Segoe UI", sans-serif;
+  --mono: "COre Mono", "Cascadia Code", Consolas, monospace;
+  /* Older names used by the window stylesheets */
+  --bg: transparent; --panel: var(--surface); --text: var(--ink); --accent: var(--emerald);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; color: var(--ink); font: 13px/1.5 var(--sans); }
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+
+/* The window: no fill, a solid frame. */
+.window, .shell {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.window { height: 100%; display: flex; flex-direction: column; }
+
+/* Header bar: brand on the screen (halo), quiet icon buttons. */
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; text-shadow: var(--halo); }
+.brand { display: flex; align-items: center; gap: 9px; font: 600 14px/1.15 var(--display); letter-spacing: -0.03em; color: var(--ink); }
+.mark { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line); background: var(--void); }
+.version, .muted, .note, .hint { color: var(--muted); }
+.icon { -webkit-app-region: no-drag; width: 30px; height: 30px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); display: grid; place-items: center; padding: 0; text-shadow: var(--halo); }
+.icon:hover { color: var(--ink); background: transparent; }
+
+/* Headings and loose text on the screen. */
+h1, h2, h3, .section-title { font-family: var(--display); letter-spacing: -0.02em; color: var(--ink); text-shadow: var(--halo); }
+.on-screen { text-shadow: var(--halo); }
+
+/* Solid surfaces: cards, rows, lists, toasts. */
+.card, .surface { background: var(--surface); border: 1px solid var(--surface-line); border-radius: 12px; }
+.card { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.card-title { font: 600 12px/1.3 var(--display); letter-spacing: -0.01em; color: var(--ink); display: flex; align-items: baseline; gap: 6px; }
+.toast { background: var(--surface); border: 1px solid var(--surface-line); border-radius: 10px; color: var(--ink); }
+
+/* Inputs: Void wells on Smoke cards. */
+select, input[type="text"], input[type="password"], input[type="search"], input[type="number"], textarea.input {
+  background: var(--void); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit;
+}
+select:focus, input:focus, textarea.input:focus { border-color: var(--edge); outline: none; }
+input[type="range"], input[type="checkbox"] { accent-color: var(--emerald); }
+
+/* Buttons. */
+.primary { background: var(--emerald); color: var(--void); border: 0; border-radius: 8px; padding: 6px 14px; font-weight: 600; }
+.primary:hover { background: var(--mint); }
+.ghost { background: var(--void); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+.ghost:hover { background: var(--smoke); }
+.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--void)); }
+.danger:hover { background: color-mix(in srgb, var(--danger) 12%, var(--void)); }
+
+/* Switch. */
+.switch { position: relative; width: 40px; height: 22px; flex: none; }
+.switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; position: absolute; inset: 0; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--void); border: 1px solid var(--line); transition: background 0.15s; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
+.switch input:checked + span { background: var(--smoke); border-color: var(--edge); }
+.switch input:checked + span::after { transform: translateX(18px); background: var(--emerald); }
+
+/* Status dot. */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); flex: none; }
+
+/* Focus, scrollbars, motion. */
+button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible { outline: 1px solid var(--mint); outline-offset: 1px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+code, kbd { font-family: var(--mono); color: var(--mint); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Test hook: a wallpaper behind the window, for readability screenshots (e2e). */
+body.wallpaper-test { background: var(--wallpaper, #808080) center / cover no-repeat; }

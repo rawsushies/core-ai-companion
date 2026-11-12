@@ -44,7 +44,8 @@ function resample(f32, from, to) {
 async function main() {
   const rows = [];
   const tts = new TextToSpeech({ cacheDir: MODELS, quality: 'fast' });
-  const stt = new SpeechToText({ model: 'onnx-community/whisper-base', language: 'en', cacheDir: MODELS });
+  const stt = new SpeechToText({ model: 'onnx-community/whisper-base', language: 'en', cacheDir: MODELS, fastModel: 'onnx-community/moonshine-base-ONNX', fast: false });
+  const { turnLooksComplete } = require('../src/main/latency');
   try {
     // Voice: warm, then first sentence vs first clause (unique text each run so nothing is cached).
     let t = now(); await tts.synth('Ready.', { voice: 'am_michael' }); const ttsCold = now() - t;
@@ -53,7 +54,12 @@ async function main() {
       t = now(); await tts.synth(`Sure, the Tower client chose a glass facade with bronze mullions, option ${i + 2}.`, { voice: 'am_michael' }); sent.push(now() - t);
       t = now(); await tts.synth(`Sure, option ${i + 2} it is.`, { voice: 'am_michael' }); clause.push(now() - t);
     }
-    rows.push(['Voice: first sentence (Kokoro q4, warm)', p(sent)], ['Voice: first clause, ~5 words (warm)', p(clause)]);
+    // Openers are rendered ahead of time (prewarm): measure a real cache hit.
+    const { OPENERS } = require('../src/main/brain/persona');
+    for (const o of OPENERS) await tts.synth(o, { voice: 'am_michael' });
+    const op = [];
+    for (let i = 0; i < RUNS; i++) { t = now(); await tts.synth(OPENERS[i % OPENERS.length], { voice: 'am_michael' }); op.push(now() - t); }
+    rows.push(['Voice: first sentence (Kokoro q4, warm)', p(sent)], ['Voice: first clause, ~5 words (warm)', p(clause)], ['Voice: pre-rendered opener ("Right.")', p(op)]);
     console.log(`voice cold start ${Math.round(ttsCold)} ms; sentence`, p(sent), 'clause', p(clause));
 
     // Speech recognition on a real spoken question (COre's own voice, resampled to 16 kHz).
@@ -64,6 +70,13 @@ async function main() {
     for (let i = 0; i < RUNS; i++) { t = now(); heard = await stt.transcribe(new Float32Array(clip)); rec.push(now() - t); }
     rows.push([`Speech recognition, ${(clip.length / 16000).toFixed(1)} s question (Whisper base, warm)`, p(rec)]);
     console.log(`stt cold ${Math.round(sttCold)} ms; warm`, p(rec), `heard "${heard}"`);
+    // The fast English recognizer (Moonshine), used for English speakers.
+    await stt.transcribe(new Float32Array(16000), { fast: true });
+    const recFast = []; let heardFast = '';
+    for (let i = 0; i < RUNS; i++) { t = now(); heardFast = await stt.transcribe(new Float32Array(clip), { fast: true }); recFast.push(now() - t); }
+    rows.push([`Speech recognition, same question (Moonshine base, warm; English)`, p(recFast)]);
+    const complete = turnLooksComplete(heardFast);
+    console.log('stt fast', p(recFast), `heard "${heardFast}" complete=${complete}`);
 
     // Brains: time to first words for a quick conversational turn.
     const firstWords = {};
@@ -83,12 +96,22 @@ async function main() {
 
     // Composition: today's voice turn.
     const best = Object.values(firstWords).sort((a, b) => a.p50 - b.p50)[0];
-    const reactNow = ENDPOINT_MS; // the orb reacts when the silence rule ends the turn
-    const firstAudioNow = best ? ENDPOINT_MS + p(rec).p50 + best.p50 + p(sent).p50 : null;
+    // 12.0: the orb reacted when the silence rule ended the turn; recognition, brain and the
+    // first clause ran one after another. 12.1: COre reacts after REACT_CHUNKS of quiet,
+    // recognition starts at the first quiet chunk (overlapping the wait), and a reply that
+    // opens with a pre-rendered word is heard as soon as the brain's first words arrive.
+    const REACT_CHUNKS = Number((/REACT_CHUNKS = (\d+)/.exec(listenSrc) || [])[1] || 0);
     rows.push([`End-of-turn wait (silence rule: ${SILENCE_CHUNKS} × ${CHUNK_MS} ms)`, { p50: ENDPOINT_MS, p95: ENDPOINT_MS }]);
+    const old = { react: ENDPOINT_MS, first: best ? ENDPOINT_MS + p(rec).p50 + best.p50 + p(clause).p50 : null };
+    // English speakers: Moonshine starts at the first quiet chunk; a finished sentence ends the
+    // turn as soon as its transcript is ready instead of after the full silence wait.
+    const QUICK_TURN_MS = Number((/QUICK_TURN_MS = (\d+)/.exec(fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'main.js'), 'utf8')) || [])[1] || ENDPOINT_MS);
+    const sttDone = complete ? Math.max(QUICK_TURN_MS, CHUNK_MS + p(recFast).p50) : Math.max(ENDPOINT_MS, CHUNK_MS + p(recFast).p50);
+    const cur = { react: REACT_CHUNKS ? REACT_CHUNKS * CHUNK_MS : ENDPOINT_MS, first: best ? sttDone + best.p50 + p(op).p50 : null, firstNoOpener: best ? sttDone + best.p50 + p(clause).p50 : null };
     const summary = [
-      `You stop talking → COre reacts: **${reactNow} ms** (target ≤ 300 ms)`,
-      firstAudioNow ? `You stop talking → first word (fastest brain, sequential today): **${Math.round(firstAudioNow)} ms** (target ≤ 1000 ms) = wait ${ENDPOINT_MS} + recognition ${p(rec).p50} + brain ${best.p50} + voice ${p(sent).p50}` : 'First word: no brain reachable',
+      `You stop talking → COre reacts: **${cur.react} ms** (12.0: ${old.react} ms; target ≤ 300 ms)`,
+      `COre's own share before the brain answers: **${sttDone} ms** (12.0: ${ENDPOINT_MS + p(rec).p50} ms). The rest is the provider's time to first word, which varies with load and free-tier limits.`,
+      best ? `You stop talking → first word: **${Math.round(cur.first)} ms** with an opener, ${Math.round(cur.firstNoOpener)} ms without (12.0: ${Math.round(old.first)} ms; target ≤ 1000 ms) = ${complete ? 'turn ended on a finished sentence, ' : ''}recognition done at ${sttDone} + brain ${best.p50} + voice ${p(op).p50} / ${p(clause).p50}` : 'First word: no brain reachable',
     ];
     console.log(summary.join('\n'));
 

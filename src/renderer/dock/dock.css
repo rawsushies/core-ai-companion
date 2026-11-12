@@ -47,7 +47,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .head-status.offline::before { background: var(--muted); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-.icon { width: 30px; height: 30px; border: 0; border-radius: 9px; background: transparent; display: grid; place-items: center; stroke: var(--muted); color: var(--muted); padding: 0; }
+.icon { width: 30px; height: 30px; border: 0; border-radius: 9px; background: transparent; display: grid; place-items: center; stroke: var(--muted); color: var(--muted); padding: 0; text-shadow: var(--halo); }
 .icon:hover { stroke: var(--ink); color: var(--ink); }
 .history-toggle { font-size: 12px; line-height: 1; }
 

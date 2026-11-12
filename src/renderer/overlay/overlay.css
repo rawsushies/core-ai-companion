@@ -23,8 +23,8 @@ html, body {
   max-width: min(440px, 70vw);
   padding: 8px 14px;
   border-radius: 14px;
-  background: rgba(5, 7, 10, 0.86);   /* brand: Void, solid frame, Ink text */
-  border: 1px solid #1d3327;
+  background: #0b1f15;   /* the chat's bubble: solid Smoke, solid edge, Ink text */
+  border: 1px solid #18382a;
   color: #e8fff1;
   font-size: 14px;
   line-height: 1.4;
@@ -32,7 +32,7 @@ html, body {
   pointer-events: none;
   opacity: 0;
   transition: opacity 180ms ease;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 #caption.show { opacity: 1; }
 
@@ -57,9 +57,9 @@ body.demo {
    Void card, solid frame, Ink text, Emerald for the line being sung. */
 .glance {
   position: fixed; left: 0; top: 0; width: 240px; padding: 11px 13px 12px;
-  background: rgba(5, 7, 10, 0.95); border: 1px solid #1d3327; border-radius: 14px;
+  background: #0b1f15; border: 1px solid #18382a; border-radius: 12px;   /* the chat's card */
   color: #e8fff1; font-size: 13px; line-height: 1.4; pointer-events: none;
-  opacity: 0; transition: opacity 200ms ease; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  opacity: 0; transition: opacity 200ms ease; box-shadow: none;
 }
 .glance.show { opacity: 1; }
 .glance[hidden] { display: none; }

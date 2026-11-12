@@ -51,7 +51,7 @@
 - Command center Brains card shows the decision layer and the last decision; every routed turn is in the activity log.
 - Advice only: permissions, approvals and the command policy are enforced in code and never read Jev's output.
 - Changing brain settings gives every resting brain a fresh chance.
-- `docs/AUDIT.md`: what works (with the tests that prove it), what is limited, and next steps.
+- `docs/dev/archive/AUDIT-agent-brain.md`: what works (with the tests that prove it), what is limited, and next steps.
 
 ### COre 2.0, part 10: Brain router (no longer tied to Claude Code)
 
@@ -318,7 +318,7 @@
 - Turn on Settings → Skills → "Read my open Archicad project" and ask COre how many doors, walls or windows the
   open project has. COre talks to Archicad's built-in JSON API on this PC only (127.0.0.1, ports 19723–19743)
   and can only use read commands; nothing in the model can be changed. Not yet tested against a real
-  Archicad. See docs/dev/RESEARCH-PHASE5-6.md for the integration research (Archicad, Revit via pyRevit
+  Archicad. See docs/dev/archive/RESEARCH-PHASE5-6.md for the integration research (Archicad, Revit via pyRevit
   Routes, Windows UI Automation) and the secure Android companion design.
 
 ### Approved file changes (you click Apply)

@@ -204,5 +204,6 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.activeElement !== $('filter')) api.close(); });
   refresh();
   setInterval(() => { if (!document.hidden) refresh(); }, 2000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); // built ahead of time: fresh on show
   window.__centerReady = true;
 })();

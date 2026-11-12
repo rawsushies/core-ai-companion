@@ -2,16 +2,23 @@
 # Builds what the installer bundles besides COre's own files (CI, Windows runner):
 #   vendor/cortex   Cortex.exe (the knowledge engine, built from its own PyInstaller recipe)
 #   vendor/models   the local AI models (speech recognition, voice, memory embeddings)
-# CORTEX_REF picks the Cortex branch/tag (default main); the commit is recorded.
+# The Cortex commit is pinned (CORTEX_REF overrides it) and PyInstaller's version is pinned in
+# bundle-requirements.txt, so the same commit always builds the same Cortex.exe.
 set -euo pipefail
+CORTEX_REF="${CORTEX_REF:-87ca5374bb884a8b5f59fde0de36ac7e284868ec}" # rawsushies/cortex-ai-brain main after #1 (Syncthing conflicts)
 src="${RUNNER_TEMP:-/tmp}/cortex-src"
 rm -rf "$src" vendor/cortex vendor/models
-git clone --depth 1 --branch "${CORTEX_REF:-main}" https://github.com/rawsushies/cortex-ai-brain "$src"
-python -m pip install -q pyinstaller
+mkdir -p "$src"
+git -C "$src" init -q
+git -C "$src" remote add origin https://github.com/rawsushies/cortex-ai-brain
+for i in 1 2 3; do git -C "$src" fetch -q --depth 1 origin "$CORTEX_REF" && break; [ "$i" = 3 ] && exit 1; sleep $((i * 10)); done
+git -C "$src" checkout -q FETCH_HEAD
+# Package index hiccups on CI runners happen ("from versions: none"): retry with backoff.
+for i in 1 2 3 4; do python -m pip install -q --retries 5 --timeout 60 -r scripts/ci/bundle-requirements.txt && break; [ "$i" = 4 ] && exit 1; sleep $((i * 15)); done
 (cd "$src" && python -m PyInstaller --noconfirm --distpath dist packaging/cortex.spec)
 mkdir -p vendor
 cp -r "$src/dist/Cortex" vendor/cortex
 echo "rawsushies/cortex-ai-brain $(git -C "$src" rev-parse HEAD)" > vendor/cortex/SOURCE.txt
 test -f vendor/cortex/Cortex.exe || test -f vendor/cortex/Cortex
-node scripts/prefetch-models.mjs vendor/models
+for i in 1 2 3; do node scripts/prefetch-models.mjs vendor/models && break; [ "$i" = 3 ] && exit 1; sleep $((i * 20)); done
 du -sh vendor/cortex vendor/models
