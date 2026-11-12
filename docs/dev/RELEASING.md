@@ -18,7 +18,8 @@ Releases are deliberate. Nothing reaches users because a file changed on a branc
 1. Work happens on branches; CI runs on every push and PR. Merging to `main` publishes nothing.
 2. Prepare the release on a branch: bump `version` in `package.json`, move the CHANGELOG "Unreleased"
    section under the new version, and write `RELEASE_NOTES.md` for it (the release body uses that file).
-3. After the user approves the release: create and push the tag `vX.Y.Z` on the reviewed commit.
+3. After the user approves the release: create and push the tag `vX.Y.Z` on the reviewed commit, or push the
+   reviewed commit to a branch `release/vX.Y.Z` (the workflow then creates the tag on that exact commit).
 4. The **Release** workflow re-runs every gate on Windows and creates a **draft** GitHub release with the
    installer, blockmap, `latest.yml` and `SHA256SUMS.txt`.
 5. A human downloads the draft installer, checks it, and clicks **Publish**. Installed copies only see

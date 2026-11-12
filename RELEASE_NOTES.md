@@ -8,6 +8,8 @@ or asks first.
 
 - **Windows:** download `COre-Setup-12.0.0.exe` and run it. Windows may warn that the installer is unsigned:
   choose *More info* → *Run anyway*.
+- **Android:** download `COre-android-12.0.0.apk` on your phone and open it (allow installing from your browser
+  when asked). In COre on your PC: Settings → Phone → Pair a phone.
 - Checksums are in `SHA256SUMS.txt`.
 
 ## What's new
