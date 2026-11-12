@@ -701,7 +701,7 @@ let settingsWin = null;
 // reload their data whenever they become visible. performance.prebuildWindows: false
 // turns this off (saves the memory of two idle renderers).
 function prebuildWindows() {
-  if ((config.data.performance || {}).prebuildWindows === false || SMOKE) return;
+  if ((config.data.performance || {}).prebuildWindows === false || SMOKE || app.isQuitting) return;
   if (!settingsWin || settingsWin.isDestroyed()) buildSettings();
   if (!centerWin || centerWin.isDestroyed()) buildCenter();
 }
@@ -3573,6 +3573,9 @@ function setHandsFree(on) {
 }
 
 let sttNoticeShown = false;
+const FAST_STT_MODEL = 'onnx-community/moonshine-base-ONNX';
+const { turnLooksComplete } = require('./latency');
+const QUICK_TURN_MS = 350; // silence before a finished sentence ends the turn (the full rule is 600 ms)
 // Local models: the installer ships them in resources/models (COre works offline
 // from the first start); anything not bundled is downloaded once into userData/models.
 function modelCacheFor(id) {
@@ -3585,6 +3588,10 @@ function makeStt() {
     model: v.sttModel,
     language: v.sttLanguage,
     cacheDir: modelCacheFor(v.sttModel),
+    // English speakers get the fast recognizer (Moonshine, ~0.25 s instead of ~0.6 s):
+    // language set to English, or automatic on an English system. Off: voice.sttFast false.
+    fastModel: FAST_STT_MODEL,
+    fast: v.sttFast !== false && (v.sttLanguage === 'english' || (!v.sttLanguage && /^en\b/i.test(app.getLocale() || ''))),
     onProgress: (p) => {
       toPanel('status', { kind: 'download', file: p.file, pct: p.pct });
       // transformers.js reports progress even when reading its cache: only
@@ -3807,9 +3814,19 @@ function wireIpc() {
     if (!fromOverlay(e) || !audio || !stt) return;
     const pcm = audio instanceof Float32Array ? audio : new Float32Array(audio);
     const len = pcm.length;
-    specStt = { len, promise: stt.transcribe(pcm).then((t) => { latency.mark('transcript'); return t; }) };
-    specStt.promise.catch(() => {});
-    latency.begin('voice', speechEnd(speechEndAt));
+    const turn = latency.begin('voice', speechEnd(speechEndAt));
+    const spec = { len, promise: stt.transcribe(pcm).then((t) => { if (latency.turn === turn) latency.mark('transcript'); return t; }) };
+    specStt = spec;
+    spec.promise.catch(() => {});
+    // End of turn without the full silence wait: once the transcript is a finished
+    // sentence and you are still quiet, stop listening now (a person would answer).
+    // At least QUICK_TURN_MS of silence first, so a short breath between two sentences
+    // doesn't end the turn; any new speech in the meantime cancels it (listen:resume).
+    const end = speechEnd(speechEndAt);
+    spec.promise.then((t) => {
+      if (specStt !== spec || !turnLooksComplete(t) || config.data.voice.quickTurn === false) return;
+      setTimeout(() => { if (specStt === spec) toOverlay('listen:stop'); }, Math.max(0, end + QUICK_TURN_MS - Date.now()));
+    }).catch(() => {});
   });
   ipcMain.on('listen:react', (e) => { if (fromOverlay(e)) latency.mark('react'); });
   ipcMain.on('listen:resume', (e) => { if (!fromOverlay(e)) return; specStt = null; latency.turn = null; });

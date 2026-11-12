@@ -4,8 +4,10 @@ const path = require('path');
 const { Worker } = require('worker_threads');
 
 class SpeechToText {
-  constructor({ model, language, cacheDir, onProgress }) {
-    this.opts = { model, language, cacheDir };
+  // fastModel: an English-only quick recognizer (Moonshine) used when fast is true
+  // (English speakers); anything else uses model (Whisper, every language).
+  constructor({ model, language, cacheDir, onProgress, fastModel = '', fast = false }) {
+    this.opts = { model, language, cacheDir, fastModel, fast: !!(fast && fastModel) };
     this.onProgress = onProgress || (() => {});
     this.worker = null;
     this.nextId = 1;
@@ -44,11 +46,23 @@ class SpeechToText {
     this._ensure().postMessage({ type: 'warm' });
   }
 
-  transcribe(float32) {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this._ensure().postMessage({ type: 'transcribe', id, audio: float32 }, [float32.buffer]);
+  // { fast } overrides the default (opts.fast) for one clip, e.g. to retry with Whisper.
+  transcribe(float32, { fast = this.opts.fast } = {}) {
+    const seconds = float32.length / 16000;
+    const run = (useFast, audio) => new Promise((resolve, reject) => {
+      const n = this.nextId++;
+      this.pending.set(n, { resolve, reject });
+      this._ensure().postMessage({ type: 'transcribe', id: n, audio, fast: useFast }, [audio.buffer]);
+    });
+    if (!fast) return run(false, float32);
+    // Safety net: real speech (over 1.2 s) that the English recognizer turns into
+    // nothing is probably another language: redo it with Whisper and stop using
+    // the fast path for this session.
+    const copy = new Float32Array(float32);
+    return run(true, float32).then((text) => {
+      if (text || seconds < 1.2) return text;
+      this.opts.fast = false;
+      return run(false, copy);
     });
   }
 

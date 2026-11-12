@@ -15,6 +15,9 @@ const t0 = Date.now();
 // Same model ids and dtypes as src/main/stt, tts and embed workers (and config.voice.sttModel's default).
 const stt = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-base', { dtype: { encoder_model: 'q8', decoder_model_merged: 'q4' } });
 await stt.dispose?.();
+// The fast English recognizer (same settings as the stt worker's fast path).
+const fast = await pipeline('automatic-speech-recognition', 'onnx-community/moonshine-base-ONNX', { dtype: 'q8' });
+await fast.dispose?.();
 const fe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { dtype: 'q8' });
 const v = await fe('COre works offline', { pooling: 'mean', normalize: true });
 await fe.dispose?.();
@@ -25,4 +28,4 @@ for (const dtype of ['q4', 'q8']) { // q4 = default quality, q8 = "best"
 }
 const size = (d) => fs.readdirSync(d, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? size(path.join(d, e.name)) : fs.statSync(path.join(d, e.name)).size), 0);
 console.log(`models ready in ${out}: ${(size(out) / 1e6).toFixed(0)} MB, embedding dim ${v.dims.at(-1)}, ${Math.round((Date.now() - t0) / 1000)} s`);
-for (const id of ['onnx-community/whisper-base', 'Xenova/all-MiniLM-L6-v2', 'onnx-community/Kokoro-82M-v1.0-ONNX']) if (!fs.existsSync(path.join(out, id))) { console.error(`missing ${id}`); process.exit(1); }
+for (const id of ['onnx-community/whisper-base', 'onnx-community/moonshine-base-ONNX', 'Xenova/all-MiniLM-L6-v2', 'onnx-community/Kokoro-82M-v1.0-ONNX']) if (!fs.existsSync(path.join(out, id))) { console.error(`missing ${id}`); process.exit(1); }

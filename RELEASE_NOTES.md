@@ -1,37 +1,61 @@
 # COre 12.0.0
 
-COre becomes a desktop operator: it sees what is on your screen, remembers your projects through your Cortex
-knowledge vault, notices what needs you, and works your apps one approved step at a time. Everything new is off
-or asks first.
+COre 12.0.0 introduces desktop automation, a local long-term knowledge layer and proactive assistance.
+All new capabilities are opt-in or require explicit approval before acting.
 
-## Install
+## Highlights
 
-- **Windows:** download `COre-Setup-12.0.0.exe` and run it. Windows may warn that the installer is unsigned:
-  choose *More info* → *Run anyway*.
-- **Android:** download `COre-android-12.0.0.apk` on your phone and open it (allow installing from your browser
-  when asked). In COre on your PC: Settings → Phone → Pair a phone.
-- Checksums are in `SHA256SUMS.txt`.
+- **Desktop automation.** The agent reads applications through Windows UI Automation, plans each task,
+  performs one approved step at a time and verifies the result. Commands run in a Windows AppContainer
+  sandbox restricted to user-approved folders.
+- **Long-term knowledge layer.** Decisions, lessons and research are stored as plain Markdown in a local
+  vault, indexed by the bundled Cortex engine. The vault is compatible with Obsidian and can be synchronised
+  between devices with Syncthing. Sync conflicts are preserved and reported, never resolved silently.
+- **Situation awareness.** COre can describe the active desktop (windows, dialogs, current project) with a
+  source for every statement, and rejects answers that reference items it cannot observe.
+- **Proactive suggestions.** Interrupted tasks, overdue items and failed automations are surfaced on request
+  (`/suggest`). No action is taken without confirmation.
+- **Provider resilience.** Models are selected from each provider's live catalogue and replaced automatically
+  when retired or unavailable. Verified against Groq and Gemini.
+- **Diagnostics.** `/diagnostics` reports provider health and latency, routing, memory, sandbox and automation
+  status without exposing secrets.
 
-## What's new
+## Installation
 
-- **Long-term memory with Cortex:** connect your Cortex vault (Settings → Privacy). Decisions, lessons and
-  research go there; preferences stay in COre. If Cortex is offline, notes wait and are delivered later.
-- **Set up for you:** on first start COre creates your knowledge vault and adds it to Obsidian automatically (no
-  account or key). No Obsidian yet? Type `/vault obsidian`. Share it with other devices for free using Syncthing.
-- **Open in Obsidian:** your vault is plain Markdown. `/obsidian` opens it, `/obsidian Projects/X.md` opens a note.
-- **Knows what you're working on:** "what am I working on?" reads your open windows and dialogs, recalls the
-  project from both memories, and says where each fact came from. It won't invent windows it can't see.
-- **Smarter desktop agent:** reads real controls through Windows UI Automation, plans first, checks the result,
-  and knows how common apps (Excel, Word, LibreOffice Calc, Explorer, browsers, VS Code, Archicad) work best.
-- **Suggestions:** `/suggest` lists unfinished tasks, overdue to-dos from Cortex and automations that failed.
-  Nothing runs until you choose.
-- **Safer commands:** on Windows, commands run in a locked-down sandbox that can only touch folders you allow.
-- **Free AI that works out of the box:** Gemini, Groq and OpenRouter keys are enough; COre picks a current model by
-  itself and switches if one is retired or busy. `/diagnostics` shows how each brain is doing.
+| Platform | Asset |
+|---|---|
+| Windows 10/11 (x64) | `COre-Setup-12.0.0.exe` |
+| Android | `COre-android-12.0.0.apk` (pair from Settings → Phone) |
 
-## Known limits
+The Windows installer includes the Cortex knowledge engine and all local models (speech recognition, speech
+synthesis, embeddings). No additional downloads are required, and the application works offline after
+installation. Existing installations update automatically once this release is published.
 
-- The installer is unsigned.
-- Some apps (LibreOffice on a machine without accessibility tools) show COre no controls; it then uses the
-  keyboard and checks the saved file.
-- Injection detection is a warning only; the real protection is that every action needs your approval.
+Verify downloads against `SHA256SUMS.txt`.
+
+## Requirements
+
+- A language model provider: Claude Code (signed in), or a free API key for Gemini, Groq or OpenRouter, or a
+  local Ollama model.
+- Obsidian and Syncthing are optional.
+
+## Security
+
+- Every desktop action requires approval; commands execute in an OS sandbox.
+- Retrieved content (files, web pages, notes) is treated as data, never as instructions.
+- Conversation history is never imported automatically; the knowledge index remains on the local machine.
+
+## Known limitations
+
+- The installer is not code-signed. Windows SmartScreen or antivirus software may show a warning.
+- Some applications expose few controls to UI Automation; COre then uses keyboard input and verifies results
+  from saved files.
+- Prompt-injection detection is advisory; enforcement relies on approvals and sandboxing.
+
+## Verification
+
+Built and released through the gated release workflow: unit and end-to-end tests on Windows and Linux,
+packaged-application self-test, silent install/uninstall, and an installed-files check including a functional
+test of the bundled Cortex engine.
+
+Full change history: [CHANGELOG.md](https://github.com/rawsushies/core-ai-companion/blob/main/CHANGELOG.md)
