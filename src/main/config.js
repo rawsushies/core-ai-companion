@@ -128,6 +128,7 @@ const DEFAULTS = {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
     maxSteps: 25,
+    sandbox: 'auto', // commands in an OS sandbox when available (Linux: bubblewrap); 'required' refuses them otherwise; 'off'
     uia: true, // Windows: read and operate controls by their real properties (UI Automation)
     tools: true, // commands, files and web pages (inside the project folder), on top of mouse and keyboard
     allowCommands: [], // commands that never ask, matched by their start, e.g. "git status", "npm test"

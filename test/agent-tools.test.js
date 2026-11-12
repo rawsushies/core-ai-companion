@@ -175,3 +175,22 @@ test('failure advisor abort stops the task safely', async () => {
   assert.strictEqual(out.status, 'failed');
   assert.match(out.reason, /stopped safely/);
 });
+
+const SBX = require('../src/main/sandbox');
+test('OS sandbox (bubblewrap): system read-only, home hidden, writes only in the project, no network', { skip: !SBX.detect().ok && 'bubblewrap unavailable' }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-sbx-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'core-sbx-out-'));
+  const run = async (code) => { const w = SBX.wrap([process.execPath, '-e', code], { cwd: root, roots: [root] }); assert.ok(w.sandboxed); return T.runCommand([w.file, ...w.args], { cwd: root, timeoutMs: 20000 }); };
+  const ok = await run("require('fs').writeFileSync('inside.txt','yes'); console.log('wrote')");
+  assert.match(ok.out, /wrote/);
+  assert.strictEqual(fs.readFileSync(path.join(root, 'inside.txt'), 'utf8'), 'yes');
+  const bad = await run(`try { require('fs').writeFileSync(${JSON.stringify(path.join(outside, 'x.txt'))}, 'no'); console.log('LEAK') } catch (e) { console.log('blocked', e.code) }`);
+  assert.match(bad.out, /blocked (EROFS|EACCES|ENOENT)/);
+  assert.ok(!fs.existsSync(path.join(outside, 'x.txt')));
+  const sys = await run("try { require('fs').writeFileSync('/usr/core-test','x'); console.log('LEAK') } catch (e) { console.log('blocked', e.code) }");
+  assert.match(sys.out, /blocked/);
+  const home = await run(`console.log(require('fs').readdirSync(${JSON.stringify(os.homedir())}).length)`);
+  assert.match(home.out, /^0/m, 'the real home folder is hidden');
+  const net = await run("require('net').connect(53, '1.1.1.1').on('error', (e) => console.log('nonet', e.code)).on('connect', () => console.log('LEAK'))");
+  assert.match(net.out, /nonet/);
+});

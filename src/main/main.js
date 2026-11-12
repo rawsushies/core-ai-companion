@@ -1773,6 +1773,7 @@ function emergencyStop(reason = 'emergency stop') {
 // all steps" for this task). Esc or the Stop button ends it at once.
 const AG = require('./agent');
 const AT = require('./agentTools');
+const SBX = require('./sandbox');
 const { UiaClient } = require('./uia');
 let uiaClient = null;
 function agentUia() {
@@ -1804,11 +1805,15 @@ function agentTools(taskId) {
       const c = AT.checkCommand(a.cmd);
       if (!c.ok) throw new Error(`Command refused: ${c.reason}.`);
       const cwd = files.resolve(a.cwd || '.', { mustExist: true });
-      toolAudit(`agent command: ${c.argv.join(' ')} (in ${cwd})`);
-      const r = await AT.runCommand(c.argv, { cwd, signal, timeoutMs: Math.max(5, Math.min(600, Number(ag.commandTimeout) || 60)) * 1000 });
+      // OS sandbox when available: read-only system, writes only in the project, no network, home hidden.
+      const mode = ag.sandbox || 'auto';
+      const w = mode === 'off' ? { file: c.argv[0], args: c.argv.slice(1), sandboxed: false, note: 'sandbox off' } : SBX.wrap(c.argv, { cwd, roots: files.roots });
+      if (!w.sandboxed && mode === 'required') throw new Error(`Command refused: the sandbox is required but unavailable (${w.note}).`);
+      toolAudit({ event: 'agent-command', argv: c.argv, cwd, sandboxed: w.sandboxed });
+      const r = await AT.runCommand([w.file, ...w.args], { cwd, signal, timeoutMs: Math.max(5, Math.min(600, Number(ag.commandTimeout) || 60)) * 1000 });
       const head = r.timedOut ? 'timed out' : r.aborted ? 'stopped' : `exit code ${r.code}`;
       if (r.code !== 0 && !r.out) throw new Error(head);
-      return `${head}\n${r.out}`;
+      return `${head}${w.sandboxed ? ' (sandboxed)' : ''}\n${r.out}`;
     },
     read: async (a) => files.read(a.path),
     write: async (a) => { const f = files.write(taskId, a.path, a.text); toolAudit(`agent wrote ${f}`); return `wrote ${a.text.length} characters to ${a.path}`; },
