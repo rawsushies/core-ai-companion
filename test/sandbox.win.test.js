@@ -23,14 +23,19 @@ test('Windows job: commands run and return output inside the job', { skip: !win,
 });
 
 test('Windows job: a timeout kills the whole process tree, grandchildren included', { skip: !win, timeout: 90000 }, async () => {
-  const pidFile = path.join(dir, 'grandchild.pid');
-  const code = `const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' }); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(c.pid)); setInterval(()=>{},1000);`;
-  const r = await run(code, { timeoutMs: 6000 });
-  assert.ok(r.timedOut, `exit ${r.code}: ${String(r.out).slice(0, 600)}`);
-  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-  let gone = false;
-  for (let i = 0; i < 30 && !gone; i++) { await new Promise((res) => setTimeout(res, 300)); gone = !alive(pid); }
-  assert.ok(gone, `grandchild ${pid} was killed with the job`);
+  // cmd.exe (child) starts ping.exe (grandchild); a unique ping target marks ours.
+  const mark = `127.0.0.${2 + (process.pid % 200)}`;
+  const count = () => { try { return (execFileSync('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | ForEach-Object { $_.CommandLine }"], { encoding: 'utf8' }).match(new RegExp(mark.replace(/\./g, '\\.'), 'g')) || []).length; } catch { return 0; } };
+  const w = SBX.wrap(['cmd.exe', '/c', `ping -n 120 ${mark}`], { cwd: dir, roots: [dir] });
+  const p = T.runCommand([w.file, ...w.args], { cwd: dir, timeoutMs: 8000 });
+  let seen = 0;
+  for (let i = 0; i < 25 && !seen; i++) { await new Promise((res) => setTimeout(res, 250)); seen = count(); }
+  const r = await p;
+  assert.ok(r.timedOut, `exit ${r.code}: ${String(r.out).slice(0, 400)}`);
+  assert.ok(seen > 0, 'the grandchild was running inside the sandbox');
+  let left = 1;
+  for (let i = 0; i < 30 && left; i++) { await new Promise((res) => setTimeout(res, 300)); left = count(); }
+  assert.strictEqual(left, 0, 'grandchild killed with the job');
 });
 
 test('Windows job: process count and memory are capped', { skip: !win, timeout: 90000 }, async () => {
@@ -57,6 +62,8 @@ const homeSecret = win ? path.join(os.homedir(), `core-secret-${process.pid}.txt
 test('Windows AppContainer: commands run, and may write inside the project folder', { skip: !win, timeout: 90000 }, async () => {
   const w = SBX.wrap([process.execPath, '-e', '0'], { cwd: dir, roots: [dir] });
   assert.strictEqual(w.level, 'container');
+  const pm = SBX.wrap(['npm.cmd', 'test'], { cwd: dir, roots: [dir] });
+  assert.strictEqual(pm.level, 'process'); assert.match(pm.note, /no AppContainer for Node package managers/);
   const target = path.join(dir, 'made-inside.txt');
   const r = await run(`require('fs').writeFileSync(${JSON.stringify(target)}, 'ok'); console.log('wrote')`);
   assert.strictEqual(r.code, 0, r.out);
@@ -99,15 +106,3 @@ test('Windows AppContainer: no network, not even the host loopback', { skip: !wi
   } finally { srv.close(); }
 });
 
-test('Windows AppContainer: child-process diagnostics (logged)', { skip: !win, timeout: 90000 }, async () => {
-  const code = `const cp=require('child_process');const O={timeout:5000};const L=(...a)=>require('fs').appendFileSync(${JSON.stringify(path.join(dir,'diag.txt'))},a.join(' ')+'\\n');const t=(n,f)=>{L('start',n);try{const r=f();L(n,'ok',r&&r.status,r&&r.error&&r.error.code)}catch(e){L(n,'ERR',e.code,e.message)}};
-t('cmd-pipe',()=>cp.spawnSync('cmd.exe',['/c','echo hi'],O));
-t('node-pipe',()=>cp.spawnSync(process.execPath,['-e','0'],O));
-t('node-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{windowsHide:true,...O}));
-t('node-ignore',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore',...O}));
-t('node-ignore-hide',()=>cp.spawnSync(process.execPath,['-e','0'],{stdio:'ignore',windowsHide:true,...O}));
-t('node-detached',()=>{const c=cp.spawn(process.execPath,['-e','0'],{stdio:'ignore',detached:true});return {status:c.pid}});`;
-  const r = await run(code, { timeoutMs: 45000 });
-  let d = ''; try { d = fs.readFileSync(path.join(dir, 'diag.txt'), 'utf8'); } catch {}
-  console.log('DIAG', r.code, r.timedOut, JSON.stringify(d), String(r.out).slice(0, 300));
-});

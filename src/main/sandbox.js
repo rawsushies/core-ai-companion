@@ -51,7 +51,11 @@ function wrap(argv, { cwd, roots = [], network = false, platform = process.platf
   if (!d.ok) return { file: argv[0], args: argv.slice(1), sandboxed: false, note: d.reason };
   if (d.kind === 'job') {
     const b64 = (v) => Buffer.from(JSON.stringify(v), 'utf8').toString('base64');
-    const box = isolation === 'appcontainer';
+    // Node package managers spawn Node children over named pipes, which an
+    // AppContainer cannot create (libuv then hangs); they run with the Job
+    // limits only and the note says so, so the approval shows it.
+    const nodePm = /^(npm|npx|pnpm|yarn)(\.cmd|\.ps1|\.exe)?$/i.test(path.basename(String(argv[0] || '')));
+    const box = isolation === 'appcontainer' && !nodePm;
     const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', JOB_RUN, '-Cwd', cwd || '.', '-MemoryMB', String(memoryMB), '-MaxProcs', String(maxProcs), '-Argv', b64(argv)];
     if (box) args.push('-Isolate', '-Roots', b64(roots.filter(Boolean)));
     return {
@@ -61,7 +65,7 @@ function wrap(argv, { cwd, roots = [], network = false, platform = process.platf
       level: box ? 'container' : 'process',
       note: box
         ? `sandboxed (Windows AppContainer: writes only in ${roots.map((r) => path.basename(r)).join(', ') || 'nothing'}, profile hidden, no network; Job Object ${memoryMB} MB / ${maxProcs}-process limits)`
-        : `sandboxed (Windows Job Object: process tree, ${memoryMB} MB and ${maxProcs}-process limits, no clipboard or system changes; file access is not restricted)`,
+        : `sandboxed (Windows Job Object${nodePm && isolation === 'appcontainer' ? ', no AppContainer for Node package managers' : ''}: process tree, ${memoryMB} MB and ${maxProcs}-process limits, no clipboard or system changes; file access is not restricted)`,
     };
   }
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp'];
