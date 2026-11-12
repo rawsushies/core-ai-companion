@@ -154,10 +154,14 @@ class OpenAICompatBrain extends HistoryMixin {
     const prefs = String(this.cfg.prefer || '').split('|').filter(Boolean).map((p) => new RegExp(p, 'i'));
     // Not chat models: embeddings, speech (TTS such as Orpheus, Whisper), image,
     // and classifier/safety models (prompt-guard, safeguard, moderation).
-    const avoid = /embed|tts|audio|image|vision-preview|guard|whisper|moderation|orpheus|playai|speech|transcribe/i;
-    let pick = null;
-    for (const re of prefs) { pick = ids.find((m) => re.test(m) && !avoid.test(m)); if (pick) break; }
-    pick = pick || ids.find((m) => !avoid.test(m));
+    const avoid = /embed|tts|audio|image|vision-preview|guard|whisper|moderation|orpheus|playai|speech|transcribe|live|lyria|research|nano-banana|customtools/i;
+    // Models the endpoint rejected (listed but retired for this account) are skipped;
+    // a replacement the endpoint named in its error is tried first.
+    const bad = this.badModels || new Set();
+    const ok = (m) => !avoid.test(m) && !bad.has(m);
+    let pick = this.suggestedModel && ok(this.suggestedModel) ? this.suggestedModel : null;
+    for (const re of prefs) { if (pick) break; pick = ids.find((m) => re.test(m) && ok(m)); }
+    pick = pick || ids.find(ok);
     // Gemini's OpenAI endpoint lists "models/…" ids; strip the prefix (done above) and keep going.
     if (pick && pick !== this.cfg.model) {
       this.cfg.model = pick;
@@ -166,15 +170,16 @@ class OpenAICompatBrain extends HistoryMixin {
     return pick || null;
   }
 
+  // A model that is retired, renamed or overloaded is swapped for the next
+  // suitable one from the live list, up to three models per request.
   async ask(args) {
     if (!this.cfg.model) await this.resolveModel(args.signal);
-    try {
-      return await this._ask(args);
-    } catch (err) {
-      if (err.modelProblem && !args._retried && (await this.resolveModel(args.signal))) {
-        return this._ask({ ...args, _retried: true });
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this._ask(args);
+      } catch (err) {
+        if (!err.modelProblem || attempt >= 2 || !(await this.resolveModel(args.signal))) throw err;
       }
-      throw err;
     }
   }
 
@@ -209,7 +214,13 @@ class OpenAICompatBrain extends HistoryMixin {
       }
       if (re && res.status === 400 && /reasoning/i.test(t)) { this.noEffort = true; return this._ask({ prompt, image, tone, signal, onDelta, model: modelOverride }); }
       const err = new Error(`${this.name} error ${res.status}: ${t.slice(0, 200)}`);
-      err.modelProblem = res.status === 404 || /model/i.test(t);
+      err.modelProblem = res.status === 404 || (res.status === 503 && /model|demand|overload/i.test(t)) || /model/i.test(t);
+      if (err.modelProblem) {
+        (this.badModels || (this.badModels = new Set())).add(modelOverride || this.cfg.model);
+        const hint = /use (?:models\/)?([\w.-]+) for/i.exec(t); // "Please update your code to use models/X for …"
+        this.suggestedModel = hint ? hint[1] : null;
+        this.cfg.model = '';
+      }
       throw err;
     }
     let text = '';

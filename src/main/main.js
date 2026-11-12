@@ -3197,6 +3197,16 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       showSuggestions().catch((err) => addTranscript('system', `Could not check: ${err.message}`));
       return;
     } }
+    { const ob = /^\/obsidian\b\s*(.*)$/i.exec(text); if (ob) {
+      addTranscript('user', text);
+      const { vaultPath, isObsidianVault, noteUri } = require('./obsidian');
+      const vault = vaultPath(cortexCfg().vault);
+      const uri = noteUri(vault, ob[1].trim());
+      if (!vault) addTranscript('system', 'No Cortex vault is set. Set memory.cortex.vault (or run Cortex init) first.');
+      else if (!uri) addTranscript('system', 'That note path is outside your vault.');
+      else { shell.openExternal(uri); addTranscript('system', `Opening ${ob[1].trim() || 'your vault'} in Obsidian.${isObsidianVault(vault) ? '' : ' (Obsidian has not opened this folder yet; it will ask to add it as a vault.)'}`); }
+      return;
+    } }
     { const mm = /^\/memory\s+maintain\b\s*(.*)$/i.exec(text); if (mm) { addTranscript('user', text); memoryMaintain(mm[1]).catch((err) => addTranscript('system', `Maintenance failed: ${err.message}`)); return; } }
     if (/^\/automations?\s*$/i.test(text)) {
       addTranscript('user', text);

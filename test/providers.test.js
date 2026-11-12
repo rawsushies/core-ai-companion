@@ -52,3 +52,29 @@ test('providers without a key report unavailable (and are skipped)', () => {
   const p = new OpenAICompatBrain({ config: { baseUrl: 'https://x' }, state: memState(), id: 'groq', getKey: () => '' });
   assert.equal(p.available(), false);
 });
+
+test('a listed but retired model is skipped, and the replacement the provider names is used', async () => {
+  // Like Gemini: lists "old-flash", rejects it with "use models/new-flash for …", accepts new-flash (not listed).
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      if (req.url === '/v1/models') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ data: [{ id: 'models/old-flash' }, { id: 'models/other-flash' }] })); }
+      const { model } = JSON.parse(body || '{}');
+      seen.push(model);
+      if (model !== 'new-flash') { res.writeHead(404); return res.end(JSON.stringify([{ error: { code: 404, message: `This model models/${model} is no longer available to new users. Please update your code to use models/new-flash for the latest features.` } }])); }
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const cfg = { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: '', prefer: 'flash' };
+    const p = new OpenAICompatBrain({ config: cfg, state: memState(), id: 'gemini', name: 'Gemini', getKey: () => 'k' });
+    const r = await p.ask({ prompt: 'hi', onDelta: () => {} });
+    assert.equal(r.text, 'ok');
+    assert.deepEqual(seen, ['old-flash', 'new-flash']);
+    assert.equal(cfg.model, 'new-flash');
+  } finally { server.close(); }
+});
