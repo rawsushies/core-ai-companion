@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 74%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 76%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -34,7 +34,7 @@ vault files directly.
 | 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
 | 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; real-provider validation open | ~90% |
 | 2 COre 2.2 environmental intelligence | Acceptance test passes on real Windows + real Cortex | ~70% |
-| 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e in the real app); approved maintenance; opt-in auto-resume | ~70% |
+| 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e); opportunity detection, approved maintenance, opt-in auto-resume | ~80% |
 | 4 COre 3.0 unified experience | Combined acceptance scenario passes in the real app (stand-in providers); benchmarks in place | ~55% |
 
 ### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
@@ -92,7 +92,9 @@ vault files directly.
 | Acceptance | Permitted event -> relevance -> history -> authorized workflow -> verified outcome | **Pass (Linux CI, real Cortex; e2e in the real app)** | real file created in a watched folder, unrelated file ignored, Cortex decision recalled with its path, workflow writes a summary that is read back from disk |
 | 6 | Automatic resumption after restart | Implemented (opt-in) | `agent.autoResume` + background tasks; otherwise offered |
 | 12 | User-approved scheduled maintenance | Implemented | `/memory maintain` dry-run report, `apply [all]`; optional weekly report; daily pass merges only (retiring waits for approval); `test/memgate.test.js` #12 |
-| 3, 4, 7 | Skills, opportunity detection, specialist collaboration | Partly (playbooks, watch mode, specialists) | |
+| 4 | Identify problems, opportunities, unfinished tasks | Implemented | `src/main/opportunities.js`: interrupted desktop task, overdue / due-today Cortex to-dos (real Cortex test), failed or unverified automations, notes waiting for Cortex; at most 3, sourced, daily or `/suggest`, dismissable, never acts |
+| 7 | Specialist collaboration | Improved | every specialist recalls through the gateway (COre + Cortex); cores read each other's results |
+| 3 | Reusable skills and playbooks | Present (playbooks, learned desktop workflows) | |
 
 ### Phase 4: COre 3.0 unified experience
 
@@ -116,6 +118,5 @@ vault files directly.
 
 ## Next execution target
 
-1. Phase 3: opportunity detection (unfinished tasks, stale decisions) as bounded suggestions.
-2. Real-provider validation once network access to provider APIs is available.
-3. Combined Phase 4 scenario on real Windows (UIA apps + sandboxed commands in one task).
+1. Real-provider validation once network access to provider APIs is available.
+2. Combined Phase 4 scenario on real Windows (UIA apps + sandboxed commands in one task).

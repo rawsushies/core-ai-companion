@@ -52,6 +52,7 @@ const DEFAULTS = {
     greeting: true, // a short built-in greeting on the first launch of the day
   },
   presence: {
+    suggestions: true, // daily mention of unfinished work; only suggests, never acts
     chitchat: true, // after a quiet while COre starts a short conversation on its own
     minutes: 25, // quiet minutes before it does (doubles each time it's ignored)
     quietFrom: 22, // no chit-chat from this hour...

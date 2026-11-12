@@ -1030,6 +1030,36 @@ function startMemoryEngine() {
   setInterval(() => { if ((config.data.memory || {}).maintenance === 'weekly') weeklyMaintenance().catch(() => {}); }, 6 * 3600_000).unref();
 }
 
+// Unfinished work worth mentioning (COre 2.3): a few sourced suggestions,
+// once a day at most (or on /suggest). Nothing runs until you pick one.
+const { Opportunities } = require('./opportunities');
+function opportunities() {
+  return new Opportunities({
+    agentTask: readAgentTask,
+    cortex: gateway().cortex,
+    cortexOn: () => gateway().cortexOn(),
+    automationHistory,
+    pending: () => { try { return gateway().pending(); } catch { return 0; } },
+    dismissed: state.get('dismissedSuggestions') || [],
+  });
+}
+async function showSuggestions({ quietIfNone = false } = {}) {
+  const list = await opportunities().find();
+  if (!list.length && quietIfNone) return list;
+  addTranscript('system', `${Opportunities.format(list)}${list.length ? '\nHide one with /suggest hide NUMBER.' : ''}`);
+  lastSuggestions = list;
+  toolAudit({ event: 'suggestions', count: list.length, sources: list.map((x) => x.source) });
+  return list;
+}
+let lastSuggestions = [];
+function dailySuggestions() {
+  if ((config.data.presence || {}).suggestions === false) return;
+  const last = Number(state.get('suggestedAt') || 0);
+  if (Date.now() - last < 20 * 3600e3) return;
+  state.set('suggestedAt', Date.now());
+  showSuggestions({ quietIfNone: true }).catch(() => {});
+}
+
 let maintenancePlan = null;
 function maintenanceReport(p) {
   const n = p.native;
@@ -3118,6 +3148,12 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
+    { const sg = /^\/suggest(?:ions?)?\b\s*(?:hide\s+(\d+))?\s*$/i.exec(text); if (sg) {
+      addTranscript('user', text);
+      if (sg[1]) { const it = lastSuggestions[Number(sg[1]) - 1]; if (it) { state.set('dismissedSuggestions', [...(state.get('dismissedSuggestions') || []), it.id].slice(-200)); addTranscript('system', 'Hidden.'); } return; }
+      showSuggestions().catch((err) => addTranscript('system', `Could not check: ${err.message}`));
+      return;
+    } }
     { const mm = /^\/memory\s+maintain\b\s*(.*)$/i.exec(text); if (mm) { addTranscript('user', text); memoryMaintain(mm[1]).catch((err) => addTranscript('system', `Maintenance failed: ${err.message}`)); return; } }
     if (/^\/automations?\s*$/i.test(text)) {
       addTranscript('user', text);
@@ -4003,6 +4039,8 @@ app.whenReady().then(async () => {
   reloadPlaybooks();
   watchPlaybooks();
   try { startEventMonitor(); } catch (err) { console.error("[core] automations failed to start:", err.message); }
+  setTimeout(dailySuggestions, 120_000);
+  setInterval(dailySuggestions, 3 * 3600e3).unref();
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();

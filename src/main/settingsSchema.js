@@ -16,6 +16,7 @@ const SECTIONS = [
       { key: 'personality.tone', label: 'Personality', type: 'select', options: [['sarcastic', 'Sarcastic'], ['dramatic', 'Dramatic'], ['calm', 'Calm'], ['cheerful', 'Cheerful'], ['professional', 'Professional']] },
       { key: 'presence.chitchat', label: 'Chat with me when things are quiet', type: 'toggle' },
       { key: 'presence.minutes', label: 'Quiet time before COre speaks up', type: 'range', min: 5, max: 120, step: 5, unit: 'min' },
+      { key: 'presence.suggestions', label: 'Once a day, mention unfinished work (interrupted tasks, overdue to-dos, automations that failed)', type: 'toggle' },
       { key: 'presence.quietFrom', label: 'Quiet hours start', type: 'range', min: 0, max: 23, step: 1, unit: 'h' },
       { key: 'presence.quietTo', label: 'Quiet hours end', type: 'range', min: 0, max: 23, step: 1, unit: 'h' },
       { key: 'presence.reactions', label: 'Talk back when petted, poked or tossed', type: 'toggle' },

@@ -750,6 +750,11 @@ test('PHASE 4 ACCEPTANCE: instruction -> knowledge -> specialist -> plan -> tool
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('suggestions: /suggest lists unfinished work with its source, and changes nothing', async () => {
+  await send('/suggest');
+  await dock.waitForFunction(() => /Things that may need you \(from what COre can see; nothing has been done\)|Nothing waiting on you right now/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+});
+
 test('automations: a new file in the project folder starts the matching playbook and the outcome is reported', async () => {
   fs.writeFileSync(script, JSON.stringify([
     { match: '\\[automation CSV intake\\][\\s\\S]*intake-april\\.csv', full: true, reply: 'Intake summary: intake-april.csv has 2 rows.' },
