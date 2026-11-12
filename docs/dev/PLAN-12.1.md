@@ -93,6 +93,9 @@ Status: draft, 2026-11-12. Follows the 12.0.0 release.
   - the knowledge layer
   - develop
   It drops the stale notes about broken old installers and Claude being the default brain.
+- **README as a piece of the brand, not a manual:** designed like the promo material (banner, real renders,
+  short punchy sections, the dark/emerald look), with its own story structure rather than a feature dump.
+  Practical install and develop details move to compact sections lower down or to docs/.
 - **Docs:** user docs in `docs/`, developer docs in `docs/dev/`, finished audits and research in
   `docs/dev/archive/`. ROADMAP stays the single progress page; CHANGELOG has no leftover "Unreleased" parts.
 - **Housekeeping:**
@@ -100,12 +103,22 @@ Status: draft, 2026-11-12. Follows the 12.0.0 release.
   - move the two promo videos (~27 MB) out of the source tree into the brand kit's release assets
   - `vendor/` stays build-only
 
+## Promo material (after the update ships)
+
+- Remake the promo video: calm and cinematic, not bouncy. Slow camera, real smoke renders, timing that
+  follows the voice.
+- Remake the demo video: not bland. Show a real story (the user talks, COre reacts at human speed, works the
+  desktop, remembers through the vault, shows up in Obsidian), with the measured response times on screen.
+- Refresh the stills (hero, agent, phone, cards, features) from the 12.1 design. Promo assets live in the
+  release, not the source tree.
+
 ## Order and acceptance
 
 1. Phase 1 lands first. Every later change is accepted only when the benchmark shows it moved a target.
 2. Phases 2–4 and Design in parallel branches of work, each with its tests.
 3. Repository last, so the README describes the final 12.1.
 4. Release 12.1.0 through the gated release (installer check, real-provider run, all CI).
+5. Promo material from the shipped app.
 
 Done means the targets table filled with measured p50/p95 values that meet the targets, every window passing
 the readability screenshots, `npm run check` enforcing one version, and CI green on Linux and Windows.
