@@ -8,21 +8,29 @@
 // COre. Secrets in the home folder (SSH keys, browser profiles, tokens) are
 // simply not there.
 //
-// Windows / macOS: no sandbox backend yet. Commands still run argv-only with a
-// scrubbed environment, a folder jail for the working directory, a timeout
-// and per-command approval (agentTools.js); with agent.sandbox = 'required'
-// they are refused instead.
+// Windows (Job Object, ps/job-run.ps1): the whole process tree dies with COre,
+// process count and memory are capped, and the command cannot use the
+// clipboard, switch desktops, change system settings or log off. It is not a
+// file-system boundary (the folder jail for the working directory and per-
+// command approval still apply); AppContainer isolation is the next step.
+//
+// macOS: no backend yet. Commands still run argv-only with a scrubbed
+// environment, a folder jail, a timeout and per-command approval; with
+// agent.sandbox = 'required' they are refused instead.
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+const JOB_RUN = path.join(__dirname, 'ps', 'job-run.ps1');
+
 let probed = null;
 // -> { ok, kind, reason }
 function detect(platform = process.platform) {
   if (probed && probed.platform === platform) return probed;
   let r = { ok: false, kind: 'none', reason: 'no sandbox backend on this system', platform };
+  if (platform === 'win32') r = { ok: true, kind: 'job', platform };
   if (platform === 'linux') {
     const bin = ['/usr/bin/bwrap', '/bin/bwrap', '/usr/local/bin/bwrap'].find((b) => fs.existsSync(b));
     if (!bin) r.reason = 'bubblewrap (bwrap) is not installed';
@@ -36,9 +44,18 @@ function detect(platform = process.platform) {
 }
 
 // argv -> { file, args, sandboxed, note }. roots: folders the command may write.
-function wrap(argv, { cwd, roots = [], network = false, platform = process.platform, home = os.homedir() } = {}) {
+function wrap(argv, { cwd, roots = [], network = false, platform = process.platform, home = os.homedir(), memoryMB = 1024, maxProcs = 32 } = {}) {
   const d = detect(platform);
   if (!d.ok) return { file: argv[0], args: argv.slice(1), sandboxed: false, note: d.reason };
+  if (d.kind === 'job') {
+    return {
+      file: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', JOB_RUN, '-Cwd', cwd || '.', '-MemoryMB', String(memoryMB), '-MaxProcs', String(maxProcs), '--', ...argv],
+      sandboxed: true,
+      level: 'process',
+      note: `sandboxed (Windows Job Object: process tree, ${memoryMB} MB and ${maxProcs}-process limits, no clipboard or system changes; file access is not restricted)`,
+    };
+  }
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp'];
   if (home && fs.existsSync(home)) args.push('--tmpfs', home); // hide the real home folder
   for (const r of roots) if (r && fs.existsSync(r)) args.push('--bind', r, r); // after the tmpfs: project folders stay visible
