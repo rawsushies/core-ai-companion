@@ -1060,6 +1060,32 @@ function dailySuggestions() {
   showSuggestions({ quietIfNone: true }).catch(() => {});
 }
 
+// /diagnostics: one readable report of what COre is running on (no secrets). The
+// JSON one for support (copyDiagnostics) is diagnostics() further down.
+async function diagnosticsReport() {
+  const rs = brain && brain.routeStatus ? brain.routeStatus() : { providers: [] };
+  const gs = await gateway().status().catch((e) => ({ cortex: `error: ${e.message}` }));
+  const sbx = SBX.detect();
+  const ag = config.data.agent || {};
+  const ev = config.data.events || {};
+  const st = memory ? memory.stats() : null;
+  let audit = [];
+  try { audit = fs.readFileSync(path.join(app.getPath('userData'), 'logs', 'tools.log'), 'utf8').trim().split('\n').slice(-300).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch {}
+  const fails = audit.filter((e) => /error|fail/i.test(String(e.event || '')) || e.status === 'failed').slice(-5);
+  const lines = [
+    `Diagnostics (${new Date().toLocaleString()}, COre ${app.getVersion()}, ${process.platform} ${require('os').release()}):`,
+    `• Brain (${rs.mode || 'auto'}): ${(rs.providers || []).map((p) => `${p.name || p.id} ${p.state}${p.firstTokenMs != null ? ` ~${Math.round(p.firstTokenMs / 100) / 10}s` : ''}${p.ok + p.fail ? ` ${p.ok}/${p.ok + p.fail} ok` : ''}${p.reason ? ` (${String(p.reason).slice(0, 60)})` : ''}`).join('; ') || 'none'}`,
+    rs.last ? `  last turn: ${rs.last.provider || ''} ${rs.last.model || ''}${rs.last.reason ? ` because ${String(rs.last.reason).slice(0, 80)}` : ''}` : '',
+    `• Memory: ${st ? `${st.total} entries (${Object.entries(st.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}), ${st.conflicts} conflicts kept` : 'off'}`,
+    `• Cortex: ${gs.cortex}${gs.pending ? `, ${gs.pending} waiting` : ''}`,
+    `• Desktop agent: ${ag.enabled ? 'on' : 'off'}, approvals ${ag.approve || 'every'}, UI Automation ${agentUia() ? 'available' : 'not available'}`,
+    `• Command sandbox: ${sbx.ok ? sbx.kind + (sbx.kind === 'job' ? ` + ${ag.sandboxWindows || 'appcontainer'}` : '') : `none (${sbx.reason})`}, mode ${ag.sandbox || 'auto'}`,
+    `• Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}, ${(ev.rules || []).length} rule(s), monitor ${eventMonitor ? 'running' : 'stopped'}`,
+    fails.length ? `• Recent problems:\n${fails.map((e) => `   ${new Date(e.at || e.ts || Date.now()).toLocaleTimeString()} ${e.event || ''} ${String(e.error || e.reason || e.status || '').slice(0, 80)}`).join('\n')}` : '• Recent problems: none logged',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
 let maintenancePlan = null;
 function maintenanceReport(p) {
   const n = p.native;
@@ -3150,6 +3176,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
+    if (/^\/(diagnostics|diag|health)\s*$/i.test(text)) { addTranscript('user', text); diagnosticsReport().then((r) => addTranscript('system', r)).catch((err) => addTranscript('system', `Diagnostics failed: ${err.message}`)); return; }
     { const sg = /^\/suggest(?:ions?)?\b\s*(?:hide\s+(\d+))?\s*$/i.exec(text); if (sg) {
       addTranscript('user', text);
       if (sg[1]) { const it = lastSuggestions[Number(sg[1]) - 1]; if (it) { state.set('dismissedSuggestions', [...(state.get('dismissedSuggestions') || []), it.id].slice(-200)); addTranscript('system', 'Hidden.'); } return; }

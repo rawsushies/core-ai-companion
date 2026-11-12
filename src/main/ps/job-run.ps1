@@ -70,14 +70,16 @@ if ($Isolate) {
     $rootList = @()
     if ($Roots) { $rootList = @((ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Roots)))) | ForEach-Object { [string]$_ }) }
     # Grant the container exactly these folders (an ACE for the container SID only; nothing else changes).
-    foreach ($r in $rootList) { if (Test-Path -LiteralPath $r) { & icacls.exe $r /grant "*${sid}:(OI)(CI)M" /Q | Out-Null; if ($LASTEXITCODE -ne 0) { throw "could not grant $r" } } }
-    # Programs that resolve real paths (Node) look at every parent folder up to
-    # the drive root. Allow the container to read only the attributes of those
-    # parents (not their contents); best effort, since drive roots need admin.
+    # Granted once per folder: re-granting would re-walk every file below it.
     foreach ($r in $rootList) {
-      $p = Split-Path -Parent $r
-      while ($p) { & icacls.exe $p /grant "*${sid}:(RA)" /Q 2>$null | Out-Null; $n = Split-Path -Parent $p; if ($n -eq $p) { break }; $p = $n }
+      if (-not (Test-Path -LiteralPath $r)) { continue }
+      $acl = (& icacls.exe $r 2>$null) -join "`n"
+      if ($acl -match [regex]::Escape($sid) -or $acl -match 'COre\.AgentSandbox') { continue }
+      & icacls.exe $r /grant "*${sid}:(OI)(CI)M" /Q | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "could not grant $r" }
     }
+    # (No grants on parent folders: changing a folder's ACL makes Windows
+    # re-apply inheritance to everything below it, which can take minutes.)
     # Node: do not resolve the main script's real path (needs the drive root).
     $env:NODE_OPTIONS = ("$env:NODE_OPTIONS --preserve-symlinks-main").Trim()
     $prog = $Rest[0]
@@ -85,7 +87,7 @@ if ($Isolate) {
     $progDir = Split-Path -Parent $prog
     $sys = $env:SystemRoot
     if ($progDir -and (Test-Path -LiteralPath $progDir) -and -not ($sys -and $progDir.StartsWith($sys, [StringComparison]::OrdinalIgnoreCase))) {
-      & icacls.exe $progDir /grant "*${sid}:(OI)(CI)RX" /Q | Out-Null
+      if (-not ((& icacls.exe $progDir 2>$null) -join "`n" -match ([regex]::Escape($sid) + '|COre\.AgentSandbox'))) { & icacls.exe $progDir /grant "*${sid}:(OI)(CI)RX" /Q | Out-Null }
     }
     $line = ((@('"' + $prog + '"') + @($quoted)) -join ' ')
     $code = [CoreBox]::Run($line, $workDir)

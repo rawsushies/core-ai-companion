@@ -755,6 +755,17 @@ test('suggestions: /suggest lists unfinished work with its source, and changes n
   await dock.waitForFunction(() => /Things that may need you \(from what COre can see; nothing has been done\)|Nothing waiting on you right now/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
 });
 
+test('diagnostics: /diagnostics reports brain, memory, Cortex, sandbox and automations, without secrets', async () => {
+  await send('/diagnostics');
+  try {
+    await dock.waitForFunction(() => /Diagnostics \(/.test(document.getElementById('log').textContent) && /Command sandbox:/.test(document.getElementById('log').textContent), null, { timeout: 15000 });
+  } catch (err) { console.log('LOG:', (await dock.evaluate(() => document.getElementById('log').textContent)).slice(-300)); throw err; }
+  const text = await dock.evaluate(() => document.getElementById('log').textContent);
+  const report = text.slice(text.lastIndexOf('Diagnostics ('));
+  assert.match(report, /Brain \(/); assert.match(report, /Cortex: connected/); assert.match(report, /Automations: files on/);
+  assert.doesNotMatch(report, /test-jev-key/, 'no secrets');
+});
+
 test('automations: a new file in the project folder starts the matching playbook and the outcome is reported', async () => {
   fs.writeFileSync(script, JSON.stringify([
     { match: '\\[automation CSV intake\\][\\s\\S]*intake-april\\.csv', full: true, reply: 'Intake summary: intake-april.csv has 2 rows.' },

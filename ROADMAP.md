@@ -104,8 +104,8 @@ vault files directly.
 |---|---|---|---|
 | 1 | Voice, speech recognition, interruption | Present from 2.0 (local STT/TTS, barge-in) | e2e voice tests with stand-ins |
 | 2, 10 | Unified memory through the gateway, reliable across restarts | **Measured** | [docs/BENCHMARKS.md](docs/BENCHMARKS.md): recall after 5/5 full restarts, offline queue delivered 5/5 |
-| 3, 4 | Jev routing, effort passed to providers, failover | Implemented, verified with stand-ins | router/effort unit tests; e2e failover. Real providers unverified |
-| 6 | Monitoring, diagnostics, transparency | Present | command center, monitor panel, audit log |
+| 3, 4 | Jev routing (capabilities, effort, health, latency, cost), effort passed to providers, failover | Implemented, verified with stand-ins | router/effort unit tests; e2e failover. Real providers unverified |
+| 6 | Monitoring, diagnostics, transparency | Implemented | `/diagnostics`: brain health and latency per provider, last routing decision, memory, Cortex, agent, sandbox, automations, recent problems (no secrets; e2e); command center, monitor panel, audit log |
 | 7, 11 | Updates, recovery, backups, rollback | Present from 2.0 | backup e2e, updater, `/do undo` |
 | 9 | Real-world benchmarks | **Implemented** | `npm run benchmark`: memory hit rate and source correctness against real Cortex, restart reliability, injection guard (tuning and held-out sets), OS sandbox blocking, routing accuracy |
 | Acceptance | Complex instruction end to end | **Pass with stand-in providers** (CI ubuntu e2e, d0a81ff) | `test-e2e` "PHASE 4 ACCEPTANCE": Scout answers from Cortex, the agent plans, a command fails (exit 3), the agent recovers, writes and re-checks the brief, the file is read back, the verified outcome is filed in Cortex. Real providers and real multi-app Windows operation in one scenario: not yet |
