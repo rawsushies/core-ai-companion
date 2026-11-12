@@ -104,7 +104,7 @@ class MissionEngine {
         this._ev('subgoal', { index: i, text: sg.text, attempt });
         let r;
         try { r = await this.d.runSubgoal(sg, { index: i, attempt, note, signal, goal }); } catch (err) { r = { status: 'failed', summary: err.message, steps: 0 }; }
-        report.steps += Number(r.steps) || 0;
+        report.steps += Array.isArray(r.steps) ? r.steps.length : Number(r.steps) || 0; // the agent loop returns its steps as a list
         if (signal.aborted || r.status === 'stopped') return finish('stopped', { reason: this.reason || r.summary || 'stopped' });
         if (report.steps > budget.steps) return finish('limit', { reason: `the step budget (${budget.steps}) is used up`, at: i });
         if (r.status === 'ask') { sg.status = 'waiting'; return finish('ask', { question: r.summary, at: i }); }

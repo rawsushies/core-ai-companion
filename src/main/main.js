@@ -795,6 +795,8 @@ function centerState() {
     version: app.getVersion(),
     brain: brainStatus(),
     route: brain ? { ...brain.routeStatus(), jev: decider.status() } : null,
+    mission: (() => { const m = missionLive || state.get('missionLive') || null; return m ? { ...m, running: !!missionEngine } : null; })(),
+    policy: { allowed: policyStats.allow + policyStats.journal, asked: policyStats.escalate, refused: policyStats.deny, last: policyStats.last, halted: fs.existsSync(stopFile()) },
     agent: { enabled: !!(config.data.agent || {}).enabled, running: !!(agentRunner && agentRunner.running), task: t ? { goal: String(t.goal || ''), step: t.step, status: t.status, at: t.at, changed } : null },
     cores: cores.map((c) => { const h = clones.get(c.id); return { id: c.id, name: c.name, role: c.role, color: c.color, active: c.id === 'prime' || !!h, busy: h ? h.busy : 0 }; }),
     tasks: (state.get('tasks') || []).slice(-8).reverse().map((k) => ({ id: k.id, text: String(k.text || '').slice(0, 200), status: k.status, at: k.createdAt, steps: (k.steps || []).map((x) => ({ core: (coreById(x.core) || { name: x.core }).name, status: x.status })) })),
@@ -819,6 +821,8 @@ async function centerAction(name, arg) {
     case 'agentResume': startAgent('resume'); return { ok: true };
     case 'agentUndo': undoAgentTask(); return { ok: true };
     case 'agentStop': stopAgent('you pressed Stop in the command center'); return { ok: true };
+    case 'missionStop': if (missionEngine) missionEngine.stop('you pressed Stop in the command center'); stopAgent('you pressed Stop in the command center'); return { ok: true };
+    case 'missionUndo': { const m = missionLive || state.get('missionLive'); if (!m || missionEngine) return { ok: false, error: 'Nothing to undo.' }; const n = agentFiles().rollback(m.id); m.changed = 0; state.set('missionLive', m); addTranscript('system', `Undone: ${n} file${n === 1 ? '' : 's'} from the mission "${String(m.goal).slice(0, 80)}" put back.`); return { ok: true, message: `Put back ${n} file${n === 1 ? '' : 's'}.` }; }
     case 'runWorkflow': { const s = playbooks.find((p) => p.name === String(arg)); if (!s) return { ok: false, error: 'No such playbook.' }; runWorkflow(s); return { ok: true }; }
     case 'consolidate': { if (!memory) return { ok: false }; const r = memory.consolidate(); toDock('dock:memory', memory.list()); return { ok: true, message: `Merged ${r.merged}, retired ${r.retired}; ${r.total} memories.` }; }
     case 'openSkills': fs.mkdirSync(playbookDir(), { recursive: true }); shell.openPath(playbookDir()); return { ok: true };
@@ -2546,6 +2550,7 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
 // policy as /do, verifies them from disk (or has Sentinel judge when nothing on disk shows
 // it), retries once, and asks you only at the policy's boundaries or when it is stuck.
 let missionEngine = null;
+let missionLive = null; // what the command center (and the phone) show: { id, goal, status, subgoals, steps, startedAt }
 async function startMission(goal) {
   const ag = config.data.agent || {};
   addTranscript('user', `/autopilot ${goal}`);
@@ -2582,10 +2587,17 @@ async function startMission(goal) {
       return { ok: !!m && /yes/i.test(m[1]), why: (m && m[2]) || String(reply || '').slice(0, 160) };
     },
     runSubgoal: async (sg, { note, goal: g }) => startAgent(`${sg.text}${note ? `\n${note}` : ''}\n(Part of the mission: ${g})`, { mission: { grant, policy, journal, taskId } }),
-    onEvent: (e) => { if (e.type === 'plan') addTranscript('system', `Mission plan:\n${e.plan.map((x, i) => `${i + 1}. ${x.text}${x.check ? '' : ' (checked by Sentinel)'}`).join('\n')}`, { kind: 'progress' }); },
+    onEvent: (e) => {
+      const L = missionLive;
+      if (L && e.type === 'plan') L.subgoals = e.plan.map((x) => ({ text: x.text, checked: !!x.check, status: 'pending', attempts: 0, evidence: null }));
+      if (L && e.type === 'subgoal' && L.subgoals[e.index]) Object.assign(L.subgoals[e.index], { status: 'running', attempts: e.attempt });
+      if (L && e.type === 'verify' && L.subgoals[e.index]) Object.assign(L.subgoals[e.index], { status: e.ok ? 'done' : 'failed', evidence: e.evidence });
+      if (L && e.type === 'end') L.status = e.status;
+      if (e.type === 'plan') addTranscript('system', `Mission plan:\n${e.plan.map((x, i) => `${i + 1}. ${x.text}${x.check ? '' : ' (checked by Sentinel)'}`).join('\n')}`, { kind: 'progress' }); },
   });
   addTranscript('system', `Mission started: "${goal.slice(0, 120)}". Esc, Stop or the emergency hotkey ends it.`, { kind: 'progress' });
   // Learned routes: a nearly identical goal that worked before is reused (still verified step by step).
+  missionLive = { id: taskId, goal, status: 'running', subgoals: [], steps: 0, startedAt: Date.now(), grant: { folders: grant.folders, categories: grant.categories, budget: grant.budget } };
   let learned = null;
   try { learned = E.findRoute(PB.loadSkills(playbookDir()), goal); } catch {}
   if (learned) { addTranscript('system', `Reusing what worked before ("${learned.skill.name}", ${learned.plan.length} steps). Each step is still checked.`, { kind: 'progress' }); journal.append('route', { playbook: learned.skill.name, similarity: Math.round(learned.sim * 100) / 100 }); }
@@ -2601,6 +2613,9 @@ async function startMission(goal) {
     gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop' }).catch(() => {});
   }
   missionEngine = null;
+  missionLive = { ...(missionLive || {}), status: r.status, steps: r.steps, endedAt: Date.now(), question: r.question || '', reason: r.reason || '', subgoals: (r.subgoals || []).map((x) => ({ text: x.text, checked: !!x.check, status: x.status, attempts: x.attempts, evidence: x.evidence })) };
+  try { missionLive.changed = agentFiles().changed(taskId).length; } catch {}
+  state.set('missionLive', missionLive);
   addTranscript('core', E.formatReport(r), { direct: true });
   try { if (agentFiles().changed(taskId).length) addTranscript('system', 'Files were changed. Type /mission undo to put everything back.'); } catch {}
   state.set('lastMission', { id: taskId, goal, status: r.status, at: Date.now() });

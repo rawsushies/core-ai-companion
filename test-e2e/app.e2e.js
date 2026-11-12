@@ -587,6 +587,14 @@ test('command center: shows cores, tasks, playbooks, memory, devices and the act
   assert.match(await cc.textContent('#playbooks'), /code-review → Sentinel/);
   assert.match(await cc.textContent('#playbooks'), /weekdays 08:45 \(off\)/);
   assert.match(await cc.textContent('#agent'), /Step \d+/, 'the last agent task is shown');
+  // Missions: the last /autopilot mission as a checklist with its evidence, plus the policy counts.
+  await cc.waitForFunction(() => /2\/2 verified/.test(document.getElementById('mission').textContent), null, { timeout: 8000 }); // the prebuilt window refreshes on show
+  const mission = await cc.textContent('#mission');
+  assert.match(mission, /make the meeting minutes and a short summary/);
+  assert.match(mission, /2\/2 verified · [1-9]\d* steps/);
+  assert.doesNotMatch(mission, /Stop mission/, 'a finished mission offers no stop');
+  assert.match(mission, /✓ Write minutes\.md[\s\S]*checked on disk/);
+  assert.match(await cc.textContent('#policy-stats'), /\d+ steps on their own, \d+ asked, \d+ refused/);
   assert.match(await cc.textContent('#files'), /No files yet|ready/);
   assert.match(await cc.textContent('#memory'), /\d+memories\d+pinned\d+replaced/, 'memory numbers are shown');
   await cc.waitForFunction(() => document.querySelectorAll('#audit li time').length > 3, null, { timeout: 5000 });
