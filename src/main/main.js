@@ -1869,6 +1869,50 @@ function reloadPlaybooks() {
   playbookScheduler.sync(playbooksOn() ? playbooks : []);
   return playbooks;
 }
+// Proactive automations (COre 2.3): permitted events start playbooks.
+// config.events = { files, windows: allowed sources (off by default),
+//   rules: [{ id, name, source, match, on?, playbook, mode: 'ask'|'auto', cooldownMin? }] }
+const { EventMonitor } = require('./events');
+let eventMonitor = null;
+const automationHistoryFile = () => path.join(app.getPath('userData'), 'automation-history.json');
+function automationHistory() { try { return JSON.parse(fs.readFileSync(automationHistoryFile(), 'utf8')) || {}; } catch { return {}; } }
+function startEventMonitor() {
+  if (eventMonitor) eventMonitor.stop();
+  const ev = config.data.events || {};
+  if (!ev.files && !ev.windows) { eventMonitor = null; return; }
+  eventMonitor = new EventMonitor({
+    getRules: () => ((config.data.events || {}).rules || []).map((r, i) => ({ id: r.id || `rule-${i + 1}`, name: r.name || r.playbook || `Rule ${i + 1}`, workflow: r.playbook, ...r })),
+    permitted: (src) => !!(config.data.events || {})[src],
+    roots: () => files.roots,
+    listTitles: async () => { try { return (await openWindowTitles()) || []; } catch { return []; } },
+    context: async (q) => { try { return (await gateway().context(q, { budget: 900, k: 4 })).text; } catch { return ''; } },
+    history: (id) => automationHistory()[id] || [],
+    record: (id, o) => { try { const h = automationHistory(); h[id] = [...(h[id] || []), o].slice(-20); fs.writeFileSync(automationHistoryFile(), JSON.stringify(h)); } catch {} },
+    ask: async (rule, e, ctx) => {
+      const r = await dialog.showMessageBox({
+        type: 'question', buttons: ['Run it', 'Not now'], defaultId: 0, cancelId: 1, noLink: true,
+        title: 'COre automation', message: `${rule.name}: ${ctx.what}`,
+        detail: `Run the "${rule.workflow}" playbook now? It uses COre's normal tools and approvals.${ctx.history.length ? `\n\nLast run: ${ctx.history[ctx.history.length - 1].status}, ${String(ctx.history[ctx.history.length - 1].summary || '').slice(0, 120)}` : ''}`,
+      });
+      return r.response === 0;
+    },
+    runWorkflow: async (rule, e, ctx) => {
+      reloadPlaybooks();
+      const pb = playbooks.find((p) => p.name.toLowerCase() === String(rule.workflow || '').toLowerCase());
+      if (!pb) return { status: 'failed', summary: `no playbook named "${rule.workflow}"`, verified: false };
+      const event = GUARD.untrusted(ctx.what, 'event (file name or window title)').text;
+      if (pb.agent) {
+        const r = await startAgent(`${pb.name}: ${ctx.what}`.slice(0, 500), { instructions: `${pb.body}\n\n${event}\n\n${ctx.text}`.slice(0, 6000) });
+        return r ? { status: r.status, summary: r.summary || '', verified: !!r.verified } : { status: 'failed', summary: 'the desktop agent did not start', verified: false };
+      }
+      await waitPrimeIdle();
+      await handleUserText(`[automation ${rule.name}] Run the "${pb.name}" playbook for this event.\n${event}\n\n${ctx.text}`.slice(0, 8000), { internal: true, typed: true, playbook: pb });
+      return { status: 'done', summary: `handled by COre with the ${pb.name} playbook`, verified: false };
+    },
+    report: (text) => { addTranscript('system', text); toOverlay('attention', { level: 'info', title: text.slice(0, 80) }); },
+    log: (entry) => { toolAudit(entry); if (entry.event === 'monitor-outcome') gateway().log(`Automation ${entry.rule}: ${entry.what} -> ${entry.status}${entry.verified ? ' (verified)' : ''}`, { kind: 'work' }).catch(() => {}); },
+  }).start();
+}
 let playbookWatch = null;
 function watchPlaybooks() {
   let t = null;
@@ -3030,6 +3074,14 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
+    if (/^\/automations?\s*$/i.test(text)) {
+      addTranscript('user', text);
+      startEventMonitor(); // picks up edited rules
+      const ev = config.data.events || {};
+      const rules = ev.rules || [];
+      addTranscript('system', `Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}.${rules.length ? `\n${rules.map((r) => `• ${r.name || r.playbook}: ${r.source} "${r.match}" -> ${r.playbook} (${r.mode || 'ask'})${r.enabled === false ? ' (off)' : ''}`).join('\n')}` : ' No rules yet: add them under events.rules in Settings, Advanced.'}`);
+      return;
+    }
     if (/^\/cortex\s*$/i.test(text)) {
       addTranscript('user', text);
       gateway().status().then((st) => addTranscript('system', `Cortex: ${st.cortex}${st.pending ? ` · ${st.pending} waiting to be saved` : ''}${st.health ? `\n${st.health}` : ''}`)).catch(() => {});
@@ -3895,6 +3947,7 @@ app.whenReady().then(async () => {
   PB.seedExamples(playbookDir(), path.join(__dirname, '..', '..', 'assets', 'skills'));
   reloadPlaybooks();
   watchPlaybooks();
+  startEventMonitor();
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();

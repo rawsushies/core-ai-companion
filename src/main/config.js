@@ -128,6 +128,10 @@ const DEFAULTS = {
   meiosis: {
     autoReview: true, // Sentinel checks Forge's proposed file changes
   },
+  // Proactive automations: permitted event sources start playbooks. Sources are
+  // off until the user turns them on. rules: [{ name, source: 'files'|'windows',
+  // match: glob, on?: 'created'|'changed', playbook, mode: 'ask'|'auto', cooldownMin }]
+  events: { files: false, windows: false, rules: [] },
   agent: {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
