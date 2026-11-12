@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>COre agent monitor</title>
+  <link rel="stylesheet" href="../fonts/fonts.css">
+  <link rel="stylesheet" href="monitor.css">
+</head>
+<body>
+  <div class="window">
+    <header class="bar">
+      <span id="dot" class="dot" aria-hidden="true"></span>
+      <div class="head"><div class="title">Agent</div><div id="status" class="status" aria-live="polite"></div></div>
+      <button type="button" id="stop" class="stop">Stop</button>
+      <button type="button" id="close" class="icon" aria-label="Close" title="Close">✕</button>
+    </header>
+    <div id="goal" class="goal"></div>
+    <ol id="steps" class="steps" aria-label="Steps (click one to show it on screen)"></ol>
+    <div id="summary" class="summary" hidden></div>
+  </div>
+  <script src="monitor.js"></script>
+</body>
+</html>

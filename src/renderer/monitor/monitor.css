@@ -1,0 +1,34 @@
+/* Agent monitor. Brand palette (docs/BRAND.md). */
+:root { --bg: #05070a; --panel: #0b1f15; --line: rgba(232, 255, 241, 0.09); --text: #e8fff1; --muted: #86a595; --accent: #3dff85; --warn: #ffd166; --danger: #ff6b78; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; color: var(--text); font: 12.5px/1.4 "COre Sans", "Segoe UI", system-ui, sans-serif; }
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+.window { height: 100%; display: flex; flex-direction: column; background: rgba(5, 7, 10, 0.94); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 9px 8px 9px 12px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.running { background: var(--warn); box-shadow: 0 0 8px var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.dot.done { background: var(--accent); }
+.dot.failed, .dot.stopped, .dot.limit { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }
+.head { flex: 1; min-width: 0; }
+.title { font: 600 13px 'COre Display', 'COre Sans', sans-serif; }
+.status { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stop { -webkit-app-region: no-drag; background: transparent; border: 1px solid rgba(255, 107, 120, .5); color: var(--danger); border-radius: 8px; padding: 3px 10px; }
+.icon { -webkit-app-region: no-drag; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
+.icon:hover { background: rgba(232, 255, 241, .06); color: var(--text); }
+.goal { padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.steps { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 4px 6px; }
+.steps li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; padding: 6px; border-radius: 8px; }
+.steps li.has-target { cursor: pointer; }
+.steps li.has-target:hover, .steps li:focus-visible { background: rgba(61, 255, 133, .08); outline: none; }
+.steps .n { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.steps .label { overflow-wrap: anywhere; }
+.steps .why, .steps .res { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.steps .res.err { color: var(--danger); }
+.steps li.running .label { color: var(--warn); }
+.steps li.ok .n::after { content: " ✓"; color: var(--accent); }
+.steps li.failed .n::after, .steps li.invalid .n::after { content: " ✗"; color: var(--danger); }
+.steps .tgt { color: var(--accent); font-size: 11px; }
+.summary { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); }

@@ -379,7 +379,7 @@ class AgentRunner {
           if (answer === 'no') { save(step, 'stopped'); return { status: 'stopped', reason: 'you declined a step', steps: history }; }
           if (answer === 'all' && !forced) allowAll = true;
         }
-        report({ step, action: a, label, running: true });
+        report({ step, action: a, label, running: true, shot });
         let ok = true;
         let error = '';
         let result = '';

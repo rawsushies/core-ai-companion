@@ -412,6 +412,19 @@ test('desktop agent: /do clicks and types into another window, with step approva
   await dock.waitForFunction(() => /Agent finished: typed the greeting/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
   const value = await app.evaluate(() => global.__agentTarget.webContents.executeJavaScript("document.getElementById('t').value"));
   assert.strictEqual(value, 'hello from the agent');
+  // The monitor followed the task; a click on the click step outlines that spot on screen.
+  const mon = app.windows().find((p) => p.url().includes('/monitor/index.html'));
+  assert.ok(mon, 'the agent monitor opened with the task');
+  await mon.waitForFunction(() => window.__monitorReady && /Finished/.test(document.getElementById('status').textContent), null, { timeout: 8000 });
+  assert.match(await mon.textContent('#goal'), /type a greeting into the box/);
+  const labels = await mon.$$eval('#steps li .label', (n) => n.map((x) => x.textContent));
+  assert.ok(labels.some((l) => /^Click at/.test(l)) && labels.some((l) => /^Type "hello from the agent"/.test(l)), JSON.stringify(labels));
+  await mon.click('#steps li.has-target');
+  await wait(400);
+  const hl = await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('highlight.html')); return w && w.isVisible() ? w.getBounds() : null; });
+  assert.ok(hl, 'the highlight is on screen');
+  const cxDip = hl.x + hl.width / 2; const cyDip = hl.y + hl.height / 2;
+  assert.ok(Math.abs(cxDip - 310) <= 8 && Math.abs(cyDip - 190) <= 8, `outline centred on the clicked spot: ${JSON.stringify(hl)}`);
   await app.evaluate(() => { global.__agentTarget.destroy(); });
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
 });

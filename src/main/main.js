@@ -1452,7 +1452,7 @@ async function captureScreen() {
   const thumbnailSize = { width: Math.round(width * scale), height: Math.round(height * scale) };
 
   // Hide COre's own windows for a moment so they aren't in the screenshot.
-  const toHide = config.data.orb.hideFromCaptures === false ? [] : [overlay, dock].filter((w) => w && !w.isDestroyed() && w.isVisible());
+  const toHide = config.data.orb.hideFromCaptures === false ? [] : [overlay, dock, monitorWin, highlightWin].filter((w) => w && !w.isDestroyed() && w.isVisible());
   for (const w of toHide) w.hide();
   if (toHide.length) await new Promise((r) => setTimeout(r, 160));
   let sources;
@@ -1933,6 +1933,79 @@ function fileImageShot(image, name) {
   return { path: file, base64: image.base64, mediaType: image.mediaType, width: size.width, height: size.height, canPoint: false, label: `An image from the attached file "${name}"` };
 }
 
+// ---------------------------------------------------------------- agent monitor
+// A small window that follows the desktop agent: the goal, each step with its
+// result, and a click on a step highlights what it worked on, on screen.
+let monitorWin = null;
+let highlightWin = null;
+const monitor = { goal: '', status: 'idle', steps: [], startedAt: 0 };
+function sendMonitor() { if (monitorWin && !monitorWin.isDestroyed()) monitorWin.webContents.send('monitor:update', monitor); }
+function openMonitor() {
+  if (monitorWin && !monitorWin.isDestroyed()) { monitorWin.showInactive(); sendMonitor(); return; }
+  const wa = primaryDisplay().workArea;
+  monitorWin = new BrowserWindow({
+    width: 340, height: 420, x: wa.x + wa.width - 356, y: wa.y + 16, show: false, frame: false, transparent: true, backgroundColor: '#00000000',
+    alwaysOnTop: true, skipTaskbar: true, resizable: true, minWidth: 260, minHeight: 180, title: 'COre agent monitor',
+    webPreferences: { preload: path.join(PRELOAD, 'monitor.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  monitorWin.setAlwaysOnTop(true, 'floating');
+  monitorWin.loadFile(path.join(RENDERER, 'monitor', 'index.html'));
+  monitorWin.once('ready-to-show', () => { monitorWin.showInactive(); sendMonitor(); });
+  monitorWin.on('closed', () => { monitorWin = null; });
+}
+// Physical screen pixels -> a DIP rect for a window.
+function physToDip(r) {
+  const d = screen.getDisplayNearestPoint({ x: Math.round(r.x), y: Math.round(r.y) });
+  const sf = process.platform === 'win32' ? (d.scaleFactor || 1) : 1;
+  return { x: Math.round(r.x / sf), y: Math.round(r.y / sf), w: Math.max(8, Math.round(r.w / sf)), h: Math.max(8, Math.round(r.h / sf)) };
+}
+// What a step worked on, as a screen rect (DIP), or null.
+function stepTarget(a, shot) {
+  try {
+    if (a.bounds) return physToDip(a.bounds);
+    if (shot && Number.isFinite(a.x) && Number.isFinite(a.y)) {
+      const p = AG.toScreen(a, shot);
+      const sf = shot.scaleFactor || 1;
+      return { x: Math.round(p.x / sf) - 22, y: Math.round(p.y / sf) - 22, w: 44, h: 44 };
+    }
+  } catch {}
+  return null;
+}
+function highlight(rect, ms = 2400) {
+  if (!rect) return;
+  const pad = 6;
+  const b = { x: Math.round(rect.x - pad), y: Math.round(rect.y - pad), width: Math.round(rect.w + pad * 2), height: Math.round(rect.h + pad * 2) };
+  if (!highlightWin || highlightWin.isDestroyed()) {
+    highlightWin = new BrowserWindow({ ...b, show: false, frame: false, transparent: true, backgroundColor: '#00000000', alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, hasShadow: false,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    highlightWin.setIgnoreMouseEvents(true);
+    highlightWin.setAlwaysOnTop(true, 'screen-saver');
+    highlightWin.setContentProtection(true); // never in COre's own screenshots
+    highlightWin.loadFile(path.join(RENDERER, 'monitor', 'highlight.html'));
+    highlightWin.on('closed', () => { highlightWin = null; });
+  } else highlightWin.setBounds(b);
+  highlightWin.showInactive();
+  highlightWin.webContents.send('highlight:pulse');
+  clearTimeout(highlight.timer);
+  highlight.timer = setTimeout(() => { if (highlightWin && !highlightWin.isDestroyed()) highlightWin.hide(); }, ms);
+}
+function monitorStep(o) {
+  let s = monitor.steps.find((x) => x.step === o.step && x.label === (o.label || x.label));
+  if (o.advice) { monitor.steps.push({ step: o.step, label: `Advice: ${o.advice.replace(/_/g, ' ')}`, status: 'note', at: Date.now() }); sendMonitor(); return; }
+  if (o.error && !o.action) { monitor.steps.push({ step: o.step, label: o.error, status: 'invalid', at: Date.now() }); sendMonitor(); return; }
+  if (o.running) {
+    s = { step: o.step, label: o.label, why: (o.action && o.action.why) || '', status: 'running', at: Date.now(), target: stepTarget(o.action, o.shot) };
+    monitor.steps.push(s);
+    if (s.target && (config.data.agent || {}).highlight !== false) highlight(s.target, 1400); // show what is about to be touched
+  } else if (s && o.ok !== undefined) {
+    s.status = o.ok ? 'ok' : 'failed';
+    s.error = o.error || '';
+    s.result = o.result ? String(o.result).replace(/<<\/?untrusted[^>]*>>/g, '').slice(0, 300) : '';
+  }
+  if (monitor.steps.length > 60) monitor.steps.splice(0, monitor.steps.length - 60);
+  sendMonitor();
+}
+
 // "/do undo": put back every file the last task changed.
 function undoAgentTask() {
   const t = readAgentTask();
@@ -1987,6 +2060,8 @@ async function startAgent(goal, { remote = false } = {}) {
   if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
   if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
   addTranscript('user', resume ? '/do resume' : `/do ${goal}`);
+  Object.assign(monitor, { goal, status: 'running', steps: resume ? monitor.steps : [], startedAt: Date.now() });
+  if ((config.data.agent || {}).monitor !== false) openMonitor(); else sendMonitor();
   addTranscript('system', `Agent: ${resume ? `resuming at step ${resume.step + 1}:` : 'working on'} "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
   toOverlay('state', 'thinking');
   try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
@@ -1995,7 +2070,22 @@ async function startAgent(goal, { remote = false } = {}) {
     perform: async (a, p) => {
       const esc = a.type === 'key' && /(^|\+)(esc|escape)$/.test(a.combo);
       if (esc) try { globalShortcut.unregister('Escape'); } catch {}
+      // The monitor never takes the agent's input: let clicks through, and move it aside if the target is under it.
+      const mon = monitorWin && !monitorWin.isDestroyed() && monitorWin.isVisible() ? monitorWin : null;
+      if (mon) {
+        mon.setIgnoreMouseEvents(true);
+        if (p) {
+          const b = mon.getBounds();
+          const q = physToDip({ x: p.x, y: p.y, w: 1, h: 1 });
+          if (q.x >= b.x - 20 && q.x <= b.x + b.width + 20 && q.y >= b.y - 20 && q.y <= b.y + b.height + 20) {
+            const wa = screen.getDisplayMatching(b).workArea;
+            const left = b.x + b.width / 2 > wa.x + wa.width / 2;
+            mon.setPosition(left ? wa.x + 16 : wa.x + wa.width - b.width - 16, b.y);
+          }
+        }
+      }
       try { return await driver.perform(a, p); } finally {
+        if (mon && !mon.isDestroyed()) mon.setIgnoreMouseEvents(false);
         if (esc) try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
       }
     },
@@ -2030,6 +2120,7 @@ async function startAgent(goal, { remote = false } = {}) {
       if (r.error) throw new Error(r.error);
     },
     onStep: (o) => {
+      try { monitorStep(o); } catch {}
       if (o.advice) { addTranscript('system', `Agent: ${{ retry_same: 'trying that once more', retry_differently: 'changing approach', ask_human: 'asking you', abort: 'stopping safely' }[o.advice] || o.advice} after repeated failures.`, { kind: 'progress' }); return; }
       if (o.error) addTranscript('system', `Agent step ${o.step}: ${o.error}`, { kind: 'error' });
       else if (o.running) addTranscript('system', `Agent step ${o.step}: ${o.label}${o.action.why ? ` (${o.action.why})` : ''}`, { kind: 'progress' });
@@ -2051,6 +2142,9 @@ async function startAgent(goal, { remote = false } = {}) {
   try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
   try { globalShortcut.unregister('Escape'); } catch {}
   { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }
+  monitor.status = r.status;
+  monitor.summary = r.summary || r.question || r.reason || '';
+  sendMonitor();
   toDock('dock:agent-approve', null);
   toOverlay('state', 'idle');
   const msg = r.status === 'done' ? `Agent finished: ${r.summary || 'done'}`
@@ -2839,6 +2933,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
+    if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
     if (ctl) {
@@ -3205,6 +3300,11 @@ function wireIpc() {
     const { text, files } = typeof payload === 'string' ? { text: payload } : (payload || {});
     handleUserText(String(text || ''), { typed: true, files: Array.isArray(files) ? files.slice(0, 10).map(String) : [] });
   });
+  const fromMonitor = (e) => isFrom(monitorWin, e);
+  ipcMain.handle('monitor:state', (e) => (fromMonitor(e) ? monitor : null));
+  ipcMain.on('monitor:highlight', (e, i) => { if (!fromMonitor(e)) return; const st = monitor.steps[Number(i)]; if (st && st.target) highlight(st.target); });
+  ipcMain.on('monitor:stop', (e) => { if (fromMonitor(e)) stopAgent('you pressed Stop in the monitor'); });
+  ipcMain.on('monitor:close', (e) => { if (fromMonitor(e)) monitorWin.close(); });
   const fromCenter = (e) => isFrom(centerWin, e);
   ipcMain.handle('center:state', (e) => (fromCenter(e) ? centerState() : null));
   ipcMain.handle('center:action', (e, { name, arg } = {}) => (fromCenter(e) ? centerAction(String(name || ''), arg == null ? '' : String(arg)) : null));
