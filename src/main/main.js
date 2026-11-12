@@ -2091,7 +2091,18 @@ function stopAgent(reason) {
 }
 
 // Past desktop tasks and lessons that look like this goal (from memory).
+// The situation a desktop task starts from (desktop + both memory systems),
+// shared with the agent and used to file the verified outcome under its project.
+let agentSituation = null;
 async function agentExperience(goal) {
+  agentSituation = null;
+  try {
+    if (agentUia()) {
+      agentSituation = await situation().describe(goal);
+      toolAudit({ event: 'situation', for: 'agent', facts: agentSituation.facts.length, projects: agentSituation.projects.map((p) => p.project), cortex: agentSituation.memory.cortex });
+      return agentSituation.prompt.slice(0, 4000);
+    }
+  } catch {}
   try {
     if (gateway().cortexOn()) {
       const k = await gateway().context(goal, { budget: 700, k: 4 });
@@ -2232,6 +2243,12 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
   }
   // Verified outcomes go to the shared logbook; lessons to the project in Cortex.
   gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work' }).catch(() => {});
+  // A task the agent re-checked and confirmed updates the project's knowledge
+  // (Cortex, deduplicated). Unverified claims are never filed as knowledge.
+  if (r.status === 'done' && r.verified && r.summary) {
+    const proj = (agentSituation && agentSituation.projects[0] && agentSituation.projects[0].project) || currentProject();
+    if (proj) gateway().remember(`Verified on the desktop: ${r.summary.slice(0, 200)} (task "${goal.slice(0, 80)}")`, { kind: 'knowledge', project: proj }).catch(() => {});
+  }
   // Learn from mistakes: what failed on the way, and what finally worked.
   const failed = (r.steps || []).filter((h) => !h.ok && !/^invalid/.test(h.label)).map((h) => `${h.label} (${String(h.error || '').slice(0, 60)})`);
   if (failed.length) {

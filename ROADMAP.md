@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 47%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 55%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -32,8 +32,8 @@ vault files directly.
 | Phase | Status | Estimate |
 |---|---|---|
 | 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
-| 1 COre 2.1 desktop operator | In progress | ~60% |
-| 2 COre 2.2 environmental intelligence | Partly present from 2.0 (file intelligence, project context) | ~25% |
+| 1 COre 2.1 desktop operator | Acceptance passing on real Windows CI; real-provider validation open | ~85% |
+| 2 COre 2.2 environmental intelligence | Situation awareness + sourced explanation in place; acceptance test on real Windows | ~45% |
 | 3 COre 2.3 proactive intelligence | Partly present (scheduled playbooks, learned workflows) | ~20% |
 | 4 COre 3.0 unified experience | Partly present (voice, routing, command center) | ~30% |
 
@@ -56,25 +56,39 @@ vault files directly.
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Windows UI Automation + accessibility tree | Partly verified on real Windows | CI windows-latest: real Notepad text area set and read back; WinForms edit/button found via UIA + Win32 fallback. Check box detection fix pending CI. |
-| Control-level actions (press, fill, expand, focus) | Implemented, unit-tested (mocked UIA) | `test/uia.test.js` |
-| Planner (plan + done-when) | Implemented, unit + e2e | `test/agent-tools.test.js` planning test |
-| Persistent state, checkpoints, resume | Implemented (2.0), unit + e2e | `/do resume`, checkpoint tests |
-| Windows process isolation | **Not done** | Linux bubblewrap only (`test/agent-tools.test.js` real sandbox). Windows needs Job Objects / AppContainer. |
+| Windows UI Automation + accessibility tree | Verified on real Windows | CI windows-latest: WinForms edit/button/check box found, filled, pressed, toggled (UIA + Win32/MSAA fallback); real Notepad text area set and read back |
+| Control-level actions (press, fill, expand, focus) | Verified on real Windows | `test/uia.win.test.js` |
+| Planner (plan + done-when) | Verified | `test/agent.win.test.js` plan checkpointed and resumed |
+| Multi-step task, interruption, resume, verified outcome | **Pass on real Windows** | `test/agent.win.test.js`: fill + press, Esc mid-task, resume from checkpoint, tick; result read back from the app (reasoning scripted: no provider in CI) |
+| Windows process isolation | **Pass on real Windows** | Job Object (`test/sandbox.win.test.js`): tree kill on timeout incl. grandchildren, process cap, memory cap, no clipboard |
+| Windows file-system + network isolation | Implemented (AppContainer); CI confirming | `COre.AgentSandbox` AppContainer: home folder read/write/list denied, other folders denied, loopback network denied, each compared with the same operation outside the box (passed on CI run 74ef60f). npm/npx/pnpm/yarn run under the Job only (Node child processes cannot start inside an AppContainer); the command note says so |
 | Least privilege, approvals, e-stop, audit, rollback | Implemented | e2e emergency stop, tools + undo, plan approval |
-| Timeouts, process-tree kill, retries | Implemented | taskkill /T on Windows; failure advisor |
+| Timeouts, process-tree kill, retries | Verified | taskkill /T; Job kill-on-close; failure advisor |
 | Memory gateway in planning and execution | Implemented | agent experience reads Cortex; lessons and outcomes written back |
 | Model switch keeps context | Verified with stand-in providers | e2e failover with continuity |
 | Real AI providers | **Unverified** | build sandbox cannot reach provider APIs |
 
+### Phase 2: COre 2.2 environmental intelligence
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 1 | Screenshot perception + accessibility | Implemented | agent prompt carries both the screenshot and the UIA control list |
+| 2 | Active apps, window states, dialogs, changes | Implemented; Windows CI confirming | `src/main/situation.js` (UIA windows, visual state, modal/#32770 dialogs, focused controls, opened/closed/retitled/switched); `test/situation.test.js` |
+| 3 | File intelligence (PDF, Office, images, audio, video, code, IFC, DXF) | Present from 2.0 | `src/main/fileintel.js` |
+| 4, 8 | Project context from both memory systems | Implemented | situation recall through the gateway; project matched from window titles against COre projects and Cortex `Projects/` notes |
+| 5 | Understand ongoing work without repeating | Partly | "what am I working on" / "where was I" attach the situation; agent resumes from checkpoints |
+| 9 | Source verification, confirmed vs inferred | Implemented | every fact tagged observed / inferred / memory / cortex; `groundCheck` flags names in the reply that no source backs (shown to the user) |
+| 6, 7, 10 | App-specific workflows, context sync, knowledge updates after verified tasks | Partly (learned workflows, outcomes to Cortex) | |
+| Acceptance | Desktop + project + both memories, explained without fabrication | Test written on real Windows + real Cortex (`test/situation.win.test.js`); awaiting CI | |
+
 ## Blocked or limited
 
 - Real provider validation (Gemini, Groq, OpenRouter, Jev): no network access from the build environment.
-- Windows OS sandbox: not implemented yet (next target).
+- Node package managers cannot run inside the Windows AppContainer (libuv named pipes are denied); they run with Job limits only.
 - Headless CI desktop: some apps (new Notepad's XAML view) expose little to UI Automation there.
 
 ## Next execution target
 
-1. Confirm the WinForms fill/press/toggle test passes on Windows CI.
-2. Windows process isolation for agent commands (Job Object: kill-on-close, memory and process limits; restricted token where possible).
-3. Phase 1 acceptance test: a multi-step task across real Windows apps with an interruption and resume, in CI.
+1. Confirm the AppContainer boundary and the Phase 2 acceptance test on Windows CI.
+2. Phase 2: context synchronization across brain, specialists, gateway and agent (one shared situation per task); knowledge updates after verified task completion.
+3. Phase 3: permissioned event monitoring feeding bounded proactive workflows.
