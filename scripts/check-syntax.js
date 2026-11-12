@@ -25,4 +25,19 @@ for (const f of files) {
   });
 }
 if (dup) process.exit(1);
-console.log(`syntax ok: ${files.length} files`);
+
+// One version everywhere: package.json is the source; everything that names the
+// current version must agree with it (bump them together; see docs/dev/RELEASING.md).
+const ROOT = path.join(__dirname, '..');
+const read = (r) => { try { return fs.readFileSync(path.join(ROOT, r), 'utf8'); } catch { return ''; } };
+const v = JSON.parse(read('package.json')).version;
+const versions = {
+  'mobile/package.json': (JSON.parse(read('mobile/package.json') || '{}')).version,
+  'RELEASE_NOTES.md (title)': (/^# COre (\S+)/m.exec(read('RELEASE_NOTES.md')) || [])[1],
+  'CHANGELOG.md (newest release)': (/^## (\d+\.\d+\.\d+)/m.exec(read('CHANGELOG.md')) || [])[1],
+  'README.md (version badge)': (/badge\/version-([\d.]+)-/.exec(read('README.md')) || [])[1],
+  'README.md (installer name)': (/COre-Setup-([\d.]+)\.exe/.exec(read('README.md')) || [])[1],
+};
+const off = Object.entries(versions).filter(([, x]) => x !== v);
+if (off.length) { for (const [where, x] of off) console.error(`version: ${where} says ${x || 'nothing'}, package.json says ${v}`); process.exit(1); }
+console.log(`syntax ok: ${files.length} files; version ${v} everywhere`);

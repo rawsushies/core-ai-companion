@@ -1,34 +1,165 @@
-# COre
+<p align="center">
+  <img src="assets/brand/readme/hero.png" alt="COre 12: Smoke that listens. Answers in a breath.">
+</p>
 
-![COre: your desktop companion, made of smoke](assets/brand/banner-readme.png)
+<p align="center">
+  <img src="https://img.shields.io/badge/version-12.0.0-3dff85?labelColor=05070a&style=flat-square" alt="version 12.0.0">
+  <img src="https://img.shields.io/badge/Windows-desktop-7dffb0?labelColor=05070a&style=flat-square" alt="Windows desktop">
+  <img src="https://img.shields.io/badge/Android-companion-7dffb0?labelColor=05070a&style=flat-square" alt="Android companion">
+  <img src="https://img.shields.io/badge/runs-locally-86a595?labelColor=05070a&style=flat-square" alt="runs locally">
+</p>
 
-A desktop companion that lives on your screen as a **sphere of glowing smoke**. It talks with a deep robotic
-voice (sarcastic by default), listens, looks at your screen when you ask, points at things with smoke hands,
-gestures, forms emoji out of its smoke, chats when things are quiet, splits into helper copies to multitask,
-and updates itself.
+<p align="center">
+  <b><a href="https://github.com/rawsushies/core-ai-companion/releases">Download</a></b> ·
+  <a href="#talk-to-it-like-a-person">Voice</a> ·
+  <a href="#it-remembers-in-a-vault-you-own">Memory</a> ·
+  <a href="#it-works-your-desktop-with-permission">Desktop</a> ·
+  <a href="#privacy-by-design">Privacy</a> ·
+  <a href="#build-it">Build</a>
+</p>
 
-Its brain is **Claude through your own Claude Code login**, so it needs no API key. Free fallbacks (Gemini,
-Groq, OpenRouter, a local Ollama model, or any OpenAI-compatible endpoint) take over when Claude is unavailable.
+COre is not a chatbot in a window. It is a sphere of glowing smoke that lives on your desktop: it hears you,
+answers out loud, points at things with smoke hands, works your apps when you ask, and remembers your projects
+in plain notes you own. Dry-witted by default. Quiet when you're busy.
+
+<table>
+  <tr>
+    <td><img src="assets/brand/renders/orb-idle.jpg" alt="COre idle" width="200"></td>
+    <td><img src="assets/brand/renders/orb-wave.jpg" alt="COre waving" width="200"></td>
+    <td><img src="assets/brand/renders/orb-speaking.jpg" alt="COre speaking" width="200"></td>
+    <td><img src="assets/brand/renders/orb-laugh.jpg" alt="COre laughing" width="200"></td>
+  </tr>
+</table>
+
+---
+
+## Talk to it like a person
+
+<img src="assets/brand/readme/speed.png" alt="Conversation speed: COre reacts 200 ms after you stop talking">
+
+Press `Ctrl+Alt+Space`, hold the orb, or say **"Hey COre"**, and just talk. Speech recognition starts the moment
+you pause. COre shows it heard you within about 200 ms, the gap people leave between turns. It often starts
+its answer with a word it has already rendered, so the voice comes in as soon as the brain does. Talk over it
+and it stops to listen.
+
+| Do this | And COre… |
+|---|---|
+| `Ctrl+Alt+Space` / hold the orb | listens; sends when you stop or let go |
+| "Hey COre" (optional) | wakes hands-free, "Hey COre, what time is it?" works in one breath |
+| `Ctrl+Alt+S` | looks at your screen and can point at things |
+| `Ctrl+Alt+C` · `Ctrl+Alt+H` | shows the chat · hides COre (it dissolves into smoke) |
+| Type in the chat | answers like a normal chat (markdown, code), read aloud as it goes |
+
+Voice: Kokoro neural voice through a robot effects chain, words revealed in step with the audio. Recognition:
+local Whisper. Both run on your PC and ship with the installer. Tone, pitch, voice and reply language are yours
+to pick. Every number above is measured, not promised: [docs/LATENCY.md](docs/LATENCY.md), `/diagnostics`.
+
+## It remembers. In a vault you own.
+
+<img src="assets/brand/readme/memory.png" alt="One Markdown vault shared by COre, Obsidian, Cortex and your devices">
+
+Decisions, lessons and research go into a folder of plain Markdown notes: **COre Vault** in your Documents,
+created on first start. [Cortex](https://github.com/rawsushies/cortex-ai-brain), built in, indexes it locally,
+so COre recalls the right note and **says where it came from**. Open the same folder in **Obsidian** (COre adds it
+to Obsidian for you; no account, no key) and edit anything: COre picks up your changes. Share it with your other
+devices through **Syncthing**, free and peer to peer. If two devices edit one note at once, both versions are
+kept until you merge them.
+
+`/vault` shows the vault, Cortex, sync and any conflicts · `/obsidian [note]` opens it · `/vault obsidian`
+installs Obsidian. How it works: [docs/VAULT.md](docs/VAULT.md).
+
+## It works your desktop. With permission.
+
+<img src="assets/brand/readme/desktop.png" alt="COre asks before each step on your desktop">
+
+Turn on the agent (Settings → Agent) and type `/do` and a task. COre reads your apps through Windows UI
+Automation, writes a short plan, acts one step at a time with your OK, and checks the result: it reads the saved
+file back instead of trusting the screen. It knows how Excel, Word, LibreOffice, Explorer, browsers, VS Code
+and Archicad work best, and learns from your finished tasks. Commands run in a Windows sandbox that can only
+touch the folders you allow. `Esc` stops everything. [docs/dev/AGENT.md](docs/dev/AGENT.md)
+
+It also notices what needs you (`/suggest`): an interrupted task, an overdue to-do in your vault, an automation
+that failed. Nothing runs until you pick it.
+
+## A body made of smoke
+
+**30 gestures** (wave, shrug, count to five, heart hands, facepalm…) and **shapes with sounds** (a laughing face
+that giggles, a heart that hums, a check mark that dings). Pet it, poke it, toss it across the screen. After a
+quiet while it may start a short, relevant conversation, never in quiet hours, and it backs off when ignored.
+Every window it opens has no fill: your screen shows through, with only the text and controls drawn solid.
+
+<details>
+<summary><b>Everything else</b></summary>
+
+| | |
+|---|---|
+| **Meiosis Mode** | Three specialists split off as smoke helpers: Scout (research), Forge (build), Sentinel (review). `@Scout …` talks to one; address several for a shared task. [docs/dev/MEIOSIS.md](docs/dev/MEIOSIS.md) |
+| **Screen partner** | Offers **Take a look** when an error dialog or "(Not Responding)" window appears. Window titles only until you click. |
+| **Project reading** | Share one folder: COre and its cores can list, read and search it. Changes are proposed as diffs and applied only when you click; every change can be undone. |
+| **Skills** | Notes, timers, weather, music, apps from a safe list, calendar (ICS), web search buttons. Instant answers (time, next song, lyrics) skip the brain. Plugins are JSON link templates in `skills/`. |
+| **Glance** | "What's playing?" or "show me the lyrics" puts a small card beside the orb. |
+| **Automations** | File and window events can start approved playbooks; results are verified (`/automations`). |
+| **Phone** | Pair with a QR code and chat end-to-end encrypted over Wi-Fi. The Android app also works away from home with Gemini. [docs/dev/MOBILE.md](docs/dev/MOBILE.md) |
+| **Backups** | Settings, memories, notes and plugins to any folder (OneDrive/Drive/Dropbox = cloud), optionally encrypted. Never API keys. |
+| **Notifications** | Anything can ping COre on `127.0.0.1:47321` with the per-install token. |
+| **Make it yours** | Seven smoke colours, size, density, battery/balanced/quality profiles, reduced motion, larger text, start with Windows. |
+
+</details>
+
+## Brains
+
+COre picks a brain per request (what it needs, measured speed, health) and fails over without losing the
+conversation. Plain conversation is routed at once on your PC; harder requests get a quick second opinion from
+**Jev**, COre's decision layer.
+
+| Brain | |
+|---|---|
+| **Claude** (default) | Claude Code with your own login, no API key. Kept warm in the background. |
+| **Gemini · Groq · OpenRouter** | Free API keys. COre picks a current model from each live list and moves off retired or busy ones. Keys are encrypted with your OS account. |
+| **Ollama** | Fully offline local model. |
+| **Custom** | Any OpenAI-compatible endpoint (DeepSeek, LM Studio…). |
+
+Verified against the live APIs: [docs/REAL-PROVIDERS.md](docs/REAL-PROVIDERS.md).
+
+## Privacy, by design
+
+- **Microphone** opens only while COre listens. Hands-free mode checks short phrases on your PC only. Speech and
+  voice never leave your PC.
+- **Screen** is captured only when you ask (`Ctrl+Alt+S`, "look at this", **Take a look**).
+- **Every action asks first.** Commands run sandboxed. Text from files, web pages and notes is treated as data,
+  never as instructions, and suspected injections are flagged.
+- **Your knowledge is your folder.** History is never imported silently, and Cortex's index stays on your PC.
+- **Crash reports** stay in COre's logs folder. Nothing is uploaded.
 
 ## Install
 
-### Windows installer
+**Windows:** download `COre-Setup-12.0.0.exe` from [Releases](https://github.com/rawsushies/core-ai-companion/releases)
+and run it. It includes everything: Cortex, the speech and voice models, the memory model. COre works offline
+from the first start and updates itself from published releases. **Android:** `COre-android-12.0.0.apk` from the
+same release; pair it in Settings → Phone.
 
-> **Status:** installers published before the new release process (v2.0.0 – v10.2.0) are incomplete: some
-> contain only a `.blockmap`, and none can update itself. Until a release built by the new gated process
-> is published, **install from source** (below). See [docs/dev/RELEASING.md](docs/dev/RELEASING.md).
+For the Claude brain, install [Claude Code](https://docs.claude.com/en/docs/claude-code) and log in once; or add
+a free Gemini/Groq/OpenRouter key in Settings → Brain.
 
-A verified release contains **COre-Setup-x.y.z.exe**, `latest.yml` and `SHA256SUMS.txt`. Run the installer to
-get Start-menu and desktop shortcuts and a normal uninstaller (Windows Settings → Apps, or COre's Settings →
-Maintenance → Uninstall). Installed copies then update themselves from published releases.
+<details>
+<summary>If your antivirus removes COre</summary>
 
-For the Claude brain, install [Claude Code](https://docs.claude.com/en/docs/claude-code) and log in once.
-COre's chat shows a **Log in to Claude** button if you aren't logged in.
+The installer isn't code-signed yet, so some antivirus programs (AVG, Avast and others) quarantine `COre.exe` as a
+false positive. Restore it from quarantine with an exception, or add an exception for
+`%LOCALAPPDATA%\Programs\COre` and run the installer again. Your settings and memory in `%APPDATA%\COre` are not
+touched. You can report the false positive to the vendor (AVG: avg.com/false-positive-file-form).
+</details>
 
-### From source
+<details>
+<summary>Black box behind the orb?</summary>
 
-You need **Node.js 20+**. On Windows you can unzip the folder and double-click **Install COre.bat** instead:
-it installs Node.js and Claude Code if they're missing and puts a shortcut on your Desktop.
+Some graphics drivers can't draw transparent windows on the GPU. COre notices and restarts in safe graphics
+mode; you can also pick it in Settings → Look → Graphics mode or the tray menu.
+</details>
+
+## Build it
+
+Node.js 20+. On Windows, **Install COre.bat** sets everything up from a source folder.
 
 ```bash
 npm install
@@ -38,197 +169,37 @@ npm install
 npm start
 ```
 
-Source copies update themselves from **published releases** (backed up first, rolled back automatically if
-an update fails or won't start). Developers can switch to the `main` channel in Settings → Privacy. The first time you talk, COre downloads its speech
-recognition (~80 MB) and voice (~90 MB) models once. Both then run offline on your PC.
-
-> **Black box behind the orb?** Some graphics drivers can't draw transparent windows on the GPU. COre notices
-> and restarts in *safe graphics mode*. You can also pick it in Settings → Look → Graphics mode, or in the tray menu.
-
-### If your antivirus removes COre
-
-The installer isn't code-signed yet, so some antivirus programs (AVG, Avast and others) quarantine `COre.exe` as a
-false positive.
-
-1. Open your antivirus quarantine (AVG: **Menu → Quarantine**), select COre, and choose **Restore and add
-   exception**.
-2. Or add an exception for the install folder `%LOCALAPPDATA%\Programs\COre`, then run the installer again.
-3. Your settings and memory are safe in `%APPDATA%\COre`. Uninstalling or quarantining doesn't touch them.
-
-You can also report the false positive to your antivirus vendor (AVG: avg.com/false-positive-file-form).
-
-## Use
-
-| Do this | And COre… |
-|---|---|
-| `Ctrl+Alt+Space` | listens; press again to stop early (or set "press again to send" in Settings) |
-| Press and hold the orb | listens while you hold, sends when you let go |
-| "Hey COre" (optional) | wakes hands-free; "Hey COre, what time is it?" works in one breath |
-| `Ctrl+Alt+S` | talks about your screen (gets a screenshot, can point at things) |
-| `Ctrl+Alt+C` | shows/hides the chat under the orb |
-| `Ctrl+Alt+H` | hides/shows COre (it dissolves into smoke) |
-| Type in the chat | answers like a normal Claude chat (markdown, code), read aloud as it goes |
-| Drag / click the orb | moves it / toggles the chat |
-
-All shortcuts can be changed in **Settings** (tray menu → Settings…, or ⚙ → All settings… in the chat).
-
-## What it can do
-
-**Talk and listen.** Kokoro neural voice through a robot effects chain (ring mod, flanger, detuned double),
-with words revealed in step with the audio. Pick the tone (sarcastic, dramatic, calm, cheerful,
-professional), voice, pitch, robot amount and **reply language**. Speech recognition is local Whisper.
-
-**Hands-free (optional).** Turn on "Hey COre" in Settings → Voice or the tray. A tiny detector only passes
-short phrases after a pause to the local speech model; nothing leaves your PC. Talk over COre to interrupt it
-(barge-in). **Conversation mode** keeps listening for a few seconds after each spoken reply.
-
-**Body language.** 30 gestures made of the same smoke arms: wave, thumbs up/down, shrug, count to five,
-clap, facepalm, point in four directions, beckon, stop, OK, peace, rock, heart hands, think, salute, fist pump,
-celebrate, juggle, hug, magic, flex, bow, nod, shake, spin, bounce. COre picks them while it talks.
-
-**Shape-shifting.** The smoke forms shapes with matching sounds: a laughing face that giggles, a heart that
-hums, a check mark that dings, a frown that sighs, plus stars, arrows, music notes, a light bulb, Zzz, and any
-one to three letters or digits.
-
-**Presence.** After a quiet while COre starts a short, relevant conversation. It only does this when you're
-at the computer but paused, never in quiet hours, at most a few times a day, and it backs off when ignored.
-Pet it, tickle it, poke it (double click) or toss it across the screen, and it reacts. Ask for **trivia, a
-riddle or 20 questions**.
-
-**Meiosis Mode: four cores, one chat.** COre coordinates three specialists that split off as smoke helpers:
-**Scout** (research), **Forge** (build) and **Sentinel** (review/QA). Start a message with `@Scout`, `@Forge` or
-`@Sentinel` (or pick one with the chip beside the input; `@` autocompletes) to talk to one directly. Address
-several to run a shared task that COre then sums up. Every reply in the single chat is labelled with who
-said it, subtitles name the speaker, and only one core speaks at a time. Specialists can't touch files or
-the web yet. See [docs/dev/MEIOSIS.md](docs/dev/MEIOSIS.md).
-
-**Screen partner.** When an error dialog, crash report or "(Not Responding)" window appears, COre offers a
-**Take a look** button. It notices from window titles only; a screenshot is taken when you click. When it points
-at something, the smoke finger snaps onto the nearest button or label. Summon it on another monitor and it moves there.
-
-**Project reading (read-only).** Share one folder in Settings → Projects and COre and its cores can list,
-read and search it to answer from your actual files. Nothing outside the folder is reachable, `.env`, keys
-and credential files are never read, nothing is ever run, and every access shows in the chat and in
-`logs/tools.log`. Optionally (off by default) cores can **propose** file changes: you see a diff card and
-nothing is written until you click Apply. Every applied change can be undone.
-
-**Skills.** Notes, timers and reminders, weather (free Open-Meteo; set your city), music control
-(play/pause/next/volume), opening apps from a safe list, web search buttons, and your calendar via a private
-ICS link. Lookups come back as a spoken answer. **Glance:** ask "what's playing?" or "show me the lyrics" and a
-small card appears beside the orb with the song or its synced lyrics (from lrclib.net, only when you ask). Short
-requests like the time or "next song" are answered instantly, without the brain. **Plugins:** put JSON files in COre's data folder under
-`skills/`, for example:
-
-```json
-{ "name": "wiki", "description": "search Wikipedia", "url": "https://en.wikipedia.org/wiki/Special:Search?search={q}" }
-```
-
-**Desktop agent (optional).** Turn it on in Settings → Agent, then type `/do` and a task. COre works through it on
-your screen, one step at a time, asking before each click or keystroke. Esc stops it. See
-[docs/dev/AGENT.md](docs/dev/AGENT.md).
-
-**COre for Android.** An app in `mobile/` (built by CI): chat with COre on your PC over Wi-Fi, or with Gemini when
-you're away, and it still knows you. Light enough for older phones. See [docs/dev/MOBILE.md](docs/dev/MOBILE.md).
-
-**Phone companion (optional).** Pair your phone with a QR code (Settings → Phone) and chat with COre from the
-phone's browser on the same Wi-Fi, end-to-end encrypted. See [docs/dev/PHONE.md](docs/dev/PHONE.md).
-
-**Memory in your Google account (optional).** Settings → Cloud keeps COre's memory in your Drive's private app
-folder, synced both ways. You need a free OAuth client of your own: [docs/dev/CLOUD.md](docs/dev/CLOUD.md).
-
-**Backups.** Settings → Backup keeps copies of your settings, memories, notes and plugins in a folder you choose.
-Pick a OneDrive, Google Drive or Dropbox folder and they're cloud backups. API keys are never included, and a
-passphrase can encrypt them.
-
-**Memory, clipboard, moods.** COre remembers facts about you across conversations (see or delete them in
-⚙ → Memory), can work with what you copied ("explain what I copied"), and its smoke shows moods.
-
-**Make it yours.** Seven smoke colours, size, density, performance profiles (Battery saver / Balanced / Best
-quality), reduced motion (follows Windows), larger chat text, captions on or off, start with Windows.
-
-**Notifications from anything.** COre listens on `127.0.0.1:47321` (token in the panel menu):
-
-```bash
-curl -X POST http://127.0.0.1:47321/notify -H "Authorization: Bearer YOUR_TOKEN" -H "content-type: application/json" -d '{"title":"Build finished","level":"success"}'
-```
-
-## Brains
-
-COre tries brains in order and skips any that aren't connected (chat ⚙ → Brain, or Settings → Brain):
-
-- **Claude** (default): Claude Code on your PC, kept running in the background so replies start in about a
-  second. Haiku by default; Sonnet or Opus in Settings.
-- **Google Gemini**, **Groq**, **OpenRouter**: free API keys (links in ⚙ → Brain). Keys are encrypted with your
-  OS account before they're saved.
-- **Local model (Ollama)**: fully offline. Press **Install Ollama**, then **Download model**.
-- **Custom endpoint**: any OpenAI-compatible API (DeepSeek, LM Studio…) via `brain.openaiCompat` in `config.json`.
-
-## Privacy and safety
-
-- **Microphone:** opened only while COre listens, unless you turn on hands-free. Then it stays open, but only
-  short phrases are checked, on your PC, for "Hey COre". Speech recognition and the voice are local.
-- **Screen:** screenshots happen only on `Ctrl+Alt+S`, a "look at this" phrase, or a **Take a look** click. They're
-  sent to the brain you chose; the last 5 stay in COre's workspace folder. Watch mode reads window titles only.
-- **Claude:** COre runs `claude -p` with **no tools** in its persistent session (the per-message fallback may
-  only `Read` the screenshot file), inside its own workspace, `--restricted` where supported. It never uses
-  `--dangerously-skip-permissions` and cannot run commands.
-- **Skills:** nothing runs a command built from the model's words. Apps and media keys come from fixed lists,
-  links open only when you click, and plugins are data (https link templates), not code. Each skill can be
-  switched off.
-- **Crash reports** are written to COre's own logs folder and never uploaded.
-- The notification endpoint is localhost-only and needs the per-install token.
-
-## Settings and maintenance
-
-Everything is in the **Settings** window: General, Look, Voice, Brain, Accessibility, Skills, Privacy, and
-**Maintenance** (check for updates, copy diagnostics, open data/crash-log folders, replay the tour, restart,
-reset, uninstall). Settings are saved in `config.json` in COre's data folder.
-
-## How it works
-
-```
- hotkeys / chat / wake phrase ─► main process (Electron)
-   ├─ Brain chain: Claude Code CLI (persistent) ► Gemini / Groq / OpenRouter / Ollama / custom
-   │    stream ► tag parser ► sentence chunker ► [say | gesture | form | skill | clone | end]
-   ├─ Whisper STT + Kokoro TTS (worker threads, local)    ├─ skills (notes, weather, music, apps…)
-   ├─ presence (chit-chat), watch mode, reminders, memory ├─ helper clones + speech floor
-   ├─ settings window, updater (source: GitHub main; installer: Releases)
-   └─ notify server 127.0.0.1:47321
-                     │ IPC
- overlay window (transparent, always on top, click-through except over the orb; moves, never resizes while idle)
-   ├─ orb-smoke.js  WebGL2 transform-feedback particles: flow on a sphere, filaments, smoke hands with
-   │                moving fingers, shapes from a 64×32 target texture, trails, bloom
-   ├─ motion.js / gestures.js / shapes.js / interactions.js
-   ├─ voice.js      Kokoro audio ► robot chain ► analyser ► resonance; synthesized giggles/hums
-   └─ listen.js / wake.js   mic + energy VAD ► 16 kHz PCM
-```
-
-The smoke uses simplex noise with analytic gradients by Ian McEwan and Stefan Gustavson (ashima/webgl-noise,
-MIT). The liquid style uses signed-distance-field techniques from Inigo Quilez's articles.
-
-## Brand
-
-Logo, icons, banners, colours and voice: see [docs/BRAND.md](docs/BRAND.md).
-
-## Develop
-
 ```bash
 npm test
 ```
 
-```bash
-npm run check
+`npm run check` (syntax, duplicate functions, one version everywhere), `npm run e2e` (the real app, virtual
+display), `npm run benchmark:latency` (response times with the real components). Releases go through gated CI
+and land as drafts a human publishes: [docs/dev/RELEASING.md](docs/dev/RELEASING.md). Progress and evidence:
+[ROADMAP.md](ROADMAP.md).
+
+<details>
+<summary>Under the hood</summary>
+
+```
+ voice / chat / hotkeys ─► main process (Electron)
+   ├─ brain: router (capability, speed, health) ► Claude · Gemini · Groq · OpenRouter · Ollama · custom
+   │    stream ► tags ► sentence chunker ► [say | gesture | form | skill | agent step]
+   ├─ memory gateway ► COre active memory + Cortex (MCP) ► Markdown vault ◄ Obsidian, Syncthing
+   ├─ Whisper + Kokoro (worker threads, local) · latency tracer · agent (UI Automation, sandbox)
+   └─ settings, command center, monitor (built ahead of time) · notify server 127.0.0.1:47321
+                     │ IPC
+ overlay (transparent, always on top) ─ WebGL2 smoke particles, gestures, shapes, voice, mic + VAD
 ```
 
-```bash
-npm run dist
-```
+The smoke uses simplex noise with analytic gradients by Ian McEwan and Stefan Gustavson (ashima/webgl-noise,
+MIT), and signed-distance-field techniques from Inigo Quilez's articles. Open
+`src/renderer/overlay/index.html` in Chrome to play with the orb without Electron.
+</details>
 
-`npm run dist` builds the Windows installer (run it on Windows; GitHub Actions builds and publishes it when
-the version changes on `main`). To sign it, add `WINDOWS_CSC_LINK` (base64 .pfx) and `WINDOWS_CSC_KEY_PASSWORD`
-secrets to the repository.
+---
 
-Open `src/renderer/overlay/index.html` in Chrome to play with the orb without Electron. Keys: P point, E explain,
-T talk, L listen, K think, N notification colours, G next gesture, F next shape, 1–7 moods. Fixed poses for
-screenshots: `?pose=point|explain|speaking|attention|move|gesture&g=wave|form&shape=laugh`, plus `&r=120` for
-size and `&bg=light` for a light wallpaper.
+<p align="center">
+  <img src="assets/brand/wordmark.png" alt="COre" width="180"><br>
+  <sub>Capital C, capital O, lowercase "re". The O is the orb. Brand kit: <a href="docs/BRAND.md">docs/BRAND.md</a></sub>
+</p>
