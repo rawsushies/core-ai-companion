@@ -229,6 +229,20 @@ function Get-Windows() {
         $o.state = ([string]$wp.Current.WindowVisualState).ToLower()
         $o.modal = [bool]$wp.Current.IsModal
       } catch {}
+      # Owned windows (message boxes, modal dialogs) sit under their owner in the tree.
+      try {
+        $owned = $w.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)))
+        foreach ($d in $owned) {
+          $dc = $d.Current
+          if (-not $dc.Name) { continue }
+          $out += [ordered]@{
+            id = (Add-Element $d); name = $dc.Name; cls = $dc.ClassName; pid = $dc.ProcessId
+            process = (Get-ProcessName $dc.ProcessId); bounds = (Get-Rect $d)
+            handle = $dc.NativeWindowHandle; foreground = ([int64]$dc.NativeWindowHandle -eq $fg)
+            state = 'normal'; modal = $true; dialog = $true; owner = $c.Name
+          }
+        }
+      } catch {}
     } catch {}
   }
   return ,$out

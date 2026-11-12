@@ -103,14 +103,14 @@ class Situation {
       const { app, document } = splitTitle(obs.active.name);
       if (document) add(`The active window appears to show "${clip(document, 80)}" in ${app}`, 'inferred', 'from the window title');
     } else if (!obs.error) add('No window is in the foreground', 'observed', 'uia');
-    for (const d of obs.dialogs) add(`Dialog open: "${clip(d.name, 100)}"${d.process ? ` (${d.process})` : ''}`, 'observed', 'uia');
-    const others = obs.windows.filter((w) => w !== obs.active).slice(0, 12);
+    for (const d of obs.dialogs) add(`Dialog open: "${clip(d.name, 100)}"${d.owner ? ` over "${clip(d.owner, 60)}"` : ''}${d.process ? ` (${d.process})` : ''}`, 'observed', 'uia');
+    const others = obs.windows.filter((w) => w !== obs.active && !obs.dialogs.includes(w)).slice(0, 12);
     if (others.length) add(`Other windows: ${others.map((w) => `"${clip(w.name, 50)}"${w.state === 'minimized' ? ' (minimized)' : ''}`).join(', ')}`, 'observed', 'uia');
     if (obs.controls.length) add(`Controls in the active window: ${obs.controls.map((c) => `${c.type}${c.name ? ` "${c.name}"` : ''}${c.value ? ` = "${c.value}"` : ''}${c.toggle ? ` [${c.toggle}]` : ''}`).join('; ')}`, 'observed', 'uia');
     for (const c of obs.changes) add(`Since the last look: ${c}`, 'observed', 'uia');
 
     // Recall from both memory systems, steered by what is on screen.
-    const query = [question, obs.active && obs.active.name, ...obs.dialogs.map((d) => d.name)].filter(Boolean).join(' | ').slice(0, 400);
+    const query = [question, obs.active && obs.active.name, ...obs.dialogs.map((d) => d.name), ...obs.windows.filter((w) => w !== obs.active).slice(0, 6).map((w) => clip(w.name, 60))].filter(Boolean).join(' | ').slice(0, 500);
     let memory = { text: '', sources: [], cortex: 'off' };
     if (this.gateway && query) { try { memory = await this.gateway.context(query); } catch {} }
     const projects = Situation.matchProjects(obs, this._knownProjects(memory.sources));
