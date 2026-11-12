@@ -71,6 +71,15 @@ if ($Isolate) {
     if ($Roots) { $rootList = @((ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Roots)))) | ForEach-Object { [string]$_ }) }
     # Grant the container exactly these folders (an ACE for the container SID only; nothing else changes).
     foreach ($r in $rootList) { if (Test-Path -LiteralPath $r) { & icacls.exe $r /grant "*${sid}:(OI)(CI)M" /Q | Out-Null; if ($LASTEXITCODE -ne 0) { throw "could not grant $r" } } }
+    # Programs that resolve real paths (Node) look at every parent folder up to
+    # the drive root. Allow the container to read only the attributes of those
+    # parents (not their contents); best effort, since drive roots need admin.
+    foreach ($r in $rootList) {
+      $p = Split-Path -Parent $r
+      while ($p) { & icacls.exe $p /grant "*${sid}:(RA)" /Q 2>$null | Out-Null; $n = Split-Path -Parent $p; if ($n -eq $p) { break }; $p = $n }
+    }
+    # Node: do not resolve the main script's real path (needs the drive root).
+    $env:NODE_OPTIONS = ("$env:NODE_OPTIONS --preserve-symlinks-main").Trim()
     $prog = $Rest[0]
     if (-not [IO.Path]::IsPathRooted($prog)) { $c = Get-Command $prog -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $prog = $c.Source } }
     $progDir = Split-Path -Parent $prog
