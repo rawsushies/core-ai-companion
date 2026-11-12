@@ -13,7 +13,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { check, listFiles, hash } = require('./checks');
+const { check, listFiles, hash } = require('../../../src/main/missions/checks');
 
 const CATEGORIES = ['files', 'documents', 'spreadsheets', 'research', 'knowledge', 'development', 'communication', 'system', 'long', 'adversarial'];
 const TIERS = ['T1', 'T2', 'T3', 'T4'];

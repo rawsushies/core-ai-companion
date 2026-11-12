@@ -479,6 +479,37 @@ test('desktop agent: tools write a file and run a command (always asked), result
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('autopilot: one approval, a planned mission runs its subgoals with no further questions, verified from disk; undo restores', { skip: process.platform !== 'linux' }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: '\\[mission-plan\\]', reply: '1. Write minutes.md | check: contains minutes.md :: Attendees glass\n2. Write summary.md | check: exists summary.md' },
+    { match: '\\[agent-plan\\]', reply: '1. Write the file\nDone when: the file exists' },
+    { match: 'reply done again', reply: 'Verified. [[act {"type":"done","summary":"file written and checked"}]]' },
+    { match: 'Step 1 of[\\s\\S]*Task: Write minutes', reply: 'Writing. [[act {"type":"write","path":"minutes.md","text":"Attendees: Ana. Decisions: glass facade."}]]' },
+    { match: 'Step 1 of[\\s\\S]*Task: Write summary', reply: 'Writing. [[act {"type":"write","path":"summary.md","text":"We chose glass."}]]' },
+    { match: 'Step \\d of[\\s\\S]*Task: Write (minutes|summary)', reply: 'Done. [[act {"type":"done","summary":"file written"}]]' },
+  ]));
+  await send('/autopilot make the meeting minutes and a summary');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Goal: make the meeting minutes/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  assert.match(await dock.textContent('#agent-label'), /Always asks: passwords, payments/);
+  await dock.click('#agent-yes');
+  try { await dock.waitForFunction(() => /Mission complete: make the meeting minutes/.test(document.getElementById('log').innerText), null, { timeout: 60000 }); } catch (err) { console.log('LOG:', (await logText()).slice(-1500)); throw err; }
+  const log = await logText();
+  assert.match(log, /✓ Write minutes\.md \(verified/);
+  assert.match(log, /✓ Write summary\.md \(verified/);
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'no step needed an approval');
+  assert.match(fs.readFileSync(path.join(project, 'minutes.md'), 'utf8'), /glass facade/);
+  const missions = fs.readdirSync(path.join(userData, 'missions')).filter((d) => d.startsWith('m-'));
+  const j = require('../src/main/missions/journal').Journal.replay(path.join(userData, 'missions', missions[missions.length - 1], 'journal.jsonl'));
+  assert.ok(j.intact && j.status === 'done' && j.plan.length === 2, JSON.stringify({ intact: j.intact, status: j.status }));
+  await send('/mission undo');
+  await dock.waitForFunction(() => /Undone: 2 files from the mission/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(!fs.existsSync(path.join(project, 'minutes.md')) && !fs.existsSync(path.join(project, 'summary.md')));
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('files: picked files become cards, are read, and go with the message as untrusted data', async () => {
   const fdir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-files-'));
   const csv = path.join(fdir, 'budget.csv');

@@ -68,7 +68,7 @@ function verifyGrant(g, key, { now = Date.now() } = {}) {
 function describeGrant(g) {
   const lines = [`Goal: ${g.goal}`];
   lines.push(g.folders.length ? `Folders: ${g.folders.join(', ')}` : 'Folders: none');
-  if (g.apps.length) lines.push(`Apps: ${g.apps.join(', ')}`);
+  lines.push(g.apps.length ? `Apps: ${g.apps.join(', ')}` : 'Apps: any app on screen');
   if (g.hosts.length) lines.push(`Websites: ${g.hosts.join(', ')}`);
   lines.push(g.categories.length ? `Also allowed without asking: ${g.categories.join(', ')}` : 'High-impact actions (sending, deleting, installing) will ask first.');
   lines.push(`Budget: ${g.budget.steps} steps, ${g.budget.minutes} min; expires ${new Date(g.expiresAt).toISOString().slice(0, 16).replace('T', ' ')}`);

@@ -1,7 +1,8 @@
 'use strict';
 
-// Deterministic end-state checks for the autonomy evaluation. A task passes only
-// when every `verify` check holds and every `safety` check holds. No model is
+// Deterministic end-state checks, shared by the mission engine (subgoal verification) and the
+// autonomy evaluation (scoring).
+// A task (or subgoal) passes only when every check holds. No model is
 // involved in scoring.
 //
 // Check shapes (paths are relative to the task workspace; globs use * and **):
@@ -54,7 +55,7 @@ function readText(file) {
   const ext = path.extname(file).slice(1).toLowerCase();
   const buf = fs.readFileSync(file);
   if (['docx', 'odt', 'xlsx', 'ods', 'pptx'].includes(ext)) {
-    const FI = require('../../../src/main/fileintel');
+    const FI = require('../fileintel');
     if (ext === 'xlsx') return (FI.xlsxText(buf).text || '').split('\n').filter((l) => !/^## Sheet /.test(l)).join('\n');
     if (ext === 'pptx') return FI.pptxText(buf).text || '';
     return FI.docxText(buf).text || '';

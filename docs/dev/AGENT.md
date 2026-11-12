@@ -39,6 +39,16 @@ Every action passes one deterministic gate, `src/main/policy` (no model involved
   folder, which refuses every action until it is deleted. `/diagnostics` shows how many steps ran, asked or
   were refused.
 
+## Missions (13.0): `/autopilot GOAL`
+
+1. COre shows **one** card: the folders, what may happen without asking, the budget and the expiry. Approve once.
+2. It plans 1–10 subgoals, each with a check (a file that must exist or contain something). Each subgoal runs
+   through the same agent loop and safety policy as `/do`, so it can never do more than the grant allows.
+3. Each subgoal is verified from disk; only when no file can show it does Sentinel judge, and the report says so.
+4. A subgoal that fails is retried once with what went wrong; then the mission stops and asks you.
+5. The report lists every subgoal with its evidence. `/mission undo` puts back every file the mission changed;
+   `/mission stop`, Esc, Stop and the emergency hotkey end it.
+
 ## Actions
 
 | Action | Limits |

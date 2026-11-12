@@ -34,7 +34,7 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
   // (that dialog is as invisible to UI Automation as the rest of LibreOffice).
   const profile = path.join(dir, 'lo-profile');
   fs.mkdirSync(path.join(profile, 'user'), { recursive: true });
-  fs.writeFileSync(path.join(profile, 'user', 'registrymodifications.xcu'), '<?xml version="1.0" encoding="UTF-8"?>\n<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n<item oor:path="/org.openoffice.Office.Common/Save/Document"><prop oor:name="WarnAlienFormat" oor:op="fuse"><value>false</value></prop></item>\n<item oor:path="/org.openoffice.Setup/Office"><prop oor:name="ooSetupInstCompleted" oor:op="fuse"><value>true</value></prop></item>\n</oor:items>\n');
+  fs.writeFileSync(path.join(profile, 'user', 'registrymodifications.xcu'), '<?xml version="1.0" encoding="UTF-8"?>\n<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n<item oor:path="/org.openoffice.Office.Common/Save/Document"><prop oor:name="WarnAlienFormat" oor:op="fuse"><value>false</value></prop></item>\n<item oor:path="/org.openoffice.Setup/Office"><prop oor:name="ooSetupInstCompleted" oor:op="fuse"><value>true</value></prop></item>\n<item oor:path="/org.openoffice.Office.Jobs/Jobs/org.openoffice.Office.Jobs:Job[\'UpdateCheck\']/Arguments"><prop oor:name="AutoCheckEnabled" oor:op="fuse"><value>false</value></prop></item>\n</oor:items>\n');
   const shots = process.env.CORE_SHOTS || dir;
   const shot = (name) => { try { execFileSync('powershell.exe', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $i=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($i); $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); $i.Save('${path.join(shots, name).replace(/'/g, "''")}')`], { stdio: 'ignore', timeout: 20000 }); } catch {} };
   const app = spawn(SOFFICE, [`-env:UserInstallation=file:///${profile.replace(/\\/g, '/')}`, '--calc', '--norestore', '--nologo', '--infilter=CSV:44,34,76,1', file], { stdio: 'ignore' });
@@ -48,8 +48,11 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
       await wait(1000);
       all = await uia.windows();
       w = all.find((x) => /budget\.csv/i.test(x.name) && /LibreOffice|Calc/i.test(x.name));
-      // LibreOffice 26 can open a first-start or import question before the sheet: answer it.
+      // LibreOffice 26 can open its updater or a first-start question before the sheet.
+      // The updater (a separate process) is closed; a soffice question is answered with Enter.
       if (!w && i % 5 === 4) {
+        const upd = all.find((x) => /^LibreOffice Update/i.test(x.name) || /updater/i.test(String(x.process || '')));
+        if (upd) { console.log('LibreOffice updater closed:', upd.name); try { await uia.activate(upd.id); await key('escape'); } catch {} try { execFileSync('taskkill', ['/IM', `${upd.process || 'updater'}.exe`, '/F'], { stdio: 'ignore' }); } catch {} continue; }
         const q = all.find((x) => x.process && /soffice/i.test(x.process) && !/budget\.csv/i.test(x.name));
         if (q) { console.log('LibreOffice asks first:', q.name); try { await uia.activate(q.id); await key('enter'); } catch {} }
       }
