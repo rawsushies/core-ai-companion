@@ -1,5 +1,7 @@
 # COre command launcher (Windows): runs one command inside a Job Object.
-#   powershell -NoProfile -NonInteractive -File job-run.ps1 -Cwd <dir> -MemoryMB 1024 -MaxProcs 32 -- <program> <args...>
+#   powershell -NoProfile -NonInteractive -File job-run.ps1 -Cwd <dir> -MemoryMB 1024 -MaxProcs 32 -Argv <base64 of a JSON array: program, args...>
+# (argv travels as one base64 value so arguments that start with '-' are never
+# taken for launcher parameters by Windows PowerShell's binder)
 # Limits: the whole process tree is killed when this launcher exits (COre kills
 # it on timeout, Stop or emergency stop); at most MaxProcs processes; a memory
 # cap per process; no clipboard, desktop switching, system-setting changes,
@@ -9,10 +11,10 @@ param(
   [string]$Cwd = '.',
   [int]$MemoryMB = 1024,
   [int]$MaxProcs = 32,
-  [Parameter(ValueFromRemainingArguments = $true)] [string[]]$Rest
+  [string]$Argv = ''
 )
 $ErrorActionPreference = 'Stop'
-if ($Rest.Count -gt 0 -and $Rest[0] -eq '--') { $Rest = $Rest[1..($Rest.Count - 1)] }
+try { $Rest = @(ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Argv)))) } catch { $Rest = @() }
 if ($Rest.Count -lt 1) { [Console]::Error.WriteLine('job-run: no command'); exit 2 }
 
 Add-Type -TypeDefinition @'
@@ -53,7 +55,7 @@ try { $script:job = [CoreJob]::Make($MemoryMB, $MaxProcs) } catch { [Console]::E
 # From here every process started (and their children) is inside the job.
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $Rest[0]
-$quoted = foreach ($a in ($Rest | Select-Object -Skip 1)) { if ($a -match '[\s"]') { '"' + ($a -replace '"', '\"') + '"' } else { $a } }
+$quoted = foreach ($a in ($Rest | Select-Object -Skip 1)) { if ($a -eq '' -or $a -match '[\s"]') { '"' + ($a -replace '"', '\"') + '"' } else { $a } }
 $psi.Arguments = ($quoted -join ' ')
 $psi.WorkingDirectory = (Resolve-Path -LiteralPath $Cwd).Path
 $psi.UseShellExecute = $false

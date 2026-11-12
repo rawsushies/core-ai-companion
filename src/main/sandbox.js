@@ -50,7 +50,7 @@ function wrap(argv, { cwd, roots = [], network = false, platform = process.platf
   if (d.kind === 'job') {
     return {
       file: 'powershell.exe',
-      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', JOB_RUN, '-Cwd', cwd || '.', '-MemoryMB', String(memoryMB), '-MaxProcs', String(maxProcs), '--', ...argv],
+      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', JOB_RUN, '-Cwd', cwd || '.', '-MemoryMB', String(memoryMB), '-MaxProcs', String(maxProcs), '-Argv', Buffer.from(JSON.stringify(argv), 'utf8').toString('base64')],
       sandboxed: true,
       level: 'process',
       note: `sandboxed (Windows Job Object: process tree, ${memoryMB} MB and ${maxProcs}-process limits, no clipboard or system changes; file access is not restricted)`,
