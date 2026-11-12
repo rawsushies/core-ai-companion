@@ -26,7 +26,7 @@ test('Windows job: a timeout kills the whole process tree, grandchildren include
   const pidFile = path.join(dir, 'grandchild.pid');
   const code = `const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' }); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(c.pid)); setInterval(()=>{},1000);`;
   const r = await run(code, { timeoutMs: 6000 });
-  assert.ok(r.timedOut);
+  assert.ok(r.timedOut, `exit ${r.code}: ${String(r.out).slice(0, 600)}`);
   const pid = Number(fs.readFileSync(pidFile, 'utf8'));
   let gone = false;
   for (let i = 0; i < 30 && !gone; i++) { await new Promise((res) => setTimeout(res, 300)); gone = !alive(pid); }
