@@ -5,6 +5,8 @@ its acceptance test passes against real components (real Cortex, real Windows
 apps, real providers). Mocked tests are listed separately and never count as
 real-world validation.
 
+The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
+
 **Overall estimated completion: 47%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
