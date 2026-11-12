@@ -150,9 +150,14 @@ class OpenAICompatBrain extends HistoryMixin {
     if (!res.ok) return null;
     const data = await res.json();
     const ids = (data.data || data.models || []).map((m) => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
-    const prefer = this.cfg.prefer ? new RegExp(this.cfg.prefer, 'i') : null;
-    const avoid = /embed|tts|audio|image|vision-preview|guard|whisper|moderation/i;
-    const pick = ids.find((m) => (!prefer || prefer.test(m)) && !avoid.test(m)) || ids.find((m) => !avoid.test(m));
+    // prefer: "a|b|c" in order of preference (the first alternative that any model matches wins).
+    const prefs = String(this.cfg.prefer || '').split('|').filter(Boolean).map((p) => new RegExp(p, 'i'));
+    // Not chat models: embeddings, speech (TTS such as Orpheus, Whisper), image,
+    // and classifier/safety models (prompt-guard, safeguard, moderation).
+    const avoid = /embed|tts|audio|image|vision-preview|guard|whisper|moderation|orpheus|playai|speech|transcribe/i;
+    let pick = null;
+    for (const re of prefs) { pick = ids.find((m) => re.test(m) && !avoid.test(m)); if (pick) break; }
+    pick = pick || ids.find((m) => !avoid.test(m));
     if (pick && pick !== this.cfg.model) {
       this.cfg.model = pick;
       this.onModelChange(this.id, pick);

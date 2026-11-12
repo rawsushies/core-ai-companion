@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 82%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 88%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -32,10 +32,10 @@ vault files directly.
 | Phase | Status | Estimate |
 |---|---|---|
 | 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
-| 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; real-provider validation open | ~90% |
-| 2 COre 2.2 environmental intelligence | Acceptance passes on real Windows + real Cortex; app profiles, context sync, verified knowledge updates, ongoing-work continuity | ~90% |
+| 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; agent loop verified with a real model | ~95% |
+| 2 COre 2.2 environmental intelligence | Acceptance on real Windows + real Cortex; a real model explains the desktop with no invented names | ~95% |
 | 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e); opportunity detection, approved maintenance, opt-in auto-resume | ~80% |
-| 4 COre 3.0 unified experience | Combined acceptance passes in the real app and on real Windows (scripted reasoning); benchmarks, diagnostics, responsiveness budgets | ~65% |
+| 4 COre 3.0 unified experience | Combined acceptance in the real app and on real Windows; real-model validation 7/7 (routing, effort, failover, knowledge, injection, grounding, agent) | ~75% |
 
 ### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
 
@@ -66,7 +66,7 @@ vault files directly.
 | Timeouts, process-tree kill, retries | Verified | taskkill /T; Job kill-on-close; failure advisor |
 | Memory gateway in planning and execution | Implemented | agent experience reads Cortex; lessons and outcomes written back |
 | Model switch keeps context | Verified with stand-in providers | e2e failover with continuity |
-| Real AI providers | **Unverified** | build sandbox cannot reach provider APIs |
+| Real AI providers | **Verified with Groq (7/7)** | [docs/REAL-PROVIDERS.md](docs/REAL-PROVIDERS.md): `npm run validate:providers` runs COre's production brain against the real model: model picked from the live list (`openai/gpt-oss-120b`), `reasoning_effort=high` accepted, answer from real Cortex knowledge citing `Projects/Tower.md`, failover from a dead provider keeping the conversation, injected instructions in a file not obeyed, desktop explained with no unsupported names, and the agent loop reaching a verified result. Gemini, OpenRouter, Claude and Jev not yet run |
 
 ### Phase 2: COre 2.2 environmental intelligence
 
@@ -104,7 +104,7 @@ vault files directly.
 |---|---|---|---|
 | 1 | Voice, speech recognition, interruption | Present from 2.0 (local STT/TTS, barge-in) | e2e voice tests with stand-ins |
 | 2, 10 | Unified memory through the gateway, reliable across restarts | **Measured** | [docs/BENCHMARKS.md](docs/BENCHMARKS.md): recall after 5/5 full restarts, offline queue delivered 5/5 |
-| 3, 4 | Jev routing (capabilities, effort, health, latency, cost), effort passed to providers, failover | Implemented, verified with stand-ins | router/effort unit tests; e2e failover. Real providers unverified |
+| 3, 4 | Jev routing (capabilities, effort, health, latency, cost), effort passed to providers, failover | Verified with a real provider (Groq): effort accepted, failover with continuity | router/effort unit tests; e2e failover. Real providers unverified |
 | 6 | Monitoring, diagnostics, transparency | Implemented | `/diagnostics`: brain health and latency per provider, last routing decision, memory, Cortex, agent, sandbox, automations, recent problems (no secrets; e2e); command center, monitor panel, audit log |
 | 7, 11 | Updates, recovery, backups, rollback, portable knowledge | Present; backups now include notes waiting for Cortex and automation history | backup e2e, `test/backup.test.js`, updater, `/do undo`. The Cortex vault is the user's own folder (portable, versioned by Cortex) |
 | 12 | Responsive on Windows | **Measured on real Windows** | warm budgets checked every CI run (`test/situation.win.test.js`): window list 47 ms, control snapshot 67 ms, full situation with both memories 64 ms (windows-latest, b97e1fc) |
@@ -115,10 +115,10 @@ vault files directly.
 
 - Injection guard on held-out examples: 4/6 flagged, 1/4 benign flagged (see benchmarks); every retrieved text is fenced as data regardless.
 
-- Real provider validation (Gemini, Groq, OpenRouter, Jev): no network access from the build environment.
+- Real providers: Groq verified; Gemini, OpenRouter, Claude and Jev not yet run (need their keys). Groq's free tier rate-limits long agent runs (COre waits and retries).
 - Node package managers cannot run inside the Windows AppContainer (libuv named pipes are denied); they run with Job limits only.
 - Headless CI desktop: some apps (new Notepad's XAML view) expose little to UI Automation there.
 
 ## Next execution target
 
-1. Real-provider validation once network access to provider APIs is available.
+1. Run the real-provider validation on Gemini and Jev too (keys needed); Office-app desktop scenarios; a fresh unseen injection test set.
