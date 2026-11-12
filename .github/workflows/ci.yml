@@ -116,3 +116,11 @@ jobs:
       - run: node --test test/office.win.test.js
         env:
           CORE_OFFICE: '1'
+      - name: Install Obsidian
+        if: always()
+        run: choco install obsidian -y --no-progress
+      - name: Real Obsidian opens the vault COre set up
+        if: always()
+        run: node --test test/obsidian.win.test.js
+        env:
+          CORE_OBSIDIAN: '1'

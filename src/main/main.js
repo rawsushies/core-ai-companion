@@ -1064,6 +1064,58 @@ function dailySuggestions() {
   showSuggestions({ quietIfNone: true }).catch(() => {});
 }
 
+// Automatic knowledge-vault setup. First launch of a new install: turn on the
+// bundled Cortex, create the vault (Documents\COre Vault unless Cortex already has
+// one) and add it to Obsidian's vault list so it shows up there by itself. Existing
+// users keep their choice (/vault setup does it on request). Later launches only
+// add the vault to Obsidian once Obsidian is installed. Installing Obsidian itself
+// is offered, never done unasked (/vault obsidian).
+function setupVault({ force = false, announce = true, freshInstall = false } = {}) {
+  const O = require('./obsidian');
+  const c = config.data.memory.cortex || (config.data.memory.cortex = {});
+  const firstTime = !state.get('vaultSetup');
+  if (force || (firstTime && freshInstall && !c.enabled)) {
+    const r = cortexCfg();
+    if (force || require('./cortex').resolveCortex(c, { resourcesPath: app.isPackaged ? process.resourcesPath : '' }).bundled || r.command) { c.enabled = true; config.save(); }
+  }
+  if (!c.enabled) return null;
+  const vault = cortexCfg().vault;
+  if (!vault) return null;
+  const made = O.ensureVault(vault);
+  let obsidian = 'not installed';
+  if (O.obsidianInstalled()) {
+    obsidian = state.get('obsidianRegistered') === vault && !force ? 'already' : O.registerVault(vault);
+    if (obsidian === 'added' || obsidian === 'already') state.set('obsidianRegistered', vault);
+  }
+  state.set('vaultSetup', vault);
+  const msg = [`Your knowledge vault is ready${made.created ? ' (new)' : ''}: ${vault}. COre's long-term memory (Cortex, built in) keeps its notes there.`,
+    obsidian === 'added' ? 'It is now in Obsidian\'s vault list (restart Obsidian if it was open). Type /obsidian to open it.'
+      : obsidian === 'already' ? 'Obsidian already knows it. Type /obsidian to open it.'
+        : obsidian === 'not installed' ? `Obsidian is not installed. ${process.platform === 'win32' ? 'Type /vault obsidian and I\'ll install it (free) and connect it.' : 'Install it from obsidian.md and the vault will be added automatically.'}`
+          : `I could not add it to Obsidian (${obsidian}); open the folder there with "Open folder as vault".`,
+    'Turn this off in Settings → Privacy. To share it with another device, see /vault.'].join('\n');
+  if (announce && (force || firstTime || obsidian === 'added')) addTranscript('system', msg);
+  toolAudit({ event: 'vault-setup', vault, created: made.created, obsidian });
+  return { vault, obsidian, created: made.created };
+}
+
+async function installObsidian() {
+  const O = require('./obsidian');
+  if (process.platform !== 'win32') { addTranscript('system', 'Install Obsidian from obsidian.md; COre adds your vault to it on the next start.'); return; }
+  if (O.obsidianInstalled()) { setupVault({ force: true }); return; }
+  addTranscript('system', 'Installing Obsidian (its official package via winget)…');
+  const code = await new Promise((resolve) => {
+    const p = spawn('winget', O.OBSIDIAN_WINGET, { windowsHide: true, stdio: 'ignore' });
+    p.on('error', () => resolve(-1)); p.on('exit', resolve);
+  });
+  toolAudit({ event: 'install-obsidian', code });
+  if (!O.obsidianInstalled()) { addTranscript('system', code === -1 ? 'winget is not available here. Install Obsidian from obsidian.md, then type /vault setup.' : `The install did not finish (code ${code}). You can install it from obsidian.md, then type /vault setup.`); return; }
+  // A fresh Obsidian has no vault list until it first runs: create it with ours.
+  fs.mkdirSync(path.dirname(O.obsidianConfigPath()), { recursive: true });
+  const r = setupVault({ force: true });
+  if (r && r.vault) shell.openExternal(O.noteUri(r.vault));
+}
+
 // /vault: the knowledge layer at a glance: the Markdown vault (source of truth),
 // Obsidian, the Cortex index, Syncthing between devices, and sync conflicts.
 async function vaultReport() {
@@ -3213,6 +3265,8 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       showSuggestions().catch((err) => addTranscript('system', `Could not check: ${err.message}`));
       return;
     } }
+    if (/^\/vault\s+setup\s*$/i.test(text)) { addTranscript('user', text); try { setupVault({ force: true }); } catch (err) { addTranscript('system', `Vault setup failed: ${err.message}`); } return; }
+    if (/^\/vault\s+obsidian\s*$/i.test(text)) { addTranscript('user', text); installObsidian().catch((err) => addTranscript('system', `Could not install Obsidian: ${err.message}`)); return; }
     if (/^\/vault\s*$/i.test(text)) { addTranscript('user', text); vaultReport().then((r) => addTranscript('system', r)).catch((err) => addTranscript('system', `Could not check the vault: ${err.message}`)); return; }
     { const ob = /^\/obsidian\b\s*(.*)$/i.exec(text); if (ob) {
       addTranscript('user', text);
@@ -4193,6 +4247,7 @@ app.whenReady().then(async () => {
   floor = new CL.SpeechFloor({ mainBusy: () => !!current || !!listening || (mainSpeaking && Date.now() - mainSpeakingSince < 60_000) });
   setInterval(() => floor.pump(), 500);
   if (process.env.CORE_DEBUG_CHITCHAT) setTimeout(() => startChitchat({ quietMinutes: 30 }), 9000); // end-to-end tests
+  { const freshInstall = !state.get('onboarded'); setTimeout(() => { try { setupVault({ freshInstall }); } catch (err) { console.warn('[core] vault setup:', err.message); } }, freshInstall ? 30000 : 2000); } // after the tour on a first run
   if (!state.get('onboarded')) setTimeout(runTour, 4500); // first run: show COre around
   else setTimeout(greetIfFirstToday, 3500);
 

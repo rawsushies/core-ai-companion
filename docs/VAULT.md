@@ -35,6 +35,14 @@ PC vault ↔ Syncthing ↔ other devices' vaults   (transport only; free, peer t
 - **New device / fresh install:** point COre at the synced vault folder; Cortex builds a new local index from the
   files. The index is never synced (a database copied mid-write would be corrupted).
 
+## Automatic setup
+
+On the first start of a new install COre turns on its built-in Cortex, creates the vault (`Documents\COre Vault`,
+unless Cortex already uses one) with a welcome note, and adds it to Obsidian's vault list (`obsidian.json`) so it
+appears in Obsidian with no folder picking. No account, API key or plugin is involved. If Obsidian is not installed,
+`/vault obsidian` installs it (official winget package) and connects it; if you install it yourself later, COre
+adds the vault on its next start. Existing users: `/vault setup`. Turn it off in Settings → Privacy.
+
 ## Setting up a second device (free, no Obsidian Sync)
 
 1. Install Syncthing on both devices (syncthing.net) and pair them (Add Remote Device, by device ID).

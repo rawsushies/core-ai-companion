@@ -14,6 +14,8 @@ or asks first.
 
 - **Long-term memory with Cortex:** connect your Cortex vault (Settings → Privacy). Decisions, lessons and
   research go there; preferences stay in COre. If Cortex is offline, notes wait and are delivered later.
+- **Set up for you:** on first start COre creates your knowledge vault and adds it to Obsidian automatically (no
+  account or key). No Obsidian yet? Type `/vault obsidian`. Share it with other devices for free using Syncthing.
 - **Open in Obsidian:** your vault is plain Markdown. `/obsidian` opens it, `/obsidian Projects/X.md` opens a note.
 - **Knows what you're working on:** "what am I working on?" reads your open windows and dialogs, recalls the
   project from both memories, and says where each fact came from. It won't invent windows it can't see.

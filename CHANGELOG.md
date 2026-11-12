@@ -12,7 +12,8 @@
 - **Automations** (`/automations`): file and window events can start approved playbooks; results are verified and recorded.
 - **Knowledge maintenance** (`/memory maintain`): proposes merges and delivery of waiting notes; applies only what you approve. Cortex notes are never rewritten.
 - **Diagnostics** (`/diagnostics`): brain health and latency per provider, last routing decision, memory, Cortex, agent, sandbox, automations, recent problems (no secrets).
-- **Obsidian** (`/obsidian [note]`): opens your Cortex vault, or a note COre cited, in Obsidian.
+- **Knowledge layer**: one Markdown vault shared by COre, Obsidian and Cortex, carried between devices by Syncthing. First start sets it up automatically (vault + Obsidian's vault list); `/vault`, `/vault setup`, `/vault obsidian` (installs Obsidian), `/obsidian [note]`. Sync conflicts keep both versions and are reported, never resolved silently.
+- **Installer bundles Cortex.exe and the local models** (speech, voice, embeddings): works offline from first start.
 - **Windows sandbox**: commands run in an AppContainer with a Job Object (no access outside granted folders); verified on real Windows.
 - **Free AI providers verified for real**: Groq and Gemini pass all 7 real-model scenarios (routing, effort, Cortex knowledge, failover, injection, grounding, agent loop); Jev routes 6/6 live requests. Models are picked from each provider's live list and COre moves off retired or overloaded models on its own.
 

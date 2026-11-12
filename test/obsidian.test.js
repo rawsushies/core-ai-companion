@@ -40,3 +40,36 @@ test('Cortex: settings win, else the bundled Cortex.exe; vault from settings, Co
   assert.strictEqual(resolveCortex({}, { ...o, exists: () => false }).command, '');
   assert.strictEqual(resolveCortex({}, { ...o, env: { CORTEX_VAULT: path.join(home, 'Brain') } }).vault, path.join(home, 'Brain'));
 });
+
+test('automatic setup: the vault is created with a welcome note, existing notes are never touched', () => {
+  const { ensureVault, isObsidianVault } = require('../src/main/obsidian');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-ev-'));
+  const v = path.join(root, 'COre Vault');
+  assert.deepStrictEqual(ensureVault(v), { created: true });
+  assert.ok(isObsidianVault(v) && fs.existsSync(path.join(v, 'Welcome to COre.md')));
+  fs.writeFileSync(path.join(v, 'Welcome to COre.md'), 'my own text');
+  assert.deepStrictEqual(ensureVault(v), { created: false });
+  assert.strictEqual(fs.readFileSync(path.join(v, 'Welcome to COre.md'), 'utf8'), 'my own text');
+});
+
+test('automatic setup: the vault is added to Obsidian\'s vault list once, other vaults kept', () => {
+  const { registerVault, obsidianConfigPath, obsidianInstalled } = require('../src/main/obsidian');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'core-ob-'));
+  const file = obsidianConfigPath({ APPDATA: path.join(home, 'Roaming') }, home, 'win32');
+  assert.strictEqual(file, path.join(home, 'Roaming', 'obsidian', 'obsidian.json'));
+  const v = path.join(home, 'COre Vault');
+  assert.strictEqual(registerVault(v, { file }), 'no-obsidian');
+  assert.ok(!obsidianInstalled({ APPDATA: path.join(home, 'Roaming'), LOCALAPPDATA: path.join(home, 'Local'), ProgramFiles: path.join(home, 'PF') }, home, 'win32'));
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  assert.ok(obsidianInstalled({ APPDATA: path.join(home, 'Roaming'), LOCALAPPDATA: path.join(home, 'Local'), ProgramFiles: path.join(home, 'PF') }, home, 'win32'));
+  fs.writeFileSync(file, JSON.stringify({ vaults: { aaaa: { path: path.join(home, 'Other'), ts: 1, open: true } }, frame: 'hidden' }));
+  assert.strictEqual(registerVault(v, { file, id: 'bbbb', now: 2 }), 'added');
+  const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepStrictEqual(cfg.vaults.bbbb, { path: path.resolve(v), ts: 2 });
+  assert.deepStrictEqual(cfg.vaults.aaaa, { path: path.join(home, 'Other'), ts: 1, open: true });
+  assert.strictEqual(cfg.frame, 'hidden');
+  assert.strictEqual(registerVault(v, { file, id: 'cccc' }), 'already');
+  fs.writeFileSync(file, '{broken');
+  assert.match(registerVault(v, { file }), /left untouched/);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), '{broken');
+});
