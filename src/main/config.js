@@ -34,7 +34,7 @@ const DEFAULTS = {
     // Advice only: it never approves actions.
     jev: { enabled: true, provider: 'auto', model: '', timeoutMs: 2500, minConfidence: 0.35 },
     jevKey: '', // TypeSafe key for Jev: stored as an encrypted secret instead
-    gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', prefer: 'flash', vision: true },
+    gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', prefer: 'flash', vision: true, reasoningEffort: true },
     groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', prefer: 'versatile|70b|llama', vision: false },
     openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', prefer: ':free$', vision: false },
     ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:3b', visionModel: '' },
@@ -52,6 +52,7 @@ const DEFAULTS = {
     greeting: true, // a short built-in greeting on the first launch of the day
   },
   presence: {
+    suggestions: true, // daily mention of unfinished work; only suggests, never acts
     chitchat: true, // after a quiet while COre starts a short conversation on its own
     minutes: 25, // quiet minutes before it does (doubles each time it's ignored)
     quietFrom: 22, // no chit-chat from this hour...
@@ -60,6 +61,11 @@ const DEFAULTS = {
     reactions: true, // say something now and then when petted, poked or tossed
   },
   memory: {
+    maintenance: 'off', // 'weekly': prepare a knowledge-maintenance report each week; changes only after you approve (/memory maintain apply)
+    // Cortex: your long-term knowledge vault (github.com/rawsushies/cortex-ai-brain),
+    // reached through its MCP server. command: 'python' (or 'python3' / Cortex.exe),
+    // script: path to Cortex's run.py (empty for Cortex.exe), vault: the vault folder.
+    cortex: { enabled: false, command: '', script: '', vault: '' },
     enabled: true, // COre remembers facts about you across conversations (⚙ → Memory)
     autoCapture: true, // save clear statements like "my name is…" / "I prefer…" from your messages (shown in the chat)
     semantic: true, // semantic search with a small local model (downloads ~23 MB once)
@@ -124,10 +130,19 @@ const DEFAULTS = {
   meiosis: {
     autoReview: true, // Sentinel checks Forge's proposed file changes
   },
+  // Proactive automations: permitted event sources start playbooks. Sources are
+  // off until the user turns them on. rules: [{ name, source: 'files'|'windows',
+  // match: glob, on?: 'created'|'changed', playbook, mode: 'ask'|'auto', cooldownMin }]
+  events: { files: false, windows: false, rules: [] },
   agent: {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)
     maxSteps: 25,
+    background: false, // let scheduled desktop playbooks (agent: true) start the agent on their own; approvals still apply
+    sandbox: 'auto', // commands in an OS sandbox when available (Linux: bubblewrap; Windows: AppContainer + Job Object); 'required' refuses them otherwise; 'off'
+    autoResume: false, // resume an interrupted desktop task by itself after a restart (needs background: true)
+    sandboxWindows: 'appcontainer', // 'appcontainer' (no profile files, no network) or 'job' (limits only)
+    uia: true, // Windows: read and operate controls by their real properties (UI Automation)
     tools: true, // commands, files and web pages (inside the project folder), on top of mouse and keyboard
     allowCommands: [], // commands that never ask, matched by their start, e.g. "git status", "npm test"
     commandTimeout: 60, // seconds

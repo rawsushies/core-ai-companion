@@ -29,6 +29,7 @@ if (MODE === 'auth') {
 let turns = 0;
 function reply(text) {
   turns++;
+  if (process.env.FAKE_CLAUDE_PROMPTS) { try { fs.appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `\n=====\n${text}`); } catch {} }
   out({ type: 'system', subtype: 'init', session_id: sid, model: 'fake' });
   // FAKE_CLAUDE_REPLY: fixed reply for UI tests; {core} becomes the specialist's name.
   const core = (/\[core ([^\]]+)\]/.exec(text) || [])[1] || 'COre';
@@ -39,7 +40,10 @@ function reply(text) {
   if (process.env.FAKE_CLAUDE_SCRIPT) {
     try {
       for (const rule of JSON.parse(fs.readFileSync(process.env.FAKE_CLAUDE_SCRIPT, 'utf8'))) {
-        if (new RegExp(rule.match, 'i').test(text)) { scripted = rule.reply; failWith = rule.error || null; break; }
+        // Rules match the request, not the other cores' work quoted in the context
+        // (unless a rule asks for the full prompt with full: true).
+        const hay = rule.full ? text : text.replace(/\[Specialists' work\][\s\S]*?(?=\n\n\[|$)/, '');
+        if (new RegExp(rule.match, 'i').test(hay)) { scripted = rule.reply; failWith = rule.error || null; break; }
       }
     } catch {}
   }

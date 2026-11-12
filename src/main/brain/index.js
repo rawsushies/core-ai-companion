@@ -222,6 +222,7 @@ class Brain {
         const model = modelFor(p, need, bc.routing);
         await p.ask({
           model: model && model !== (p.cfg && p.cfg.model) ? model : undefined,
+          effort: decision ? decision.effort : (this.profile === 'strong' ? 'high' : undefined),
           prompt: buildPrompt(p, `${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}${recap ? `\n\n${recap}` : ''}`, shot),
           tone,
           image: shot && shot.base64 ? { base64: shot.base64, mediaType: shot.mediaType || 'image/png' } : null,

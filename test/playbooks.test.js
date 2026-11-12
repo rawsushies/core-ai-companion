@@ -120,3 +120,13 @@ test('bundled examples are copied once into an empty folder', () => {
   assert.ok(list.find((s) => s.name === 'daily-briefing' && !s.enabled && s.schedule === 'weekdays 08:45'));
   assert.strictEqual(PB.seedExamples(dir, path.join(__dirname, '..', 'assets', 'skills')), 0);
 });
+
+test('a desktop workflow that worked is saved as an agent playbook and parsed back', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-pba-'));
+  const s = PB.saveAgentSkill(dir, { name: 'Export Report', goal: 'export the weekly report as PDF', steps: ['Open the report in Excel', 'Press File, then Export'], doneWhen: 'report.pdf exists' });
+  assert.strictEqual(s.name, 'export-report');
+  assert.strictEqual(s.agent, true);
+  assert.match(s.body, /1\. Open the report in Excel\n2\. Press File, then Export\n\nDone when: report\.pdf exists/);
+  assert.throws(() => PB.saveAgentSkill(dir, { name: 'export-report', goal: 'x' }), /already exists/);
+  assert.strictEqual(PB.parseSkill('---\nname: a\n---\nx').agent, false);
+});

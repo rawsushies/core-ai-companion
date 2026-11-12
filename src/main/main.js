@@ -119,6 +119,25 @@ let dockVisible = true;
 let dockHeight = 60;
 let currentPipeline = null;
 let memory = null;
+// Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
+const { CortexClient } = require('./cortex');
+const { MemoryGateway, isDecision } = require('./memgate');
+let cortexClient = null;
+let memGate = null;
+function cortexCfg() {
+  const c = (config.data.memory && config.data.memory.cortex) || {};
+  return { command: c.command || '', args: [...(c.script ? [c.script] : []), 'mcp'], vault: c.vault || '' };
+}
+function gateway() {
+  const want = JSON.stringify(cortexCfg());
+  if (!memGate || memGate.cfgKey !== want || memGate.memory !== memory) {
+    if (cortexClient) cortexClient.dispose();
+    cortexClient = new CortexClient({ cfg: cortexCfg() });
+    memGate = new MemoryGateway({ memory, cortex: cortexClient, enabled: () => !!(config.data.memory.cortex && config.data.memory.cortex.enabled) && config.data.memory.enabled !== false, queueFile: path.join(app.getPath('userData'), 'cortex-queue.json') });
+    memGate.cfgKey = want;
+  }
+  return memGate;
+}
 let reminders = null;
 let presence = null;
 const clones = new Map(); // id -> helper clone
@@ -130,6 +149,7 @@ let floor = null;
 let lastReaction = 0;
 let notes = null;
 let plugins = [];
+let lastChatAt = 0; // last ordinary message you sent (not a command)
 const PB = require('./playbooks');
 let playbooks = [];
 let playbookScheduler = null;
@@ -755,6 +775,7 @@ function centerState() {
     workflows: playbookScheduler ? playbookScheduler.upcoming() : [],
     playbooks: playbooks.map((p) => ({ name: p.name, description: p.description, core: (coreById(p.core) || { name: 'COre' }).name, schedule: p.schedule, enabled: p.enabled })),
     playbooksOn: playbooksOn(),
+    cortex: memGate ? { on: memGate.cortexOn(), last: memGate.last, pending: memGate.pending() } : { on: false },
     memory: memory ? { ...memory.stats(), enabled: config.data.memory.enabled !== false, recent: memory.conflicts.slice(0, 6).map((c) => ({ was: c.was, now: c.now, at: c.at })) } : null,
     files: { total: shelfItems.length, ready: shelfItems.filter((f) => f.status === 'ready').length, errors: shelfItems.filter((f) => f.status === 'error').length, recent: shelfItems.slice(0, 5).map((f) => ({ name: f.name, kind: f.kind, info: f.info, status: f.status })) },
     devices: {
@@ -864,6 +885,7 @@ function changeSetting(key, value) {
   SCHEMA.setPath(config.data, key, v);
   config.save();
   applyLive(key, v);
+  if (key.startsWith('events.')) startEventMonitor();
   return { ok: true, values: settingsValues(), secrets: settingsSecrets() };
 }
 
@@ -999,9 +1021,108 @@ function startMemoryEngine() {
     embedder = new Embedder({ cacheDir: path.join(app.getPath('userData'), 'models') });
     memory.setEmbedder((texts) => embedder.embed(texts));
   }
-  const pass = () => { try { const r = memory.consolidate(); if (r.merged || r.retired) toDock('dock:memory', memory.list()); } catch {} };
+  // Daily: merge near-duplicates only (their text stays in the survivor's
+  // history). Retiring old episodes deletes, so it waits for your approval in
+  // knowledge maintenance (/memory maintain, or the weekly check if enabled).
+  const pass = () => { try { const r = memory.consolidate(Date.now(), { retire: false }); if (r.merged) toDock('dock:memory', memory.list()); } catch {} };
   setTimeout(pass, 90_000);
   setInterval(pass, 24 * 3600_000).unref();
+  setInterval(() => { if ((config.data.memory || {}).maintenance === 'weekly') weeklyMaintenance().catch(() => {}); }, 6 * 3600_000).unref();
+}
+
+// Unfinished work worth mentioning (COre 2.3): a few sourced suggestions,
+// once a day at most (or on /suggest). Nothing runs until you pick one.
+const { Opportunities } = require('./opportunities');
+function opportunities() {
+  return new Opportunities({
+    agentTask: readAgentTask,
+    cortex: gateway().cortex,
+    cortexOn: () => gateway().cortexOn(),
+    automationHistory,
+    pending: () => { try { return gateway().pending(); } catch { return 0; } },
+    dismissed: state.get('dismissedSuggestions') || [],
+  });
+}
+async function showSuggestions({ quietIfNone = false } = {}) {
+  const list = await opportunities().find();
+  if (!list.length && quietIfNone) return list;
+  addTranscript('system', `${Opportunities.format(list)}${list.length ? '\nHide one with /suggest hide NUMBER.' : ''}`);
+  lastSuggestions = list;
+  toolAudit({ event: 'suggestions', count: list.length, sources: list.map((x) => x.source) });
+  return list;
+}
+let lastSuggestions = [];
+function dailySuggestions() {
+  if ((config.data.presence || {}).suggestions === false) return;
+  const last = Number(state.get('suggestedAt') || 0);
+  if (Date.now() - last < 20 * 3600e3) return;
+  state.set('suggestedAt', Date.now());
+  showSuggestions({ quietIfNone: true }).catch(() => {});
+}
+
+// /diagnostics: one readable report of what COre is running on (no secrets). The
+// JSON one for support (copyDiagnostics) is diagnostics() further down.
+async function diagnosticsReport() {
+  const rs = brain && brain.routeStatus ? brain.routeStatus() : { providers: [] };
+  const gs = await gateway().status().catch((e) => ({ cortex: `error: ${e.message}` }));
+  const sbx = SBX.detect();
+  const ag = config.data.agent || {};
+  const ev = config.data.events || {};
+  const st = memory ? memory.stats() : null;
+  let audit = [];
+  try { audit = fs.readFileSync(path.join(app.getPath('userData'), 'logs', 'tools.log'), 'utf8').trim().split('\n').slice(-300).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch {}
+  const fails = audit.filter((e) => /error|fail/i.test(String(e.event || '')) || e.status === 'failed').slice(-5);
+  const lines = [
+    `Diagnostics (${new Date().toLocaleString()}, COre ${app.getVersion()}, ${process.platform} ${require('os').release()}):`,
+    `• Brain (${rs.mode || 'auto'}): ${(rs.providers || []).map((p) => `${p.name || p.id} ${p.state}${p.firstTokenMs != null ? ` ~${Math.round(p.firstTokenMs / 100) / 10}s` : ''}${p.ok + p.fail ? ` ${p.ok}/${p.ok + p.fail} ok` : ''}${p.reason ? ` (${String(p.reason).slice(0, 60)})` : ''}`).join('; ') || 'none'}`,
+    rs.last ? `  last turn: ${rs.last.provider || ''} ${rs.last.model || ''}${rs.last.reason ? ` because ${String(rs.last.reason).slice(0, 80)}` : ''}` : '',
+    `• Memory: ${st ? `${st.total} entries (${Object.entries(st.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}), ${st.conflicts} conflicts kept` : 'off'}`,
+    `• Cortex: ${gs.cortex}${gs.pending ? `, ${gs.pending} waiting` : ''}`,
+    `• Desktop agent: ${ag.enabled ? 'on' : 'off'}, approvals ${ag.approve || 'every'}, UI Automation ${agentUia() ? 'available' : 'not available'}`,
+    `• Command sandbox: ${sbx.ok ? sbx.kind + (sbx.kind === 'job' ? ` + ${ag.sandboxWindows || 'appcontainer'}` : '') : `none (${sbx.reason})`}, mode ${ag.sandbox || 'auto'}`,
+    `• Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}, ${(ev.rules || []).length} rule(s), monitor ${eventMonitor ? 'running' : 'stopped'}`,
+    fails.length ? `• Recent problems:\n${fails.map((e) => `   ${new Date(e.at || e.ts || Date.now()).toLocaleTimeString()} ${e.event || ''} ${String(e.error || e.reason || e.status || '').slice(0, 80)}`).join('\n')}` : '• Recent problems: none logged',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+let maintenancePlan = null;
+function maintenanceReport(p) {
+  const n = p.native;
+  const lines = [`Knowledge maintenance (nothing has changed yet):`,
+    `• COre memory: ${n.total} entries; ${n.merged} near-duplicate${n.merged === 1 ? '' : 's'} to merge, ${n.retired} old unused episode${n.retired === 1 ? '' : 's'} to retire.`];
+  for (const m of n.plan.merges.slice(0, 3)) lines.push(`   merge "${String(m.merge).slice(0, 70)}" into "${String(m.keep).slice(0, 70)}"`);
+  for (const r of n.plan.retirements.slice(0, 3)) lines.push(`   retire "${String(r).slice(0, 90)}"`);
+  lines.push(`• Cortex: ${p.cortex === 'off' ? 'not connected' : String(p.cortex).split('\n').slice(0, 6).join(' / ')}`);
+  if (p.pending) lines.push(`• ${p.pending} long-term note${p.pending === 1 ? '' : 's'} waiting to be delivered to Cortex.`);
+  lines.push('Apply with /memory maintain apply (merges and delivery) or /memory maintain apply all (also retire). Cortex notes are never rewritten.');
+  return lines.join('\n');
+}
+async function memoryMaintain(arg = '') {
+  if (!memory) { addTranscript('system', 'Memory is off.'); return; }
+  const a = String(arg).trim().toLowerCase();
+  if (a.startsWith('apply')) {
+    if (!maintenancePlan || Date.now() - maintenancePlan.at > 3600_000) { addTranscript('system', 'Run /memory maintain first to see what would change.'); return; }
+    const r = await gateway().applyMaintenance(maintenancePlan, { merge: true, retire: a === 'apply all', flush: true });
+    toolAudit({ event: 'memory-maintenance', approved: a, ...r });
+    gateway().log(`Knowledge maintenance approved: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered}`, { kind: 'maintenance' }).catch(() => {});
+    maintenancePlan = null;
+    toDock('dock:memory', memory.list());
+    addTranscript('system', `Done: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered} to Cortex.`);
+    return;
+  }
+  maintenancePlan = await gateway().maintenancePlan();
+  addTranscript('system', maintenanceReport(maintenancePlan));
+}
+async function weeklyMaintenance() {
+  const last = Number(state.get ? state.get('maintenanceAt') : 0) || 0;
+  if (Date.now() - last < 7 * 864e5) return;
+  if (state.set) state.set('maintenanceAt', Date.now());
+  maintenancePlan = await gateway().maintenancePlan();
+  const n = maintenancePlan.native;
+  if (!n.merged && !n.retired && !maintenancePlan.pending && !/error|corrupt|missing/i.test(String(maintenancePlan.cortex))) return;
+  addTranscript('system', maintenanceReport(maintenancePlan));
+  toOverlay('attention', { level: 'info', title: 'Weekly knowledge check is ready' });
 }
 
 // ---------------------------------------------------------------- Google Drive memory (optional)
@@ -1452,7 +1573,7 @@ async function captureScreen() {
   const thumbnailSize = { width: Math.round(width * scale), height: Math.round(height * scale) };
 
   // Hide COre's own windows for a moment so they aren't in the screenshot.
-  const toHide = config.data.orb.hideFromCaptures === false ? [] : [overlay, dock].filter((w) => w && !w.isDestroyed() && w.isVisible());
+  const toHide = config.data.orb.hideFromCaptures === false ? [] : [overlay, dock, monitorWin, highlightWin].filter((w) => w && !w.isDestroyed() && w.isVisible());
   for (const w of toHide) w.hide();
   if (toHide.length) await new Promise((r) => setTimeout(r, 160));
   let sources;
@@ -1524,6 +1645,14 @@ function handleActionTag(item) {
   if (item.name === 'delegate') { delegate(item.core, item.task); return true; }
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
+    // Project decisions belong to long-term knowledge (Cortex) when it is connected.
+    const proj = /^#([\p{L}\p{N}_-]+)\s+/u.exec(item.text);
+    if (gateway().cortexOn() && isDecision(item.text)) {
+      gateway().remember(item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, ''), { kind: 'decision', project: proj ? proj[1] : currentProject() }).then((w) => {
+        toDock('dock:message', { role: 'system', text: w.stored === 'cortex' ? `Saved to Cortex: ${w.detail}` : w.stored === 'duplicate' ? 'Already in Cortex.' : `Kept for Cortex (${w.detail}).` });
+      }).catch(() => {});
+      return true;
+    }
     const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
     if (r && (r.created || r.replaced)) scheduleDriveSync();
     if (r && r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
@@ -1773,6 +1902,23 @@ function emergencyStop(reason = 'emergency stop') {
 // all steps" for this task). Esc or the Stop button ends it at once.
 const AG = require('./agent');
 const AT = require('./agentTools');
+const SBX = require('./sandbox');
+const { UiaClient } = require('./uia');
+let uiaClient = null;
+function agentUia() {
+  if (!UiaClient.supported() || (config.data.agent || {}).uia === false) return null;
+  if (!uiaClient) uiaClient = new UiaClient();
+  return uiaClient;
+}
+const { Situation, groundCheck } = require('./situation');
+const { appBlock } = require('./appProfiles');
+let situationInst = null;
+function situation() {
+  if (!situationInst) situationInst = new Situation({ uia: agentUia(), gateway: gateway(), memory });
+  return situationInst;
+}
+// "what am I working on", "what's on my screen", "where was I", /situation
+const SITUATION_RE = /(^\/situation\b|what('?s| is) (on )?(my|the) (screen|desktop)|what am i (looking at|working on|doing)|where (was|am) i\b|what('?s| is) open\b|(lagi|sedang) (ngerjain|mengerjakan) apa)/i;
 let agentRunner = null;
 const agentTaskFile = () => path.join(app.getPath('userData'), 'agent-task.json');
 function readAgentTask() { try { return JSON.parse(fs.readFileSync(agentTaskFile(), 'utf8')); } catch { return null; } }
@@ -1797,11 +1943,15 @@ function agentTools(taskId) {
       const c = AT.checkCommand(a.cmd);
       if (!c.ok) throw new Error(`Command refused: ${c.reason}.`);
       const cwd = files.resolve(a.cwd || '.', { mustExist: true });
-      toolAudit(`agent command: ${c.argv.join(' ')} (in ${cwd})`);
-      const r = await AT.runCommand(c.argv, { cwd, signal, timeoutMs: Math.max(5, Math.min(600, Number(ag.commandTimeout) || 60)) * 1000 });
+      // OS sandbox when available: read-only system, writes only in the project, no network, home hidden.
+      const mode = ag.sandbox || 'auto';
+      const w = mode === 'off' ? { file: c.argv[0], args: c.argv.slice(1), sandboxed: false, note: 'sandbox off' } : SBX.wrap(c.argv, { cwd, roots: files.roots, isolation: ag.sandboxWindows || 'appcontainer' });
+      if (!w.sandboxed && mode === 'required') throw new Error(`Command refused: the sandbox is required but unavailable (${w.note}).`);
+      toolAudit({ event: 'agent-command', argv: c.argv, cwd, sandboxed: w.sandboxed });
+      const r = await AT.runCommand([w.file, ...w.args], { cwd, signal, timeoutMs: Math.max(5, Math.min(600, Number(ag.commandTimeout) || 60)) * 1000 });
       const head = r.timedOut ? 'timed out' : r.aborted ? 'stopped' : `exit code ${r.code}`;
       if (r.code !== 0 && !r.out) throw new Error(head);
-      return `${head}\n${r.out}`;
+      return `${head}${w.sandboxed ? ' (sandboxed)' : ''}\n${r.out}`;
     },
     read: async (a) => files.read(a.path),
     write: async (a) => { const f = files.write(taskId, a.path, a.text); toolAudit(`agent wrote ${f}`); return `wrote ${a.text.length} characters to ${a.path}`; },
@@ -1820,6 +1970,50 @@ function reloadPlaybooks() {
   playbookScheduler.sync(playbooksOn() ? playbooks : []);
   return playbooks;
 }
+// Proactive automations (COre 2.3): permitted events start playbooks.
+// config.events = { files, windows: allowed sources (off by default),
+//   rules: [{ id, name, source, match, on?, playbook, mode: 'ask'|'auto', cooldownMin? }] }
+const { EventMonitor } = require('./events');
+let eventMonitor = null;
+const automationHistoryFile = () => path.join(app.getPath('userData'), 'automation-history.json');
+function automationHistory() { try { return JSON.parse(fs.readFileSync(automationHistoryFile(), 'utf8')) || {}; } catch { return {}; } }
+function startEventMonitor() {
+  if (eventMonitor) eventMonitor.stop();
+  const ev = config.data.events || {};
+  if (!ev.files && !ev.windows) { eventMonitor = null; return; }
+  eventMonitor = new EventMonitor({
+    getRules: () => ((config.data.events || {}).rules || []).map((r, i) => ({ id: r.id || `rule-${i + 1}`, name: r.name || r.playbook || `Rule ${i + 1}`, workflow: r.playbook, ...r })),
+    permitted: (src) => !!(config.data.events || {})[src],
+    roots: () => { try { return agentFiles().roots; } catch { return []; } },
+    listTitles: async () => { try { return (await openWindowTitles()) || []; } catch { return []; } },
+    context: async (q) => { try { return (await gateway().context(q, { budget: 900, k: 4 })).text; } catch { return ''; } },
+    history: (id) => automationHistory()[id] || [],
+    record: (id, o) => { try { const h = automationHistory(); h[id] = [...(h[id] || []), o].slice(-20); fs.writeFileSync(automationHistoryFile(), JSON.stringify(h)); } catch {} },
+    ask: async (rule, e, ctx) => {
+      const r = await dialog.showMessageBox({
+        type: 'question', buttons: ['Run it', 'Not now'], defaultId: 0, cancelId: 1, noLink: true,
+        title: 'COre automation', message: `${rule.name}: ${ctx.what}`,
+        detail: `Run the "${rule.workflow}" playbook now? It uses COre's normal tools and approvals.${ctx.history.length ? `\n\nLast run: ${ctx.history[ctx.history.length - 1].status}, ${String(ctx.history[ctx.history.length - 1].summary || '').slice(0, 120)}` : ''}`,
+      });
+      return r.response === 0;
+    },
+    runWorkflow: async (rule, e, ctx) => {
+      reloadPlaybooks();
+      const pb = playbooks.find((p) => p.name.toLowerCase() === String(rule.workflow || '').toLowerCase());
+      if (!pb) return { status: 'failed', summary: `no playbook named "${rule.workflow}"`, verified: false };
+      const event = GUARD.untrusted(ctx.what, 'event (file name or window title)').text;
+      if (pb.agent) {
+        const r = await startAgent(`${pb.name}: ${ctx.what}`.slice(0, 500), { instructions: `${pb.body}\n\n${event}\n\n${ctx.text}`.slice(0, 6000) });
+        return r ? { status: r.status, summary: r.summary || '', verified: !!r.verified } : { status: 'failed', summary: 'the desktop agent did not start', verified: false };
+      }
+      await waitPrimeIdle();
+      await handleUserText(`[automation ${rule.name}] Run the "${pb.name}" playbook for this event.\n${event}\n\n${ctx.text}`.slice(0, 8000), { internal: true, typed: true, playbook: pb });
+      return { status: 'done', summary: `handled by COre with the ${pb.name} playbook`, verified: false };
+    },
+    report: (text) => { addTranscript('system', text); toOverlay('attention', { level: 'info', title: text.slice(0, 80) }); },
+    log: (entry) => { toolAudit(entry); if (entry.event === 'monitor-outcome') gateway().log(`Automation ${entry.rule}: ${entry.what} -> ${entry.status}${entry.verified ? ' (verified)' : ''}`, { kind: 'work' }).catch(() => {}); },
+  }).start();
+}
 let playbookWatch = null;
 function watchPlaybooks() {
   let t = null;
@@ -1830,6 +2024,13 @@ async function runWorkflow(s) {
   toolAudit({ event: 'workflow', name: s.name });
   addTranscript('system', `Workflow: ${s.name} (${s.schedule}).`, { kind: 'progress' });
   noteEpisode(`Ran workflow ${s.name}`);
+  if (s.agent) {
+    // A scheduled desktop workflow runs unattended only if you allowed that; approvals still apply.
+    if ((config.data.agent || {}).background === true && (config.data.agent || {}).enabled) { startAgent(`${s.name}: ${s.description}`.slice(0, 500), { instructions: s.body }); return; }
+    addTranscript('system', `Workflow ${s.name} wants to operate the desktop. Start it with /skill ${s.name} (or allow background desktop tasks in Settings, Agent).`, { kind: 'progress' });
+    toOverlay('attention', { level: 'info', title: `Workflow ${s.name} is ready` });
+    return;
+  }
   if (s.core !== 'prime' && coreById(s.core)) await askCore(s.core, PB.skillBlock(s, 'scheduled run'));
   else { await waitPrimeIdle(); handleUserText(`[workflow ${s.name}] Run the "${s.name}" playbook now.`, { internal: true, typed: true, playbook: s }); }
 }
@@ -1841,6 +2042,17 @@ function listPlaybooks() {
 }
 // "/skill save NAME": COre writes a playbook from the conversation so far.
 async function savePlaybookFromChat(name) {
+  // Right after a finished desktop task: save exactly the steps that worked.
+  if (monitor.status === 'done' && monitor.endedAt && Date.now() - monitor.endedAt < 30 * 60e3 && lastChatAt < monitor.endedAt && monitor.steps.some((x) => x.status === 'ok')) {
+    try {
+      const steps = monitor.plan && monitor.plan.steps.length ? monitor.plan.steps : monitor.steps.filter((x) => x.status === 'ok').map((x) => x.label);
+      const s = PB.saveAgentSkill(playbookDir(), { name, goal: monitor.goal, steps, doneWhen: monitor.plan ? monitor.plan.doneWhen : '' });
+      reloadPlaybooks();
+      addTranscript('system', `Saved desktop workflow "${s.name}" (${steps.length} steps). Run it with /skill ${s.name}. File: ${s.file}`);
+      toolAudit({ event: 'playbook-saved', name: s.name, agent: true });
+    } catch (err) { addTranscript('system', `Could not save the workflow: ${err.message}`, { kind: 'error' }); }
+    return;
+  }
   const recent = transcript.filter((e) => e.role === 'user' || e.role === 'core').slice(-24).map((e) => `${e.role === 'user' ? 'User' : 'COre'}: ${String(e.text).slice(0, 1200)}`).join('\n');
   if (!recent) { addTranscript('system', 'Nothing to learn from yet: talk it through first, then save it.'); return; }
   addTranscript('system', `Writing playbook "${PB.slug(name)}" from this conversation…`, { kind: 'progress' });
@@ -1863,6 +2075,7 @@ function playbookCommand(text, { files = [] } = {}) {
   const s = playbooks.find((p) => p.name === PB.slug(run[1]));
   if (!s) { addTranscript('user', text); addTranscript('system', `No playbook called ${run[1]}. ${listPlaybooks()}`, { kind: 'error' }); return true; }
   const input = run[2].trim();
+  if (s.agent) { startAgent(`${s.name}: ${input || s.description}`.slice(0, 500), { instructions: s.body }); return true; }
   if (s.core !== 'prime' && coreById(s.core)) {
     addTranscript('user', text, { to: [s.core] });
     askCore(s.core, PB.skillBlock(s, input || 'see the files and context you have'));
@@ -1921,6 +2134,80 @@ function fileImageShot(image, name) {
   return { path: file, base64: image.base64, mediaType: image.mediaType, width: size.width, height: size.height, canPoint: false, label: `An image from the attached file "${name}"` };
 }
 
+// ---------------------------------------------------------------- agent monitor
+// A small window that follows the desktop agent: the goal, each step with its
+// result, and a click on a step highlights what it worked on, on screen.
+let monitorWin = null;
+let highlightWin = null;
+const monitor = { goal: '', status: 'idle', steps: [], startedAt: 0 };
+function sendMonitor() { if (monitorWin && !monitorWin.isDestroyed()) monitorWin.webContents.send('monitor:update', monitor); }
+function openMonitor() {
+  if (monitorWin && !monitorWin.isDestroyed()) { monitorWin.showInactive(); sendMonitor(); return; }
+  const wa = primaryDisplay().workArea;
+  monitorWin = new BrowserWindow({
+    width: 340, height: 420, x: wa.x + wa.width - 356, y: wa.y + 16, show: false, frame: false, transparent: true, backgroundColor: '#00000000',
+    alwaysOnTop: true, skipTaskbar: true, resizable: true, minWidth: 260, minHeight: 180, title: 'COre agent monitor',
+    webPreferences: { preload: path.join(PRELOAD, 'monitor.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  monitorWin.setAlwaysOnTop(true, 'floating');
+  monitorWin.loadFile(path.join(RENDERER, 'monitor', 'index.html'));
+  monitorWin.once('ready-to-show', () => { monitorWin.showInactive(); sendMonitor(); });
+  monitorWin.on('closed', () => { monitorWin = null; });
+}
+// Physical screen pixels -> a DIP rect for a window.
+function physToDip(r) {
+  const d = screen.getDisplayNearestPoint({ x: Math.round(r.x), y: Math.round(r.y) });
+  const sf = process.platform === 'win32' ? (d.scaleFactor || 1) : 1;
+  return { x: Math.round(r.x / sf), y: Math.round(r.y / sf), w: Math.max(8, Math.round(r.w / sf)), h: Math.max(8, Math.round(r.h / sf)) };
+}
+// What a step worked on, as a screen rect (DIP), or null.
+function stepTarget(a, shot) {
+  try {
+    if (a.bounds) return physToDip(a.bounds);
+    if (shot && Number.isFinite(a.x) && Number.isFinite(a.y)) {
+      const p = AG.toScreen(a, shot);
+      const sf = shot.scaleFactor || 1;
+      return { x: Math.round(p.x / sf) - 22, y: Math.round(p.y / sf) - 22, w: 44, h: 44 };
+    }
+  } catch {}
+  return null;
+}
+function highlight(rect, ms = 2400) {
+  if (!rect) return;
+  const pad = 6;
+  const b = { x: Math.round(rect.x - pad), y: Math.round(rect.y - pad), width: Math.round(rect.w + pad * 2), height: Math.round(rect.h + pad * 2) };
+  if (!highlightWin || highlightWin.isDestroyed()) {
+    highlightWin = new BrowserWindow({ ...b, show: false, frame: false, transparent: true, backgroundColor: '#00000000', alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, hasShadow: false,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    highlightWin.setIgnoreMouseEvents(true);
+    highlightWin.setAlwaysOnTop(true, 'screen-saver');
+    highlightWin.setContentProtection(true); // never in COre's own screenshots
+    highlightWin.loadFile(path.join(RENDERER, 'monitor', 'highlight.html'));
+    highlightWin.on('closed', () => { highlightWin = null; });
+  } else highlightWin.setBounds(b);
+  highlightWin.showInactive();
+  highlightWin.webContents.send('highlight:pulse');
+  clearTimeout(highlight.timer);
+  highlight.timer = setTimeout(() => { if (highlightWin && !highlightWin.isDestroyed()) highlightWin.hide(); }, ms);
+}
+function monitorStep(o) {
+  if (o.plan) { monitor.plan = o.plan; sendMonitor(); return; }
+  let s = monitor.steps.find((x) => x.step === o.step && x.label === (o.label || x.label));
+  if (o.advice) { monitor.steps.push({ step: o.step, label: `Advice: ${o.advice.replace(/_/g, ' ')}`, status: 'note', at: Date.now() }); sendMonitor(); return; }
+  if (o.error && !o.action) { monitor.steps.push({ step: o.step, label: o.error, status: 'invalid', at: Date.now() }); sendMonitor(); return; }
+  if (o.running) {
+    s = { step: o.step, label: o.label, why: (o.action && o.action.why) || '', status: 'running', at: Date.now(), target: stepTarget(o.action, o.shot) };
+    monitor.steps.push(s);
+    if (s.target && (config.data.agent || {}).highlight !== false) highlight(s.target, 1400); // show what is about to be touched
+  } else if (s && o.ok !== undefined) {
+    s.status = o.ok ? 'ok' : 'failed';
+    s.error = o.error || '';
+    s.result = o.result ? String(o.result).replace(/<<\/?untrusted[^>]*>>/g, '').slice(0, 300) : '';
+  }
+  if (monitor.steps.length > 60) monitor.steps.splice(0, monitor.steps.length - 60);
+  sendMonitor();
+}
+
 // "/do undo": put back every file the last task changed.
 function undoAgentTask() {
   const t = readAgentTask();
@@ -1949,15 +2236,33 @@ function stopAgent(reason) {
 }
 
 // Past desktop tasks and lessons that look like this goal (from memory).
+// The situation a desktop task starts from (desktop + both memory systems),
+// shared with the agent and used to file the verified outcome under its project.
+let agentSituation = null;
 async function agentExperience(goal) {
+  agentSituation = null;
   try {
+    if (agentUia()) {
+      agentSituation = await situation().describe(goal);
+      toolAudit({ event: 'situation', for: 'agent', facts: agentSituation.facts.length, projects: agentSituation.projects.map((p) => p.project), cortex: agentSituation.memory.cortex });
+      const appTips = appBlock(agentSituation.obs.active, memory); // what works in the app in front
+      return [agentSituation.prompt.slice(0, 4000), appTips].filter(Boolean).join('\n\n');
+    }
+  } catch {}
+  try {
+    if (gateway().cortexOn()) {
+      const k = await gateway().context(goal, { budget: 700, k: 4 });
+      const lines = [];
+      if (k.text) lines.push(k.text.slice(0, 2500));
+      if (lines.length) return lines.join('\n');
+    }
     if (!memory || config.data.memory.enabled === false) return '';
     const hits = (await memory.searchAsync(goal, 4, { kinds: ['episode'] })) || [];
-    return hits.map((h) => `- ${(h.item || h).text}`).filter((l) => /desktop task|lesson/i.test(l)).slice(0, 4).join('\n');
+    return hits.map((h) => `- ${(h.item || h).text}`).filter((l) => /desktop task|lesson|workflow that worked/i.test(l)).slice(0, 4).join('\n');
   } catch { return ''; }
 }
 
-async function startAgent(goal, { remote = false } = {}) {
+async function startAgent(goal, { remote = false, instructions = '' } = {}) {
   const ag = config.data.agent || {};
   if (/^undo$/i.test(goal.trim())) { addTranscript('user', '/do undo'); undoAgentTask(); return; }
   let resume = null;
@@ -1975,6 +2280,8 @@ async function startAgent(goal, { remote = false } = {}) {
   if (!driver) { addTranscript('system', 'The desktop agent works on Windows and Linux for now.', { kind: 'error' }); return; }
   if (agentRunner && agentRunner.running) { addTranscript('system', 'The agent is already working on a task. Say stop first.', { kind: 'error' }); return; }
   addTranscript('user', resume ? '/do resume' : `/do ${goal}`);
+  Object.assign(monitor, { goal, status: 'running', steps: resume ? monitor.steps : [], plan: resume ? monitor.plan : null, startedAt: Date.now() });
+  if ((config.data.agent || {}).monitor !== false) openMonitor(); else sendMonitor();
   addTranscript('system', `Agent: ${resume ? `resuming at step ${resume.step + 1}:` : 'working on'} "${goal.slice(0, 120)}". Press Esc or Stop to end it.`, { kind: 'progress' });
   toOverlay('state', 'thinking');
   try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
@@ -1983,7 +2290,22 @@ async function startAgent(goal, { remote = false } = {}) {
     perform: async (a, p) => {
       const esc = a.type === 'key' && /(^|\+)(esc|escape)$/.test(a.combo);
       if (esc) try { globalShortcut.unregister('Escape'); } catch {}
+      // The monitor never takes the agent's input: let clicks through, and move it aside if the target is under it.
+      const mon = monitorWin && !monitorWin.isDestroyed() && monitorWin.isVisible() ? monitorWin : null;
+      if (mon) {
+        mon.setIgnoreMouseEvents(true);
+        if (p) {
+          const b = mon.getBounds();
+          const q = physToDip({ x: p.x, y: p.y, w: 1, h: 1 });
+          if (q.x >= b.x - 20 && q.x <= b.x + b.width + 20 && q.y >= b.y - 20 && q.y <= b.y + b.height + 20) {
+            const wa = screen.getDisplayMatching(b).workArea;
+            const left = b.x + b.width / 2 > wa.x + wa.width / 2;
+            mon.setPosition(left ? wa.x + 16 : wa.x + wa.width - b.width - 16, b.y);
+          }
+        }
+      }
       try { return await driver.perform(a, p); } finally {
+        if (mon && !mon.isDestroyed()) mon.setIgnoreMouseEvents(false);
         if (esc) try { globalShortcut.register('Escape', () => stopAgent('you pressed Esc')); } catch {}
       }
     },
@@ -2018,6 +2340,7 @@ async function startAgent(goal, { remote = false } = {}) {
       if (r.error) throw new Error(r.error);
     },
     onStep: (o) => {
+      try { monitorStep(o); } catch {}
       if (o.advice) { addTranscript('system', `Agent: ${{ retry_same: 'trying that once more', retry_differently: 'changing approach', ask_human: 'asking you', abort: 'stopping safely' }[o.advice] || o.advice} after repeated failures.`, { kind: 'progress' }); return; }
       if (o.error) addTranscript('system', `Agent step ${o.step}: ${o.error}`, { kind: 'error' });
       else if (o.running) addTranscript('system', `Agent step ${o.step}: ${o.label}${o.action.why ? ` (${o.action.why})` : ''}`, { kind: 'progress' });
@@ -2032,12 +2355,22 @@ async function startAgent(goal, { remote = false } = {}) {
     },
     checkpoint: (st) => writeAgentTask({ ...st, taskId }),
     advise: (info) => decider.adviseFailure(info),
-    experience: await agentExperience(goal),
+    approvePlan: ag.approve === 'plan' ? (plan) => new Promise((resolve) => {
+      const id = require('crypto').randomUUID();
+      agentApprovals.set(id, { resolve });
+      toDock('dock:agent-approve', { id, step: 'Plan', label: `${plan.steps.length} steps: ${plan.steps.map((x, i) => `${i + 1}. ${x}`).join('  ')}`.slice(0, 400), why: plan.doneWhen ? `Done when: ${plan.doneWhen}` : 'Approve to let COre carry it out without asking each step.', forced: true });
+    }) : null,
+    uia: agentUia(),
+    experience: [instructions ? `Saved workflow to follow:\n${String(instructions).slice(0, 3000)}` : '', await agentExperience(goal)].filter(Boolean).join('\n'),
   });
   let r;
   try { r = await agentRunner.run(goal, { resume }); } catch (err) { r = { status: 'failed', reason: err.message }; }
   try { globalShortcut.unregister('Escape'); } catch {}
   { const t = readAgentTask(); if (t && t.taskId === taskId) writeAgentTask({ ...t, status: r.status }); }
+  monitor.status = r.status;
+  monitor.endedAt = Date.now();
+  monitor.summary = r.summary || r.question || r.reason || '';
+  sendMonitor();
   toDock('dock:agent-approve', null);
   toOverlay('state', 'idle');
   const msg = r.status === 'done' ? `Agent finished: ${r.summary || 'done'}`
@@ -2048,11 +2381,27 @@ async function startAgent(goal, { remote = false } = {}) {
   if (r.status !== 'done' && r.status !== 'ask') addTranscript('system', 'Type /do resume to continue this task later.');
   toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
   noteEpisode(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`);
+  // Learn what worked: the successful steps of a finished task, for next time.
+  if (r.status === 'done') {
+    const okSteps = (r.steps || []).filter((h) => h.ok && !/^said done/.test(h.label)).map((h) => h.label);
+    if (okSteps.length) noteEpisode(`Workflow that worked for desktop task "${goal.slice(0, 80)}": ${okSteps.slice(0, 10).join(' → ')}`);
+    if (okSteps.length >= 3) addTranscript('system', 'To reuse this task later, save it: /skill save a-short-name');
+  }
+  // Verified outcomes go to the shared logbook; lessons to the project in Cortex.
+  gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work' }).catch(() => {});
+  // A task the agent re-checked and confirmed updates the project's knowledge
+  // (Cortex, deduplicated). Unverified claims are never filed as knowledge.
+  if (r.status === 'done' && r.verified && r.summary) {
+    const proj = (agentSituation && agentSituation.projects[0] && agentSituation.projects[0].project) || currentProject();
+    if (proj) gateway().remember(`Verified on the desktop: ${r.summary.slice(0, 200)} (task "${goal.slice(0, 80)}")`, { kind: 'knowledge', project: proj }).catch(() => {});
+  }
   // Learn from mistakes: what failed on the way, and what finally worked.
   const failed = (r.steps || []).filter((h) => !h.ok && !/^invalid/.test(h.label)).map((h) => `${h.label} (${String(h.error || '').slice(0, 60)})`);
   if (failed.length) {
     const worked = (r.steps || []).filter((h) => h.ok && h.changed).slice(-2).map((h) => h.label).join(', ');
-    noteEpisode(`Lesson from desktop task "${goal.slice(0, 80)}": ${failed.slice(0, 3).join('; ')} did not work${r.status === 'done' && worked ? `; what worked: ${worked}` : ''}.`);
+    const lesson = `Lesson from desktop task "${goal.slice(0, 80)}": ${failed.slice(0, 3).join('; ')} did not work${r.status === 'done' && worked ? `; what worked: ${worked}` : ''}.`;
+    noteEpisode(lesson);
+    if (r.status === 'done') gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop' }).catch(() => {});
   }
   if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
   return r;
@@ -2327,8 +2676,16 @@ function cloneObstacles(except) {
   const d = primaryDisplay();
   const r = orbBounds.r || 60;
   const out = [CL.orbRect(d.bounds.x + orbBounds.x, d.bounds.y + orbBounds.y, r)];
-  if (dock && !dock.isDestroyed() && dock.isVisible()) out.push(dock.getBounds());
-  for (const c of clones.values()) if (c !== except && c.slot) out.push({ x: c.slot.x - CLONE_WIN * 0.4, y: c.slot.y - CLONE_WIN * 0.4, w: CLONE_WIN * 0.8, h: CLONE_WIN * 0.8 });
+  // Electron rects are { width, height }; placement checks { w, h }. (Before
+  // this, the chat was never avoided and helpers could spawn on top of it.)
+  if (dock && !dock.isDestroyed() && dock.isVisible()) {
+    // Reserve the column the chat can grow into (up to 460 px, up or down).
+    const b = dock.getBounds();
+    const top = Math.min(b.y, b.y + b.height - 460);
+    const bottom = Math.max(b.y + 460, b.y + b.height);
+    out.push({ x: b.x - 24, y: top - 24, w: b.width + 48, h: bottom - top + 48 });
+  }
+  for (const c of clones.values()) if (c !== except && c.slot) out.push({ x: c.slot.x - CLONE_WIN / 2, y: c.slot.y - CLONE_WIN / 2, w: CLONE_WIN, h: CLONE_WIN });
   return out;
 }
 
@@ -2386,7 +2743,7 @@ function ensureHelper(coreId) {
   const r = cloneRadius();
   const d = primaryDisplay();
   const from = { x: d.bounds.x + orbBounds.x, y: d.bounds.y + orbBounds.y };
-  const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: Math.max(r * 5.2, CLONE_WIN * 0.8), near: from });
+  const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: CLONE_WIN, near: from }); // the whole window stays clear
   if (!slot) { addTranscript('system', `No free spot on the screen for ${core.name}.`, { kind: 'error' }); return null; }
   const look = { name: core.name, tint: hexTint(core.color), color: core.color, voice: core.voice, semitones: core.semitones };
   const c = { id: core.id, core, look, name: core.name, r, slot, state: 'idle', brain: null, win: null, ac: new AbortController(), queue: Promise.resolve(), busy: 0 };
@@ -2441,7 +2798,7 @@ function routedConfig(kind) {
   const strong = b.claude && b.claude.strongModel;
   if (b.routing === 'off' || !strong || strong === b.claude.model) return config.data;
   if (!['agent', 'playbook', 'forge', 'sentinel', 'navigator', 'archivist', 'scout'].includes(kind)) return config.data;
-  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong, fallbackModel: b.claude.model } } };
+  return { ...config.data, brain: { ...b, claude: { ...b.claude, model: strong, fallbackModel: b.claude.model, effort: b.claude.effort || 'high' } } }; // deep work keeps its warm session at high effort
 }
 
 function helperBrain(c) {
@@ -2463,7 +2820,7 @@ function disposeHelperBrain(c) {
 async function archivistContext(text) {
   const parts = [];
   if (memory && config.data.memory.enabled !== false) {
-    const mem = await memory.contextForAsync(text, 14);
+    const mem = (await gateway().context(text, { budget: 2400, k: 14 })).text;
     if (mem) parts.push(mem);
     const st = memory.stats();
     parts.push(`[Memory stats] ${st.total} memories (${Object.entries(st.byKind).map(([k, n]) => `${k} ${n}`).join(', ')}), ${st.pinned} pinned.`);
@@ -2481,6 +2838,28 @@ async function archivistContext(text) {
   return parts.join('\n\n');
 }
 
+// What the specialists produced, so the cores can read each other: Prime gets
+// results it has not seen yet (and the latest from any core you name), and a
+// specialist sees what the others did recently.
+const coreResults = []; // { id, core, name, ask, reply, at, seenByPrime }
+function noteCoreResult(c, ask, reply) {
+  coreResults.push({ id: `${c.id}-${Date.now()}`, core: c.id, name: c.name, ask: String(ask).slice(0, 300), reply: String(reply).slice(0, 6000), at: Date.now(), seenByPrime: false });
+  if (coreResults.length > 12) coreResults.shift();
+}
+function coreResultsFor(reader, text = '') {
+  const low = String(text).toLowerCase();
+  const named = new Set(cores.filter((c) => c.id !== 'prime' && low.includes(c.name.toLowerCase())).map((c) => c.id));
+  let picks;
+  if (reader === 'prime') {
+    const latestNamed = [...named].map((id) => [...coreResults].reverse().find((r) => r.core === id)).filter(Boolean);
+    picks = [...new Set([...coreResults.filter((r) => !r.seenByPrime), ...latestNamed])].slice(-4);
+    for (const r of picks) r.seenByPrime = true;
+  } else picks = coreResults.filter((r) => r.core !== reader).slice(-2);
+  if (!picks.length) return '';
+  const per = reader === 'prime' ? 1500 : 1200;
+  return `[Specialists' work] What your cores produced (you can use and refer to it):\n${picks.map((r) => `- ${r.name}, asked "${r.ask}":\n${r.reply.length > per ? `${r.reply.slice(0, per)}…` : r.reply}`).join('\n')}`;
+}
+
 function askCore(coreId, text, { task, review = false } = {}) {
   const c = ensureHelper(coreId);
   if (!c) return Promise.resolve({ ok: false, error: 'not available' });
@@ -2493,8 +2872,10 @@ function askCore(coreId, text, { task, review = false } = {}) {
     const ac = new AbortController();
     c.ac = ac;
     try {
-      const context = c.id === 'archivist' ? await archivistContext(text)
-        : memory && config.data.memory.enabled !== false ? (await memory.contextForAsync(text)) || '' : '';
+      const base = c.id === 'archivist' ? await archivistContext(text)
+        : memory && config.data.memory.enabled !== false ? (await gateway().context(text, { budget: 1000, k: 5 })).text || '' : ''; // same gateway as Prime: COre memory + Cortex
+      const others = coreResultsFor(c.id, text);
+      const context = [base, others].filter(Boolean).join('\n\n');
       // Up to 3 rounds of read-only project tools before the final answer.
       let msg = CL.corePrompt(c.core, text, task);
       let reply = ''; let truncated = false; let error = null;
@@ -2511,6 +2892,7 @@ function askCore(coreId, text, { task, review = false } = {}) {
       // (or the whole answer if that's all there is).
       const details = full.split(/\n\s*\n/).slice(1).join('\n\n').trim();
       addTranscript('core', details || full || '(no answer)', { author: c.id, ...(task ? { task: task.id } : {}) });
+      if (full) noteCoreResult(c, text, full);
       offerProposals(full, c.id);
       // Navigator hands a plan to the desktop agent: you start it (Enter).
       const navTask = c.id === 'navigator' && /^\s*Task:\s*(.{4,300})$/im.exec(full);
@@ -2793,6 +3175,28 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/clone\s+\S/i.test(text)) { delegate(null, text.replace(/^\/clone\s+/i, '')); return; }
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
+    if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
+    if (/^\/(diagnostics|diag|health)\s*$/i.test(text)) { addTranscript('user', text); diagnosticsReport().then((r) => addTranscript('system', r)).catch((err) => addTranscript('system', `Diagnostics failed: ${err.message}`)); return; }
+    { const sg = /^\/suggest(?:ions?)?\b\s*(?:hide\s+(\d+))?\s*$/i.exec(text); if (sg) {
+      addTranscript('user', text);
+      if (sg[1]) { const it = lastSuggestions[Number(sg[1]) - 1]; if (it) { state.set('dismissedSuggestions', [...(state.get('dismissedSuggestions') || []), it.id].slice(-200)); addTranscript('system', 'Hidden.'); } return; }
+      showSuggestions().catch((err) => addTranscript('system', `Could not check: ${err.message}`));
+      return;
+    } }
+    { const mm = /^\/memory\s+maintain\b\s*(.*)$/i.exec(text); if (mm) { addTranscript('user', text); memoryMaintain(mm[1]).catch((err) => addTranscript('system', `Maintenance failed: ${err.message}`)); return; } }
+    if (/^\/automations?\s*$/i.test(text)) {
+      addTranscript('user', text);
+      startEventMonitor(); // picks up edited rules
+      const ev = config.data.events || {};
+      const rules = ev.rules || [];
+      addTranscript('system', `Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}.${rules.length ? `\n${rules.map((r) => `• ${r.name || r.playbook}: ${r.source} "${r.match}" -> ${r.playbook} (${r.mode || 'ask'})${r.enabled === false ? ' (off)' : ''}`).join('\n')}` : ' No rules yet: add them under events.rules in Settings, Advanced.'}`);
+      return;
+    }
+    if (/^\/cortex\s*$/i.test(text)) {
+      addTranscript('user', text);
+      gateway().status().then((st) => addTranscript('system', `Cortex: ${st.cortex}${st.pending ? ` · ${st.pending} waiting to be saved` : ''}${st.health ? `\n${st.health}` : ''}`)).catch(() => {});
+      return;
+    }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
     if (ctl) {
@@ -2850,6 +3254,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   if (typed || internal) followUpPending = false;
   const fileCtx = files.length ? fileShelf().contextFor(files) : null;
   if (!internal) {
+    lastChatAt = Date.now();
     addTranscript('user', text, fileCtx ? { files: fileCtx.names } : {});
     if (presence) presence.noteInteraction();
     stopCloneSpeech(); // the user talking to COre interrupts a specialist; COre's own turns don't
@@ -2878,16 +3283,23 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // Context for the model: relevant memories, and the clipboard when asked about it.
   // (Never let a context problem stop the message itself.)
   const contextBlocks = [];
+  let situationNow = null;
   try {
     if (memory && config.data.memory.enabled !== false) {
-      const mem = await memory.contextForAsync(text);
+      const mem = (await gateway().context(text)).text; // active memory + long-term knowledge
       if (mem) contextBlocks.push(mem);
+    }
+    if (SITUATION_RE.test(text) && !internal) {
+      situationNow = await situation().describe(text.replace(/^\/situation\s*/i, ''));
+      contextBlocks.push(situationNow.prompt);
+      toolAudit({ event: 'situation', facts: situationNow.facts.length, projects: situationNow.projects.map((p) => p.project), cortex: situationNow.memory.cortex });
     }
     if (fileCtx) {
       contextBlocks.push(fileCtx.block);
       if (fileCtx.image && !shot) shot = fileImageShot(fileCtx.image, fileCtx.imageName);
       if (fileCtx.flags.length) toolAudit({ guard: 'injection-suspected', source: `files ${fileCtx.names.join(', ')}`, flags: fileCtx.flags });
     }
+    { const work = coreResultsFor('prime', text); if (work) contextBlocks.push(work); }
     if (playbook) contextBlocks.push(PB.skillBlock(playbook));
     else if (playbooksOn() && playbooks.length && !internal) {
       for (const s of PB.matchSkills(playbooks, text)) contextBlocks.push(PB.skillBlock(s));
@@ -2951,6 +3363,11 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       },
     });
     if (reply) addTranscript('core', reply);
+    if (reply && situationNow) {
+      // Names in the answer that nothing on screen or in memory backs.
+      const g = groundCheck(reply, situationNow.facts, situationNow.memory.text);
+      if (!g.ok) addTranscript('system', `Not seen on screen or in memory: ${g.unsupported.slice(0, 5).map((u) => `"${u}"`).join(', ')}. Treat ${g.unsupported.length > 1 ? 'these' : 'this'} as unverified.`);
+    }
     if (decision) toolAudit({ event: 'route', task: decision.task, complexity: decision.complexity, effort: decision.effort, specialist: decision.specialist, source: decision.source, ms: decision.ms, provider: (brain.lastRoute || {}).provider, model: (brain.lastRoute || {}).model });
     if (reply) offerProposals(reply, 'prime');
     if (truncated) {
@@ -3121,6 +3538,19 @@ function wireIpc() {
     setDockVisible(true, true);
     toDock('dock:recipient', c.id);
   });
+  // Drag a specialist by its orb: the window follows; where you drop it, it stays.
+  ipcMain.on('clone:drag', (e, d = {}) => {
+    const c = cloneFrom(e);
+    if (!c || !c.win || c.win.isDestroyed() || c.merging) return;
+    if (d.phase === 'start') { const [x, y] = c.win.getPosition(); c.dragFrom = { x, y }; return; }
+    if (d.phase === 'end') { c.dragFrom = null; return; }
+    if (!c.dragFrom || !Number.isFinite(+d.dx) || !Number.isFinite(+d.dy)) return;
+    const wa = screen.getDisplayMatching(c.win.getBounds()).workArea;
+    const x = Math.round(Math.min(Math.max(c.dragFrom.x + Number(d.dx), wa.x - CLONE_WIN / 3), wa.x + wa.width - CLONE_WIN * 2 / 3));
+    const y = Math.round(Math.min(Math.max(c.dragFrom.y + Number(d.dy), wa.y - CLONE_WIN / 3), wa.y + wa.height - CLONE_WIN * 2 / 3));
+    c.win.setPosition(x, y);
+    c.slot = { x: x + CLONE_WIN / 2, y: y + CLONE_WIN / 2 };
+  });
   ipcMain.on('clone:interaction', (e, kind) => { const c = cloneFrom(e); if (c && kind === 'poke') mergeClone(c.id); });
   ipcMain.on('orb:interaction', (e, kind) => { if (fromOverlay(e) && ['pet', 'tickle', 'poke', 'toss'].includes(kind)) onInteraction(kind); });
   ipcMain.on('orb:anchor', (e, a) => {
@@ -3145,6 +3575,11 @@ function wireIpc() {
     const { text, files } = typeof payload === 'string' ? { text: payload } : (payload || {});
     handleUserText(String(text || ''), { typed: true, files: Array.isArray(files) ? files.slice(0, 10).map(String) : [] });
   });
+  const fromMonitor = (e) => isFrom(monitorWin, e);
+  ipcMain.handle('monitor:state', (e) => (fromMonitor(e) ? monitor : null));
+  ipcMain.on('monitor:highlight', (e, i) => { if (!fromMonitor(e)) return; const st = monitor.steps[Number(i)]; if (st && st.target) highlight(st.target); });
+  ipcMain.on('monitor:stop', (e) => { if (fromMonitor(e)) stopAgent('you pressed Stop in the monitor'); });
+  ipcMain.on('monitor:close', (e) => { if (fromMonitor(e)) monitorWin.close(); });
   const fromCenter = (e) => isFrom(centerWin, e);
   ipcMain.handle('center:state', (e) => (fromCenter(e) ? centerState() : null));
   ipcMain.handle('center:action', (e, { name, arg } = {}) => (fromCenter(e) ? centerAction(String(name || ''), arg == null ? '' : String(arg)) : null));
@@ -3589,7 +4024,17 @@ app.whenReady().then(async () => {
   // A task cut off by a crash or quit can pick up where it stopped.
   setTimeout(() => {
     const t = readAgentTask();
-    if (t && t.status === 'running' && Date.now() - (t.at || 0) < 7 * 864e5) addTranscript('system', `An agent task was interrupted at step ${t.step}: "${String(t.goal).slice(0, 80)}". Type /do resume to continue it.`);
+    if (!(t && t.status === 'running' && Date.now() - (t.at || 0) < 7 * 864e5)) return;
+    const ag = config.data.agent || {};
+    // Resume on its own only if you allowed it (agent.autoResume plus background
+    // desktop tasks), and only recent tasks; approvals still apply to every step.
+    if (ag.enabled && ag.autoResume === true && ag.background === true && Date.now() - (t.at || 0) < 2 * 3600e3) {
+      addTranscript('system', `Resuming the interrupted agent task at step ${t.step}: "${String(t.goal).slice(0, 80)}". Press Esc to stop it.`, { kind: 'progress' });
+      toolAudit({ event: 'agent-auto-resume', step: t.step });
+      startAgent('resume');
+      return;
+    }
+    addTranscript('system', `An agent task was interrupted at step ${t.step}: "${String(t.goal).slice(0, 80)}". Type /do resume to continue it.`);
   }, 4000);
   notes = new SK.Notes(path.join(userData, 'notes.json'));
   refreshCores();
@@ -3622,6 +4067,9 @@ app.whenReady().then(async () => {
   PB.seedExamples(playbookDir(), path.join(__dirname, '..', '..', 'assets', 'skills'));
   reloadPlaybooks();
   watchPlaybooks();
+  try { startEventMonitor(); } catch (err) { console.error("[core] automations failed to start:", err.message); }
+  setTimeout(dailySuggestions, 120_000);
+  setInterval(dailySuggestions, 3 * 3600e3).unref();
   setTimeout(checkAutoBackup, 60_000);
   syncPhone();
   watchPower();
@@ -3724,6 +4172,7 @@ app.on('will-quit', () => {
   stopGlanceReader();
   if (companion) companion.stop();
   stopAgent('quitting');
+  try { if (uiaClient) uiaClient.dispose(); if (cortexClient) cortexClient.dispose(); } catch {}
   try { if (playbookScheduler) playbookScheduler.stop(); if (playbookWatch) playbookWatch.close(); } catch {}
   if (embedder) embedder.dispose();
   globalShortcut.unregisterAll();

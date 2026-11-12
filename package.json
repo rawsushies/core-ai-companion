@@ -12,7 +12,8 @@
     "test": "node --test test/*.test.js",
     "check": "node scripts/check-syntax.js",
     "dist": "electron-builder --win nsis --x64",
-    "e2e": "node --test --test-concurrency=1 test-e2e/app.e2e.js"
+    "e2e": "node --test --test-concurrency=1 test-e2e/app.e2e.js",
+    "benchmark": "node scripts/benchmark.js --out docs/BENCHMARKS.md"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",

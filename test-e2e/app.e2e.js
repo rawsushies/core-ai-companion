@@ -30,6 +30,9 @@ const errors = [];
 // A local stand-in for a second AI provider (OpenAI-compatible, streaming) and
 // for Jev's decision endpoint, so routing and failover run in the real app.
 const fake = { chats: [], decisions: [], jevAnswers: null, port: 0, server: null };
+// The real Cortex knowledge vault (MCP), when a checkout is available (CI clones it).
+const CORTEX_DIR = [process.env.CORTEX_DIR, path.join(__dirname, '..', '..', 'rawsushies', 'cortex-ai-brain')].find((d) => d && fs.existsSync(path.join(d, 'run.py')));
+const cortexVault = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-vault-'));
 function startFakeProviders() {
   const http = require('http');
   const server = http.createServer((req, res) => {
@@ -69,12 +72,13 @@ test.before(async () => {
   const player = JSON.stringify({ status: 'Playing', posUs: 64000000, lenUs: 201000000, artUrl: require('url').pathToFileURL(cover).href, artist: 'The Smoke Choir', album: 'Signals', title: 'Midnight Signal' });
   script = path.join(userData, 'fake-script.json');
   fs.writeFileSync(script, JSON.stringify(baseRules = [
-    { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
-    { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
-    { match: 'Review the file changes', reply: 'Looks fine.\n\nThe readme change is plain text. Verdict: ship it' },
-    { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
+    // Cores see each other's work in their prompts: most specific rules first.
     { match: 'open my downloads folder', reply: 'I would open the file manager.\n\n1. Open Files\n2. Click Downloads\nTask: open the Downloads folder in the file manager' },
     { match: 'Memory stats\\] \\d+ memories', reply: 'From memory.\n\nArchivist checked: green tea, noted earlier.' },
+    { match: 'Review the file changes', reply: 'Looks fine.\n\nThe readme change is plain text. Verdict: ship it' },
+    { match: 'rewrite the readme', reply: '{core} here, proposing it.\n\n```txt file=readme.txt\nnew readme from forge\n```' },
+    { match: 'remember my tea', reply: 'Got it. [[remember the user likes green tea]]' },
+    { match: 'set a tea timer', reply: 'Timer on. [[do timer 10m tea]]' },
   ]));
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
     orb: { graphics: 'software' },
@@ -85,18 +89,20 @@ test.before(async () => {
       jev: { enabled: true, provider: 'typesafe', endpoint: `http://127.0.0.1:${fake.port}`, timeoutMs: 2000 },
       secrets: { jev: 'plain:test-jev-key' },
     },
+    ...(CORTEX_DIR ? { memory: { cortex: { enabled: true, command: process.platform === 'win32' ? 'python' : 'python3', script: path.join(CORTEX_DIR, 'run.py'), vault: cortexVault } } } : {}),
     voice: { tts: false },
     presence: { chitchat: false },
     update: { enabled: false },
     phone: { host: '127.0.0.1', port: 0 },
     tools: { projectRoot: project, enabled: true, allowWrites: true },
     skills: { lyrics: false }, // no network in tests
+    events: { files: true, rules: [{ name: 'CSV intake', source: 'files', match: 'intake-*.csv', on: 'created', playbook: 'csv-intake', mode: 'auto', cooldownMin: 0 }] },
   }));
   fs.writeFileSync(path.join(userData, 'state.json'), JSON.stringify({ onboarded: true }));
   app = await electron.launch({
     args: ['--no-sandbox', ROOT, `--user-data-dir=${userData}`],
     cwd: ROOT,
-    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_CLAUDE_ARGS: path.join(userData, 'fake-args.log'), FAKE_PLAYER: player,
+    env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_REPLY: 'Smoke says hi. SQLite is the lighter choice.', CORE_E2E_PAIR_ALLOW: '1', FAKE_CLAUDE_SCRIPT: script, FAKE_CLAUDE_ARGS: path.join(userData, 'fake-args.log'), FAKE_CLAUDE_PROMPTS: process.env.E2E_PROMPTS || '', FAKE_PLAYER: player,
       PATH: `${path.join(ROOT, 'test', 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}` },
     timeout: 60000,
   });
@@ -293,6 +299,40 @@ test('Meiosis: @Scout splits off and answers with its own name', async () => {
   assert.ok(clone || app.windows().length >= 4, 'a helper window exists');
 });
 
+test('cores read each other: Prime knows what Scout found; helpers spawn clear of the chat and can be dragged', async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: "Specialists' work[\\s\\S]*Scout found: the blue tent", full: true, reply: 'Scout already checked: the blue tent wins.' },
+    { match: 'pick a tent for me', reply: 'Comparing.\n\nScout found: the blue tent is lighter and cheaper.' },
+    ...baseRules,
+  ]));
+  await send('@Scout pick a tent for me');
+  await dock.waitForFunction(() => /Scout found: the blue tent/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  await send('what did scout decide?');
+  await dock.waitForFunction(() => /Scout already checked: the blue tent wins/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+  // Placement: the helper's window never overlaps the chat (after its split animation).
+  await wait(1800);
+  const rects = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.isVisible()).map((w) => ({ url: w.webContents.getURL(), b: w.getBounds() })));
+  const chat = rects.find((r) => r.url.includes('/dock/')).b;
+  const helper = rects.find((r) => /clone/.test(r.url));
+  assert.ok(helper, 'Scout is on screen');
+  const h = helper.b;
+  assert.ok(h.x >= chat.x + chat.width || h.x + h.width <= chat.x || h.y >= chat.y + chat.height || h.y + h.height <= chat.y, `helper ${JSON.stringify(h)} clear of chat ${JSON.stringify(chat)}`);
+  // Drag it with the real mouse by its orb.
+  if (process.platform === 'linux' && fs.existsSync('/usr/bin/xdotool')) {
+    const x = require('child_process');
+    const cx = h.x + h.width / 2; const cy = h.y + h.height / 2;
+    x.execFileSync('xdotool', ['mousemove', String(cx), String(cy)]);
+    await wait(500); // helpers are click-through until the pointer rests over their smoke
+    x.execFileSync('xdotool', ['mousedown', '1']);
+    for (let i = 1; i <= 6; i++) { x.execFileSync('xdotool', ['mousemove', String(cx - i * 25), String(cy + i * 10)]); await wait(40); }
+    x.execFileSync('xdotool', ['mouseup', '1']);
+    await wait(300);
+    const after = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => /clone/.test(w.webContents.getURL())).getBounds());
+    assert.ok(Math.abs(after.x - (h.x - 150)) <= 12 && Math.abs(after.y - (h.y + 60)) <= 12, `moved with the mouse: ${JSON.stringify(after)} from ${JSON.stringify(h)}`);
+  }
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('a shared task shows a live card with each specialist', async () => {
   await send('@Scout @Sentinel compare SQLite and LevelDB');
   await overlay.waitForFunction(() => { const g = window.__coreGlance(); return g && g.kind === 'task'; }, null, { timeout: 15000 });
@@ -377,6 +417,19 @@ test('desktop agent: /do clicks and types into another window, with step approva
   await dock.waitForFunction(() => /Agent finished: typed the greeting/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
   const value = await app.evaluate(() => global.__agentTarget.webContents.executeJavaScript("document.getElementById('t').value"));
   assert.strictEqual(value, 'hello from the agent');
+  // The monitor followed the task; a click on the click step outlines that spot on screen.
+  const mon = app.windows().find((p) => p.url().includes('/monitor/index.html'));
+  assert.ok(mon, 'the agent monitor opened with the task');
+  await mon.waitForFunction(() => window.__monitorReady && /Finished/.test(document.getElementById('status').textContent), null, { timeout: 8000 });
+  assert.match(await mon.textContent('#goal'), /type a greeting into the box/);
+  const labels = await mon.$$eval('#steps li .label', (n) => n.map((x) => x.textContent));
+  assert.ok(labels.some((l) => /^Click at/.test(l)) && labels.some((l) => /^Type "hello from the agent"/.test(l)), JSON.stringify(labels));
+  await mon.click('#steps li.has-target');
+  await wait(400);
+  const hl = await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('highlight.html')); return w && w.isVisible() ? w.getBounds() : null; });
+  assert.ok(hl, 'the highlight is on screen');
+  const cxDip = hl.x + hl.width / 2; const cyDip = hl.y + hl.height / 2;
+  assert.ok(Math.abs(cxDip - 310) <= 8 && Math.abs(cyDip - 190) <= 8, `outline centred on the clicked spot: ${JSON.stringify(hl)}`);
   await app.evaluate(() => { global.__agentTarget.destroy(); });
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
 });
@@ -416,6 +469,12 @@ test('desktop agent: tools write a file and run a command (always asked), result
   await send('/do undo');
   await dock.waitForFunction(() => /Undone: 1 file/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
   assert.ok(!fs.existsSync(path.join(project, 'notes.txt')));
+  // What worked can be saved as a reusable desktop playbook (built from the real steps).
+  await send('/skill save note-writer');
+  await dock.waitForFunction(() => /Saved desktop workflow "note-writer"/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  const pb = fs.readFileSync(path.join(userData, 'skills', 'note-writer', 'SKILL.md'), 'utf8');
+  assert.match(pb, /agent: true/);
+  assert.match(pb, /1\. Write notes\.txt/);
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
@@ -631,6 +690,101 @@ test('failover with continuity: Claude hits its usage limit mid-conversation, th
   fs.writeFileSync(script, JSON.stringify(baseRules));
   await settings.evaluate(() => window.settingsApi.set('brain.mode', 'manual'));
   await settings.evaluate(() => window.settingsApi.set('brain.mode', 'auto'));
+});
+
+test('memory gateway with the real Cortex: a decision goes to the vault, comes back with its source, and COre answers from it', { skip: !CORTEX_DIR && 'no Cortex checkout' }, async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: "\\[Knowledge\\][\\s\\S]*glass facade", full: true, reply: 'From your notes in Cortex (Projects/Tower.md): the client chose a glass facade.' },
+    { match: 'note the facade decision', reply: 'Noted. [[remember #Tower we decided the client wants a glass facade]]' },
+    ...baseRules,
+  ]));
+  await send('/cortex');
+  await dock.waitForFunction(() => /Cortex: connected/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  await send('note the facade decision');
+  await dock.waitForFunction(() => /Saved to Cortex: Projects\/Tower\.md › Decisions/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  assert.match(fs.readFileSync(path.join(cortexVault, 'Projects', 'Tower.md'), 'utf8'), /we decided the client wants a glass facade/);
+  await send('what facade does the tower client want?');
+  await dock.waitForFunction(() => /From your notes in Cortex \(Projects\/Tower\.md\)/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('PHASE 4 ACCEPTANCE: instruction -> knowledge -> specialist -> plan -> tools with a failure and recovery -> verified -> long-term memory', { skip: (process.platform !== 'linux' || !CORTEX_DIR) && 'needs Linux and a Cortex checkout' }, async () => {
+  // Knowledge from the earlier Cortex test: Projects/Tower.md says the client wants a glass facade.
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    { match: '^(?=[\\s\\S]*\\[Knowledge\\][\\s\\S]*glass facade)(?=[\\s\\S]*which facade)', full: true, reply: 'Per Projects/Tower.md the Tower client chose a glass facade.' },
+    { match: 'reply done again', reply: 'Checked: brief.txt has the facade decision. [[act {"type":"done","summary":"facade brief written and checked"}]]' },
+    { match: 'Step 3 of', reply: 'Written. [[act {"type":"done","summary":"facade brief written"}]]' },
+    { match: 'Step 1 of', reply: 'First, check for an existing brief. [[act {"type":"run","cmd":"node -e process.exit(3)","why":"look for an existing brief"}]]' },
+    { match: '^(?=[\\s\\S]*Step 2 of)(?=[\\s\\S]*glass facade)', full: true, reply: 'The check failed, writing the brief from the project notes instead. [[act {"type":"write","path":"brief.txt","text":"Tower facade: glass (client decision, Projects/Tower.md)","why":"save the brief"}]]' },
+    ...baseRules,
+  ]));
+  // 1. A specialist answers from long-term knowledge, routed and recorded.
+  await send('@Scout which facade did the Tower client choose?');
+  try {
+    await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-scout .msg')].some((m) => /Per Projects\/Tower\.md the Tower client chose a glass facade/.test(m.innerText)), null, { timeout: 30000 });
+  } catch (err) { console.log('LOG:', (await dock.evaluate(() => document.getElementById('log').innerText)).slice(-1500)); throw err; }
+  // 2. A desktop task: a command fails, the agent recovers, writes, re-checks.
+  await send('/do write a short Tower facade brief');
+  try {
+    await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Run/.test(document.getElementById('agent-label').textContent), null, { timeout: 30000 });
+  } catch (err) { console.log('LOG:', (await dock.evaluate(() => `${document.getElementById('agent-label').textContent} || ${document.getElementById('log').innerText.slice(-800)}`))); throw err; }
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write brief\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 30000 });
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => /Agent finished: facade brief written and checked/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  // 3. Verified from the result itself, not the agent's claim.
+  assert.strictEqual(fs.readFileSync(path.join(project, 'brief.txt'), 'utf8'), 'Tower facade: glass (client decision, Projects/Tower.md)');
+  const audit = fs.readFileSync(path.join(userData, 'logs', 'tools.log'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } });
+  assert.ok(audit.some((e) => e.event === 'agent-command' && /exit\(3\)/.test(JSON.stringify(e.argv))), 'the failing command really ran');
+  assert.ok(audit.some((e) => e.event === 'route'), 'turns were routed');
+  // 4. The verified outcome is preserved as project knowledge in Cortex.
+  const projDir = path.join(cortexVault, 'Projects');
+  let found = '';
+  for (let i = 0; i < 40 && !found; i++) {
+    await wait(250);
+    for (const f of fs.existsSync(projDir) ? fs.readdirSync(projDir) : []) { const t = fs.readFileSync(path.join(projDir, f), 'utf8'); if (/Verified on the desktop: facade brief written and checked/.test(t)) found = f; }
+  }
+  assert.ok(found, 'verified outcome filed in Cortex');
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('suggestions: /suggest lists unfinished work with its source, and changes nothing', async () => {
+  await send('/suggest');
+  await dock.waitForFunction(() => /Things that may need you \(from what COre can see; nothing has been done\)|Nothing waiting on you right now/.test(document.getElementById('log').innerText), null, { timeout: 15000 });
+});
+
+test('diagnostics: /diagnostics reports brain, memory, Cortex, sandbox and automations, without secrets', async () => {
+  await send('/diagnostics');
+  try {
+    await dock.waitForFunction(() => /Diagnostics \(/.test(document.getElementById('log').textContent) && /Command sandbox:/.test(document.getElementById('log').textContent), null, { timeout: 15000 });
+  } catch (err) { console.log('LOG:', (await dock.evaluate(() => document.getElementById('log').textContent)).slice(-300)); throw err; }
+  const text = await dock.evaluate(() => document.getElementById('log').textContent);
+  const report = text.slice(text.lastIndexOf('Diagnostics ('));
+  assert.match(report, /Brain \(/); assert.match(report, /Cortex: connected/); assert.match(report, /Automations: files on/);
+  assert.doesNotMatch(report, /test-jev-key/, 'no secrets');
+});
+
+test('automations: a new file in the project folder starts the matching playbook and the outcome is reported', async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: '\\[automation CSV intake\\][\\s\\S]*intake-april\\.csv', full: true, reply: 'Intake summary: intake-april.csv has 2 rows.' },
+    ...baseRules,
+  ]));
+  fs.mkdirSync(path.join(userData, 'skills', 'csv-intake'), { recursive: true });
+  fs.writeFileSync(path.join(userData, 'skills', 'csv-intake', 'SKILL.md'), '---\nname: csv-intake\ndescription: Summarize a new intake CSV.\nenabled: true\n---\n1. Count the rows\n2. Report the total\n');
+  await send('/automations');
+  await dock.waitForFunction(() => /Automations: files on/.test(document.getElementById('log').innerText) && /CSV intake: files "intake-\*\.csv" -> csv-intake \(auto\)/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  await wait(500);
+  fs.writeFileSync(path.join(project, 'not-an-intake.csv'), 'a,b\n1,2\n'); // does not match the rule
+  fs.writeFileSync(path.join(project, 'intake-april.csv'), 'item,amount\nsteel,9000\nglass,4200\n');
+  await dock.waitForFunction(() => /Intake summary: intake-april\.csv has 2 rows/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  await dock.waitForFunction(() => /CSV intake: File created: intake-april\.csv\. Done \(not verified\)/.test(document.getElementById('log').innerText), null, { timeout: 30000 });
+  const hist = JSON.parse(fs.readFileSync(path.join(userData, 'automation-history.json'), 'utf8'));
+  const runs = Object.values(hist).flat();
+  assert.strictEqual(runs.length, 1, JSON.stringify(hist));
+  assert.match(runs[0].what, /intake-april\.csv/);
+  fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
 test('chat still works after everything above', async () => {

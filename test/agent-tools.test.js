@@ -93,7 +93,7 @@ function runner(replies, extra = {}) {
   const asked = [];
   const prompts = [];
   let i = 0;
-  const r = new AG.AgentRunner({
+  const r = new AG.AgentRunner({ plan: false,
     screenshot: async () => shot,
     think: async ({ text }) => { prompts.push(text); return replies[Math.min(i++, replies.length - 1)]; },
     driver: { perform: async () => {} },
@@ -174,4 +174,42 @@ test('failure advisor abort stops the task safely', async () => {
   const out = await r.run('x');
   assert.strictEqual(out.status, 'failed');
   assert.match(out.reason, /stopped safely/);
+});
+
+const SBX = require('../src/main/sandbox');
+test('OS sandbox (bubblewrap): system read-only, home hidden, writes only in the project, no network', { skip: SBX.detect().kind !== 'bwrap' && 'bubblewrap unavailable' }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-sbx-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'core-sbx-out-'));
+  const run = async (code) => { const w = SBX.wrap([process.execPath, '-e', code], { cwd: root, roots: [root] }); assert.ok(w.sandboxed); return T.runCommand([w.file, ...w.args], { cwd: root, timeoutMs: 20000 }); };
+  const ok = await run("require('fs').writeFileSync('inside.txt','yes'); console.log('wrote')");
+  assert.match(ok.out, /wrote/);
+  assert.strictEqual(fs.readFileSync(path.join(root, 'inside.txt'), 'utf8'), 'yes');
+  const bad = await run(`try { require('fs').writeFileSync(${JSON.stringify(path.join(outside, 'x.txt'))}, 'no'); console.log('LEAK') } catch (e) { console.log('blocked', e.code) }`);
+  assert.match(bad.out, /blocked (EROFS|EACCES|ENOENT)/);
+  assert.ok(!fs.existsSync(path.join(outside, 'x.txt')));
+  const sys = await run("try { require('fs').writeFileSync('/usr/core-test','x'); console.log('LEAK') } catch (e) { console.log('blocked', e.code) }");
+  assert.match(sys.out, /blocked/);
+  const home = await run(`console.log(require('fs').readdirSync(${JSON.stringify(os.homedir())}).length)`);
+  assert.match(home.out, /^0/m, 'the real home folder is hidden');
+  const net = await run("require('net').connect(53, '1.1.1.1').on('error', (e) => console.log('nonet', e.code)).on('connect', () => console.log('LEAK'))");
+  assert.match(net.out, /nonet/);
+});
+
+test('planning: a short plan comes first, guides every step and the final check, and survives a resume', async () => {
+  const saved = [];
+  const plans = [];
+  const { r, prompts } = runner([
+    'Plan:\n1. Open the Save dialog with ctrl+s\n2. Type the name report.txt\n3. Press Enter\nDone when: the title bar shows report.txt',
+    '[[act {"type":"key","combo":"ctrl+s"}]]',
+    '[[act {"type":"done","summary":"saved"}]]',
+    '[[act {"type":"done","summary":"saved"}]]',
+  ], { plan: undefined, autoApprove: true, checkpoint: (st) => saved.push(JSON.parse(JSON.stringify(st))), onStep: (o) => { if (o.plan) plans.push(o.plan); } });
+  const out = await r.run('save the file as report.txt');
+  assert.strictEqual(out.status, 'done');
+  assert.match(prompts[0], /\[agent-plan\][\s\S]*Done when:/);
+  assert.deepStrictEqual(plans[0].steps, ['Open the Save dialog with ctrl+s', 'Type the name report.txt', 'Press Enter']);
+  assert.match(prompts[1], /Your plan:\n1\. Open the Save dialog/);
+  assert.match(prompts[3], /confirm against: the title bar shows report\.txt/);
+  assert.strictEqual(saved[0].plan.doneWhen, 'the title bar shows report.txt', 'the plan is checkpointed');
+  assert.strictEqual(AG.parsePlan('no numbered lines here'), null);
 });

@@ -30,7 +30,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip # GPU (CUDA) binaries from nuget.org are not needed; the CPU ones ship in the package
       - run: npm run check
+      - name: Cortex knowledge vault for the memory gateway tests
+        shell: bash
+        run: git clone --depth 1 https://github.com/rawsushies/cortex-ai-brain "$RUNNER_TEMP/cortex" && echo "CORTEX_DIR=$RUNNER_TEMP/cortex" >> "$GITHUB_ENV"
+      - name: Sandbox backend for the agent's commands (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap >/dev/null && (bwrap --ro-bind / / --unshare-all true && echo bwrap works || echo "bwrap blocked here; sandbox tests will skip")
       - run: npm test
       - name: Self-test the app (Linux, virtual display)
         if: runner.os == 'Linux'
@@ -53,6 +61,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip # GPU (CUDA) binaries from nuget.org are not needed; the CPU ones ship in the package
       - name: Build installer (not published)
         run: npx electron-builder --win nsis --x64 --publish never
       - name: Self-test the packaged app

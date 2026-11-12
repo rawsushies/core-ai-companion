@@ -83,8 +83,15 @@ function runCommand(argv, { cwd, timeoutMs = 60000, maxOut = 8000, signal } = {}
     child.stdout.on('data', add);
     child.stderr.on('data', add);
     const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve({ ...r, out: out.length > maxOut ? `${out.slice(0, maxOut)}\n…(cut)` : out }); };
-    const timer = setTimeout(() => { try { child.kill(); } catch {} finish({ code: -1, timedOut: true }); }, timeoutMs);
-    if (signal) signal.addEventListener('abort', () => { try { child.kill(); } catch {} finish({ code: -1, aborted: true }); }, { once: true });
+    // Kill the whole process tree on timeout (Windows needs taskkill /T).
+    const killTree = () => {
+      try {
+        if (process.platform === 'win32' && child.pid) require('child_process').execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
+        else child.kill('SIGKILL');
+      } catch {}
+    };
+    const timer = setTimeout(() => { killTree(); finish({ code: -1, timedOut: true }); }, timeoutMs);
+    if (signal) signal.addEventListener('abort', () => { killTree(); finish({ code: -1, aborted: true }); }, { once: true });
     child.on('error', (err) => { out += `could not start: ${err.message}`; finish({ code: -1 }); });
     child.on('close', (code) => finish({ code }));
   });

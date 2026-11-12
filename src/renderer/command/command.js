@@ -183,6 +183,7 @@
     renderTasks(s.tasks);
     renderPlaybooks(s);
     renderMemory(s.memory);
+    if (s.cortex) $('memory').append(el('div', 'muted', s.cortex.on ? `Cortex: connected${s.cortex.last ? ` · last recall ${s.cortex.last.cortex}` : ''}${s.cortex.pending ? ` · ${s.cortex.pending} waiting` : ''}` : 'Cortex: not connected (Settings, Privacy)'));
     renderDevices(s.devices, s.files);
     renderAudit(s.audit);
   }
