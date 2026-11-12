@@ -108,3 +108,16 @@ test('automatic backups are due by interval', () => {
   assert.strictEqual(BK.isDue(new Date(Date.now() - 25 * 3600e3).toISOString(), 24), true);
   assert.strictEqual(BK.isDue('', 0), false);
 });
+
+test('notes still waiting for Cortex and automation history are backed up and restored', () => {
+  const d = dataDir();
+  fs.writeFileSync(path.join(d, 'cortex-queue.json'), JSON.stringify([{ text: 'The client approved revision R7', kind: 'decision', project: 'Tower' }]));
+  fs.writeFileSync(path.join(d, 'automation-history.json'), JSON.stringify({ inv: [{ at: 1, status: 'done', verified: true }] }));
+  const r = BK.createBackup({ dataDir: d, destDir: tmp(), appVersion: '1.0.0' });
+  const b = BK.readBackup(r.file);
+  assert.match(b.files['cortex-queue.json'], /revision R7/);
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'core-bk-new-'));
+  BK.restoreBackup({ backup: b, dataDir: other, snapshotDir: fs.mkdtempSync(path.join(os.tmpdir(), 'core-bk-snap-')) });
+  assert.match(fs.readFileSync(path.join(other, 'cortex-queue.json'), 'utf8'), /revision R7/);
+  assert.match(fs.readFileSync(path.join(other, 'automation-history.json'), 'utf8'), /verified/);
+});
