@@ -66,5 +66,6 @@ The real Obsidian is covered separately on Windows CI: `test/obsidian.win.test.j
 create the vault and add it to Obsidian's vault list, launches Obsidian and checks (through UI Automation) that it
 opened the COre vault on the note COre wrote (Obsidian 1.15.0: window "Tower - COre Vault - Obsidian").
 `test-e2e/installed.e2e.js` drives two installed copies of COre: first launch, bundled Cortex, vault, Obsidian
-list, remember and recall, and the knowledge travelling both ways over real Syncthing (verified on a Linux package
-build; the Windows installer run is the `installed-windows` CI job). Typing inside Obsidian is not automated.
+list, remember and recall, and the knowledge travelling both ways over real Syncthing (verified on Windows CI with the
+real installer, Obsidian and Syncthing, and on a Linux package build). The install check confirms the bundled
+Cortex.exe reports Syncthing conflict copies. Typing inside Obsidian is not automated.

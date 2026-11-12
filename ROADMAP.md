@@ -8,7 +8,7 @@ real-world validation.
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
 **Overall estimated completion: 93%** (planning baseline 38%; recalculated from
-verified acceptance criteria below, last update 2026-11-12).
+verified acceptance criteria below, last update 2026-11-12; unchanged by the 12.1 audit, which verified items already counted as pending work in the knowledge layer: 5 of 6 criteria verified, typing inside Obsidian untested).
 
 ## Memory architecture status
 
@@ -31,8 +31,8 @@ Evidence, by what it proves (only verified items count):
 | COre memory → Markdown note; outside edits indexed and recalled; two devices both ways; offline; conflicts keep both versions; fresh index reconnects | **Verified 8/8** (CI Linux, real Syncthing ×2, real Cortex ×2) | `test/vault.sync.test.js` |
 | Cortex reports Syncthing conflict copies | **Verified** in Cortex (merged rawsushies/cortex-ai-brain#1) and in the vault test on CI | `tests/test_cloud.py` (Cortex), `test/vault.sync.test.js` step 7 |
 | Real Obsidian opens the vault COre set up and shows its note | **Verified on Windows CI** (Obsidian 1.15.0, window "Tower - COre Vault - Obsidian") | `test/obsidian.win.test.js` |
-| Installed app: first launch → bundled Cortex → vault → Obsidian list → remember and recall; second installation via Syncthing both ways | **Verified on a Linux package build** (two copies, real bundled Cortex, real Syncthing); Windows installer run pending in CI (`installed-windows`) | `test-e2e/installed.e2e.js` |
-| Bundled Cortex.exe recognises Syncthing conflicts | Pending: install check added, needs the next Windows packaging run | `scripts/ci/check-install.js` |
+| Installed app: first launch → bundled Cortex → vault → Obsidian list → remember and recall; second installation via Syncthing both ways | **Verified on Windows CI** (silent install of the real installer, two installations, Obsidian 1.15.0, real Syncthing; run 43201591563, 7/7 steps) and on a Linux package build | `test-e2e/installed.e2e.js` |
+| Bundled Cortex.exe recognises Syncthing conflicts | **Verified on Windows CI** (installed Cortex.exe built reproducibly from cortex-ai-brain 87ca537 with pinned PyInstaller; brain_health reports the conflict copy; run 43201591563) | `scripts/ci/check-install.js` |
 | Editing in the Obsidian app itself (typing a note) | Not tested: edits are simulated as file writes, which is how Obsidian saves | — |
 
 ## Cortex integration status
