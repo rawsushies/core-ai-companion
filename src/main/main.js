@@ -119,6 +119,25 @@ let dockVisible = true;
 let dockHeight = 60;
 let currentPipeline = null;
 let memory = null;
+// Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
+const { CortexClient } = require('./cortex');
+const { MemoryGateway, isDecision } = require('./memgate');
+let cortexClient = null;
+let memGate = null;
+function cortexCfg() {
+  const c = (config.data.memory && config.data.memory.cortex) || {};
+  return { command: c.command || '', args: [...(c.script ? [c.script] : []), 'mcp'], vault: c.vault || '' };
+}
+function gateway() {
+  const want = JSON.stringify(cortexCfg());
+  if (!memGate || memGate.cfgKey !== want || memGate.memory !== memory) {
+    if (cortexClient) cortexClient.dispose();
+    cortexClient = new CortexClient({ cfg: cortexCfg() });
+    memGate = new MemoryGateway({ memory, cortex: cortexClient, enabled: () => !!(config.data.memory.cortex && config.data.memory.cortex.enabled) && config.data.memory.enabled !== false, queueFile: path.join(app.getPath('userData'), 'cortex-queue.json') });
+    memGate.cfgKey = want;
+  }
+  return memGate;
+}
 let reminders = null;
 let presence = null;
 const clones = new Map(); // id -> helper clone
@@ -756,6 +775,7 @@ function centerState() {
     workflows: playbookScheduler ? playbookScheduler.upcoming() : [],
     playbooks: playbooks.map((p) => ({ name: p.name, description: p.description, core: (coreById(p.core) || { name: 'COre' }).name, schedule: p.schedule, enabled: p.enabled })),
     playbooksOn: playbooksOn(),
+    cortex: memGate ? { on: memGate.cortexOn(), last: memGate.last, pending: memGate.pending() } : { on: false },
     memory: memory ? { ...memory.stats(), enabled: config.data.memory.enabled !== false, recent: memory.conflicts.slice(0, 6).map((c) => ({ was: c.was, now: c.now, at: c.at })) } : null,
     files: { total: shelfItems.length, ready: shelfItems.filter((f) => f.status === 'ready').length, errors: shelfItems.filter((f) => f.status === 'error').length, recent: shelfItems.slice(0, 5).map((f) => ({ name: f.name, kind: f.kind, info: f.info, status: f.status })) },
     devices: {
@@ -1525,6 +1545,14 @@ function handleActionTag(item) {
   if (item.name === 'delegate') { delegate(item.core, item.task); return true; }
   if (item.name === 'remember') {
     if (!memory || config.data.memory.enabled === false) return true;
+    // Project decisions belong to long-term knowledge (Cortex) when it is connected.
+    const proj = /^#([\p{L}\p{N}_-]+)\s+/u.exec(item.text);
+    if (gateway().cortexOn() && isDecision(item.text)) {
+      gateway().remember(item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, ''), { kind: 'decision', project: proj ? proj[1] : currentProject() }).then((w) => {
+        toDock('dock:message', { role: 'system', text: w.stored === 'cortex' ? `Saved to Cortex: ${w.detail}` : w.stored === 'duplicate' ? 'Already in Cortex.' : `Kept for Cortex (${w.detail}).` });
+      }).catch(() => {});
+      return true;
+    }
     const r = memory.remember(item.text, { source: { via: turnVia, at: Date.now() } });
     if (r && (r.created || r.replaced)) scheduleDriveSync();
     if (r && r.created) toDock('dock:message', { role: 'system', text: `Remembered: ${r.item.text}` });
@@ -2057,6 +2085,12 @@ function stopAgent(reason) {
 // Past desktop tasks and lessons that look like this goal (from memory).
 async function agentExperience(goal) {
   try {
+    if (gateway().cortexOn()) {
+      const k = await gateway().context(goal, { budget: 700, k: 4 });
+      const lines = [];
+      if (k.text) lines.push(k.text.slice(0, 2500));
+      if (lines.length) return lines.join('\n');
+    }
     if (!memory || config.data.memory.enabled === false) return '';
     const hits = (await memory.searchAsync(goal, 4, { kinds: ['episode'] })) || [];
     return hits.map((h) => `- ${(h.item || h).text}`).filter((l) => /desktop task|lesson|workflow that worked/i.test(l)).slice(0, 4).join('\n');
@@ -2188,11 +2222,15 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
     if (okSteps.length) noteEpisode(`Workflow that worked for desktop task "${goal.slice(0, 80)}": ${okSteps.slice(0, 10).join(' → ')}`);
     if (okSteps.length >= 3) addTranscript('system', 'To reuse this task later, save it: /skill save a-short-name');
   }
+  // Verified outcomes go to the shared logbook; lessons to the project in Cortex.
+  gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work' }).catch(() => {});
   // Learn from mistakes: what failed on the way, and what finally worked.
   const failed = (r.steps || []).filter((h) => !h.ok && !/^invalid/.test(h.label)).map((h) => `${h.label} (${String(h.error || '').slice(0, 60)})`);
   if (failed.length) {
     const worked = (r.steps || []).filter((h) => h.ok && h.changed).slice(-2).map((h) => h.label).join(', ');
-    noteEpisode(`Lesson from desktop task "${goal.slice(0, 80)}": ${failed.slice(0, 3).join('; ')} did not work${r.status === 'done' && worked ? `; what worked: ${worked}` : ''}.`);
+    const lesson = `Lesson from desktop task "${goal.slice(0, 80)}": ${failed.slice(0, 3).join('; ')} did not work${r.status === 'done' && worked ? `; what worked: ${worked}` : ''}.`;
+    noteEpisode(lesson);
+    if (r.status === 'done') gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop' }).catch(() => {});
   }
   if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
   return r;
@@ -2611,7 +2649,7 @@ function disposeHelperBrain(c) {
 async function archivistContext(text) {
   const parts = [];
   if (memory && config.data.memory.enabled !== false) {
-    const mem = await memory.contextForAsync(text, 14);
+    const mem = (await gateway().context(text, { budget: 2400, k: 14 })).text;
     if (mem) parts.push(mem);
     const st = memory.stats();
     parts.push(`[Memory stats] ${st.total} memories (${Object.entries(st.byKind).map(([k, n]) => `${k} ${n}`).join(', ')}), ${st.pinned} pinned.`);
@@ -2967,6 +3005,11 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
+    if (/^\/cortex\s*$/i.test(text)) {
+      addTranscript('user', text);
+      gateway().status().then((st) => addTranscript('system', `Cortex: ${st.cortex}${st.pending ? ` · ${st.pending} waiting to be saved` : ''}${st.health ? `\n${st.health}` : ''}`)).catch(() => {});
+      return;
+    }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
     const ctl = /^\/(stop|merge)\b\s*(.*)$/i.exec(text);
     if (ctl) {
@@ -3055,7 +3098,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   const contextBlocks = [];
   try {
     if (memory && config.data.memory.enabled !== false) {
-      const mem = await memory.contextForAsync(text);
+      const mem = (await gateway().context(text)).text; // active memory + long-term knowledge
       if (mem) contextBlocks.push(mem);
     }
     if (fileCtx) {
@@ -3918,7 +3961,7 @@ app.on('will-quit', () => {
   stopGlanceReader();
   if (companion) companion.stop();
   stopAgent('quitting');
-  try { if (uiaClient) uiaClient.dispose(); } catch {}
+  try { if (uiaClient) uiaClient.dispose(); if (cortexClient) cortexClient.dispose(); } catch {}
   try { if (playbookScheduler) playbookScheduler.stop(); if (playbookWatch) playbookWatch.close(); } catch {}
   if (embedder) embedder.dispose();
   globalShortcut.unregisterAll();

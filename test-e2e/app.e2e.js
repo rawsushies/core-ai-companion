@@ -30,6 +30,9 @@ const errors = [];
 // A local stand-in for a second AI provider (OpenAI-compatible, streaming) and
 // for Jev's decision endpoint, so routing and failover run in the real app.
 const fake = { chats: [], decisions: [], jevAnswers: null, port: 0, server: null };
+// The real Cortex knowledge vault (MCP), when a checkout is available (CI clones it).
+const CORTEX_DIR = [process.env.CORTEX_DIR, path.join(__dirname, '..', '..', 'rawsushies', 'cortex-ai-brain')].find((d) => d && fs.existsSync(path.join(d, 'run.py')));
+const cortexVault = fs.mkdtempSync(path.join(os.tmpdir(), 'core-e2e-vault-'));
 function startFakeProviders() {
   const http = require('http');
   const server = http.createServer((req, res) => {
@@ -86,6 +89,7 @@ test.before(async () => {
       jev: { enabled: true, provider: 'typesafe', endpoint: `http://127.0.0.1:${fake.port}`, timeoutMs: 2000 },
       secrets: { jev: 'plain:test-jev-key' },
     },
+    ...(CORTEX_DIR ? { memory: { cortex: { enabled: true, command: process.platform === 'win32' ? 'python' : 'python3', script: path.join(CORTEX_DIR, 'run.py'), vault: cortexVault } } } : {}),
     voice: { tts: false },
     presence: { chitchat: false },
     update: { enabled: false },
@@ -685,6 +689,22 @@ test('failover with continuity: Claude hits its usage limit mid-conversation, th
   fs.writeFileSync(script, JSON.stringify(baseRules));
   await settings.evaluate(() => window.settingsApi.set('brain.mode', 'manual'));
   await settings.evaluate(() => window.settingsApi.set('brain.mode', 'auto'));
+});
+
+test('memory gateway with the real Cortex: a decision goes to the vault, comes back with its source, and COre answers from it', { skip: !CORTEX_DIR && 'no Cortex checkout' }, async () => {
+  fs.writeFileSync(script, JSON.stringify([
+    { match: "\\[Knowledge\\][\\s\\S]*glass facade", full: true, reply: 'From your notes in Cortex (Projects/Tower.md): the client chose a glass facade.' },
+    { match: 'note the facade decision', reply: 'Noted. [[remember #Tower we decided the client wants a glass facade]]' },
+    ...baseRules,
+  ]));
+  await send('/cortex');
+  await dock.waitForFunction(() => /Cortex: connected/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  await send('note the facade decision');
+  await dock.waitForFunction(() => /Saved to Cortex: Projects\/Tower\.md › Decisions/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  assert.match(fs.readFileSync(path.join(cortexVault, 'Projects', 'Tower.md'), 'utf8'), /we decided the client wants a glass facade/);
+  await send('what facade does the tower client want?');
+  await dock.waitForFunction(() => /From your notes in Cortex \(Projects\/Tower\.md\)/.test(document.getElementById('log').innerText), null, { timeout: 20000 });
+  fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
 test('chat still works after everything above', async () => {

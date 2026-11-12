@@ -60,6 +60,10 @@ const DEFAULTS = {
     reactions: true, // say something now and then when petted, poked or tossed
   },
   memory: {
+    // Cortex: your long-term knowledge vault (github.com/rawsushies/cortex-ai-brain),
+    // reached through its MCP server. command: 'python' (or 'python3' / Cortex.exe),
+    // script: path to Cortex's run.py (empty for Cortex.exe), vault: the vault folder.
+    cortex: { enabled: false, command: '', script: '', vault: '' },
     enabled: true, // COre remembers facts about you across conversations (⚙ → Memory)
     autoCapture: true, // save clear statements like "my name is…" / "I prefer…" from your messages (shown in the chat)
     semantic: true, // semantic search with a small local model (downloads ~23 MB once)

@@ -1,70 +1,78 @@
-# COre roadmap to v10.0.0
+# COre roadmap and status
 
-COre is developed in an automatic loop: each phase is built, tested (unit tests + the real Electron app
-headless + real Claude where possible), audited for bugs, versioned, and pushed to `main` (installed copies
-auto-update). Every loop iteration: **find bugs → fix → build the next phase's features → research other
-companion projects for ideas → measure performance → ship**.
+Evidence-based tracker for the master roadmap. A requirement counts only when
+its acceptance test passes against real components (real Cortex, real Windows
+apps, real providers). Mocked tests are listed separately and never count as
+real-world validation.
 
-Rules for every phase
-- Keep CPU/GPU light: no full-screen work, idle frame cap, no per-frame window resizes.
-- Never break: voice/text harmony, transparency, auto-update, Windows support.
-- Each phase ends with: tests green, app smoke-tested, CHANGELOG entry, version bump, push.
+**Overall estimated completion: 47%** (planning baseline 38%; recalculated from
+verified acceptance criteria below, last update 2026-11-12).
 
-Status legend: ✅ shipped · 🔨 in progress · ⏳ planned
+## Memory architecture status
 
-## ✅ v0.4.1 — Alive and quick (done)
+- **COre native memory** (`src/main/memory.js`) = active memory: profile,
+  preferences, facts, confidence and decay, contradictions, task episodes.
+- **Cortex** (`rawsushies/cortex-ai-brain`, MCP over stdio) = long-term
+  knowledge: project decisions, lessons, linked notes, logbook, version history.
+- **Memory gateway** (`src/main/memgate.js`) = the only memory interface the
+  brain, specialists and agent use. One destination per kind (decision, lesson,
+  knowledge, research go to Cortex; the rest stays native). No third engine.
 
-## ✅ v0.5.0 — Harmony & glass
-- Fix: flicker while dragging / idle (fixed-size stage that only moves; no resizes during a drag; chat
-  follows on drop).
-- Fix: replies stopping after a few sentences (typed replies are spoken in full; code blocks skipped).
-- Voice ⇄ text harmony: each sentence's words are revealed over the real length of its audio.
-- Chat tab redesign: smaller, translucent glass, shows only the latest exchange, fades out when idle,
-  full on hover/focus; history expandable.
+## Cortex integration status
 
-## ✅ v1.0.0 — Real app
-- Windows installer (.exe, NSIS) with Start-menu/desktop shortcuts and a proper **uninstaller**; built by
-  GitHub Actions on Windows and attached to GitHub Releases; updater learns release installs.
-- Settings window (all options in a UI, not config.json): brains, voice, look, hotkeys, privacy, startup.
-- Start with Windows (optional), single-click "Quit/Restart/Reset" maintenance tools.
+Connected through `src/main/cortex.js` (MCP client). Off until the user turns it
+on (Settings, Privacy). History import stays off (`CORTEX_AUTO_IMPORT=off`);
+Cortex's own consent gate (`import_history`) is never touched. COre never writes
+vault files directly.
 
-## ✅ v2.0.0 — Body language
-- Gesture library: 20+ cheap hand/body animations (wave, thumbs up, shrug, count on fingers, clap, facepalm,
-  point up/down/left/right, beckon, stop palm, OK sign, peace, heart hands, thinking chin, salute, spin,
-  bow, nod, shake, celebrate, juggle…), all from the same particle arms (no extra GPU work).
-- `[[gesture name]]` tag + automatic gestures from the reply's meaning.
+## Phase status
 
-## ✅ v3.0.0 — Shape-shifting
-- COre forms shapes/emoji out of its smoke (laughing face, heart, check mark, question mark, star, sun,
-  moon, music note, arrows, numbers/letters…) with matching voice expression (giggle, hum, sigh).
-- `[[form laugh]]` tag; particle targets sampled from tiny vector glyphs (cheap).
+| Phase | Status | Estimate |
+|---|---|---|
+| 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
+| 1 COre 2.1 desktop operator | In progress | ~60% |
+| 2 COre 2.2 environmental intelligence | Partly present from 2.0 (file intelligence, project context) | ~25% |
+| 3 COre 2.3 proactive intelligence | Partly present (scheduled playbooks, learned workflows) | ~20% |
+| 4 COre 3.0 unified experience | Partly present (voice, routing, command center) | ~30% |
 
-## ✅ v4.0.0 — Companion presence
-- Idle chit-chat: after a quiet while, COre starts a short, relevant conversation (time of day, what's on
-  screen if allowed, memories, reminders), rate-limited and respectful (do-not-disturb, fullscreen apps,
-  meetings).
-- Interactions: poke, pet, toss, tickle reactions; mini games (riddles, 20 questions, trivia).
+### Phase 0: memory acceptance tests (real Cortex MCP, `test/memgate.test.js`, `test-e2e` "memory gateway")
 
-## ✅ v5.0.0 — Many COres
-- Clones: COre splits (meiosis animation) into helpers, each with its own window, voice, context and task;
-  they lay themselves out so they never overlap each other or your focus window; merge back when done.
-- Voice routing so clones never talk over each other (queue / priority / per-clone voice).
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 1 | Preference across sessions | Pass | new Memory + new Cortex process recall it |
+| 2 | Historical project decision from Cortex | Pass | decision recalled with `Projects/Tower.md` source |
+| 3 | Combine active + long-term | Pass | `[Memory]` and `[Knowledge]` in one context |
+| 4 | Contradictions preserved | Pass | native conflict log keeps the old fact |
+| 5 | Update without destroying history | Pass | changed decision appended, earlier one kept (Cortex also versions notes) |
+| 6 | Linked knowledge and sources | Pass | linked note arrives through Cortex link traversal; source paths kept |
+| 7 | Corrupted index recovery | Pass | garbage `index.db` is set aside and rebuilt by Cortex |
+| 8 | Cortex unavailable | Pass | native memory still answers; decision queued, delivered when back |
+| 9 | No duplicate writes, clear ownership | Pass | duplicate decision refused; DESTINATION table |
+| 10 | Import only with authorization | Pass | COre starts Cortex with auto-import off; retrieved notes fenced as data |
 
-## ✅ v6.0.0 — Hands-free
-- Wake word ("Hey COre", on-device), push-to-talk hold mode, barge-in (talk over COre to interrupt),
-  continuous conversation mode.
+### Phase 1: COre 2.1 desktop operator
 
-## ✅ v7.0.0 — Screen partner
-- Optional watch mode: COre notices errors/dialogs on screen and offers help; smarter pointing (UI element
-  detection), multi-monitor presence.
+| Requirement | Status | Evidence |
+|---|---|---|
+| Windows UI Automation + accessibility tree | Partly verified on real Windows | CI windows-latest: real Notepad text area set and read back; WinForms edit/button found via UIA + Win32 fallback. Check box detection fix pending CI. |
+| Control-level actions (press, fill, expand, focus) | Implemented, unit-tested (mocked UIA) | `test/uia.test.js` |
+| Planner (plan + done-when) | Implemented, unit + e2e | `test/agent-tools.test.js` planning test |
+| Persistent state, checkpoints, resume | Implemented (2.0), unit + e2e | `/do resume`, checkpoint tests |
+| Windows process isolation | **Not done** | Linux bubblewrap only (`test/agent-tools.test.js` real sandbox). Windows needs Job Objects / AppContainer. |
+| Least privilege, approvals, e-stop, audit, rollback | Implemented | e2e emergency stop, tools + undo, plan approval |
+| Timeouts, process-tree kill, retries | Implemented | taskkill /T on Windows; failure advisor |
+| Memory gateway in planning and execution | Implemented | agent experience reads Cortex; lessons and outcomes written back |
+| Model switch keeps context | Verified with stand-in providers | e2e failover with continuity |
+| Real AI providers | **Unverified** | build sandbox cannot reach provider APIs |
 
-## ✅ v8.0.0 — Skills
-- Plugin/skill system (safe, permissioned): timers, notes, weather, music control, app launcher, web
-  search via the brain, calendar integrations.
+## Blocked or limited
 
-## ✅ v9.0.0 — Polish
-- Themes/skins (colours, styles), languages, accessibility, performance profiles, crash reporting (local),
-  onboarding tour.
+- Real provider validation (Gemini, Groq, OpenRouter, Jev): no network access from the build environment.
+- Windows OS sandbox: not implemented yet (next target).
+- Headless CI desktop: some apps (new Notepad's XAML view) expose little to UI Automation there.
 
-## ✅ v10.0.0 — Release
-- Full audit, performance pass, docs, signed installer, release notes.
+## Next execution target
+
+1. Confirm the WinForms fill/press/toggle test passes on Windows CI.
+2. Windows process isolation for agent commands (Job Object: kill-on-close, memory and process limits; restricted token where possible).
+3. Phase 1 acceptance test: a multi-step task across real Windows apps with an interruption and resume, in CI.

@@ -159,6 +159,10 @@ const SECTIONS = [
     title: 'Privacy',
     fields: [
       { key: 'memory.enabled', label: 'Remember things about me', type: 'toggle' },
+      { key: 'memory.cortex.enabled', label: 'Connect my Cortex knowledge vault (long-term notes, project decisions, lessons) through its MCP server', type: 'toggle' },
+      { key: 'memory.cortex.command', label: 'Cortex program (python, python3, or the path to Cortex.exe)', type: 'text', maxLength: 300, optional: true },
+      { key: 'memory.cortex.script', label: "Cortex run.py path (leave empty for Cortex.exe)", type: 'text', maxLength: 400, optional: true },
+      { key: 'memory.cortex.vault', label: 'Cortex vault folder', type: 'text', maxLength: 400, optional: true },
       { key: 'memory.autoCapture', label: 'Pick up facts I mention ("my name is…", "I prefer…"), shown in the chat', type: 'toggle' },
       { key: 'memory.semantic', label: 'Smarter memory search with a small local model (downloads about 23 MB once)', type: 'toggle', restart: true },
       { key: 'watch.enabled', label: 'Notice error pop-ups and offer help (reads window titles only)', type: 'toggle' },

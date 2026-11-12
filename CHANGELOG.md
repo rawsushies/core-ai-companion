@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Memory architecture: COre × Cortex
+
+- **Memory gateway** (`memgate.js`): one memory interface for the brain, specialists and agent. It merges COre's active memory with recall from the user's **Cortex** knowledge vault (long-term notes, linked notes, decisions, lessons) within a token budget, keeps source paths, and fences retrieved notes as data. Each kind of memory has one destination: decisions, lessons, knowledge and research go to Cortex (deduplicated, appended under dated sections so history is kept); preferences, profile, facts and episodes stay in COre.
+- **Cortex MCP client** (`cortex.js`): talks to Cortex's own MCP server; COre never writes vault files directly and starts Cortex with history import off.
+- When Cortex is down, COre keeps working on native memory and long-term writes wait in a queue until it is back.
+- `[[remember #Project we decided …]]` goes to the project's Decisions in Cortex; desktop-task outcomes go to Cortex's shared logbook and lessons to the project. `/cortex` shows status and vault health.
+- Settings, Privacy: connect Cortex (program, run.py, vault). `ROADMAP.md` tracks verified progress.
+- Windows UI Automation: Win32 fallback through window messages for standard controls without UIA patterns, and check boxes told apart from buttons.
+
 ### COre 2.1, part 2: Desktop intelligence, planning, sandbox, monitor
 
 - **Windows UI Automation**: the agent reads the foreground window's controls by their real properties (type, name, automation id, value, checked/expanded state, enabled, bounds) and acts on them by id: `press`, `fill` (with the value read back to verify), `expand`, `focus`. Controls without a press action are clicked at their centre; fields that ignore programmatic text are focused and typed into. Coordinates remain for anything not in the list. Off by `agent.uia: false`.
