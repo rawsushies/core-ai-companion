@@ -71,8 +71,10 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
     let text = '';
     for (let i = 0; i < 30; i++) { await wait(1000); text = fs.readFileSync(file, 'utf8'); if (/Glass/.test(text)) break; }
     console.log('saved file:', JSON.stringify(text));
-    assert.match(text, /Facade,4200000/, 'existing data kept');
-    assert.match(text, /Glass,900000/, 'the new row is in the file on disk');
+    // LibreOffice quotes text cells when it writes CSV ("Facade",4200000): compare unquoted rows.
+    const rows = text.split(/\r?\n/).filter(Boolean).map((l) => l.split(',').map((c) => c.replace(/^"|"$/g, '')));
+    assert.deepStrictEqual(rows[1], ['Facade', '4200000'], 'existing data kept');
+    assert.deepStrictEqual(rows[2], ['Glass', '900000'], 'the new row is in the file on disk');
   } finally {
     keys.dispose();
     uia.dispose();
