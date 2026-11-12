@@ -1885,6 +1885,7 @@ function agentUia() {
   return uiaClient;
 }
 const { Situation, groundCheck } = require('./situation');
+const { appBlock } = require('./appProfiles');
 let situationInst = null;
 function situation() {
   if (!situationInst) situationInst = new Situation({ uia: agentUia(), gateway: gateway(), memory });
@@ -2218,7 +2219,8 @@ async function agentExperience(goal) {
     if (agentUia()) {
       agentSituation = await situation().describe(goal);
       toolAudit({ event: 'situation', for: 'agent', facts: agentSituation.facts.length, projects: agentSituation.projects.map((p) => p.project), cortex: agentSituation.memory.cortex });
-      return agentSituation.prompt.slice(0, 4000);
+      const appTips = appBlock(agentSituation.obs.active, memory); // what works in the app in front
+      return [agentSituation.prompt.slice(0, 4000), appTips].filter(Boolean).join('\n\n');
     }
   } catch {}
   try {

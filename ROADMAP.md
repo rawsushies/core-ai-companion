@@ -7,7 +7,7 @@ real-world validation.
 
 The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs/ROADMAP-HISTORY.md).
 
-**Overall estimated completion: 76%** (planning baseline 38%; recalculated from
+**Overall estimated completion: 78%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12).
 
 ## Memory architecture status
@@ -33,7 +33,7 @@ vault files directly.
 |---|---|---|
 | 0 Memory integration | Done for 10/10 acceptance tests (real Cortex) | complete |
 | 1 COre 2.1 desktop operator | Acceptance and security boundaries pass on real Windows CI; real-provider validation open | ~90% |
-| 2 COre 2.2 environmental intelligence | Acceptance test passes on real Windows + real Cortex | ~70% |
+| 2 COre 2.2 environmental intelligence | Acceptance passes on real Windows + real Cortex; app profiles, context sync, verified knowledge updates | ~85% |
 | 3 COre 2.3 proactive intelligence | Acceptance passes (unit with real Cortex + e2e); opportunity detection, approved maintenance, opt-in auto-resume | ~80% |
 | 4 COre 3.0 unified experience | Combined acceptance scenario passes in the real app (stand-in providers); benchmarks in place | ~55% |
 
@@ -78,7 +78,9 @@ vault files directly.
 | 4, 8 | Project context from both memory systems | Implemented | situation recall through the gateway; project matched from window titles against COre projects and Cortex `Projects/` notes |
 | 5 | Understand ongoing work without repeating | Partly | "what am I working on" / "where was I" attach the situation; agent resumes from checkpoints |
 | 9 | Source verification, confirmed vs inferred | Implemented | every fact tagged observed / inferred / memory / cortex; `groundCheck` flags names in the reply that no source backs (shown to the user) |
-| 6, 7, 10 | App-specific workflows, context sync, knowledge updates after verified tasks | Partly (learned workflows, outcomes to Cortex) | |
+| 6 | Application-specific intelligence | Implemented | `src/main/appProfiles.js`: tips for Excel, Word, PowerPoint, Notepad, Explorer, browsers, VS Code, Archicad, plus workflows and lessons learned in that app, given to the agent as hints (approvals unchanged) |
+| 7 | Context sync across brain, specialists, gateway, agent | Implemented | one gateway for Prime, every specialist and the agent; the agent starts from the shared situation |
+| 10 | Knowledge update after verified completion | Implemented | verified agent outcomes filed under the project in Cortex (e2e + Windows acceptance) |
 | Acceptance | Desktop + project + both memories, explained without fabrication | **Pass** | `test/situation.win.test.js` on windows-latest: real project window and its message box observed, project Lakeside inferred from the title, COre memory and `Projects/Lakeside.md` from real Cortex recalled, every fact sourced; invented window flagged by `groundCheck`. The brain's own wording needs a real provider (unverified) |
 
 ### Phase 3: COre 2.3 proactive intelligence
