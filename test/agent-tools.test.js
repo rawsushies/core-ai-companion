@@ -177,7 +177,7 @@ test('failure advisor abort stops the task safely', async () => {
 });
 
 const SBX = require('../src/main/sandbox');
-test('OS sandbox (bubblewrap): system read-only, home hidden, writes only in the project, no network', { skip: !SBX.detect().ok && 'bubblewrap unavailable' }, async () => {
+test('OS sandbox (bubblewrap): system read-only, home hidden, writes only in the project, no network', { skip: SBX.detect().kind !== 'bwrap' && 'bubblewrap unavailable' }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-sbx-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'core-sbx-out-'));
   const run = async (code) => { const w = SBX.wrap([process.execPath, '-e', code], { cwd: root, roots: [root] }); assert.ok(w.sandboxed); return T.runCommand([w.file, ...w.args], { cwd: root, timeoutMs: 20000 }); };
