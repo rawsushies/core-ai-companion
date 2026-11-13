@@ -50,3 +50,21 @@ test('SIGKILL at random moments: the journal always matches the disk; undo resto
     assert.strictEqual(fs.readFileSync(path.join(W, 'keep.md'), 'utf8'), 'existing');
   }
 });
+
+test('a crash while the undo manifest is being written leaves the previous manifest intact; undo also removes cut-off writes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-man-'));
+  const W = path.join(root, 'work');
+  fs.mkdirSync(W);
+  fs.writeFileSync(path.join(W, 'keep.md'), 'existing');
+  const files = new AT.FileOps({ roots: [W], backupDir: path.join(root, 'b') });
+  files.write('t', path.join(W, 'keep.md'), 'changed');
+  files.write('t', path.join(W, 'new.md'), 'new');
+  const man = path.join(root, 'b', 't', 'manifest.json');
+  // The crash: the next manifest was only half written, and a file write was cut off.
+  fs.writeFileSync(`${man}.tmp`, '[{"path":');
+  fs.writeFileSync(path.join(W, 'new.md.core-tmp'), 'partial');
+  assert.doesNotThrow(() => JSON.parse(fs.readFileSync(man, 'utf8')), 'the manifest itself is never torn');
+  files.rollback('t');
+  assert.deepStrictEqual(fs.readdirSync(W).sort(), ['keep.md']);
+  assert.strictEqual(fs.readFileSync(path.join(W, 'keep.md'), 'utf8'), 'existing');
+});

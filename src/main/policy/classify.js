@@ -28,6 +28,22 @@ const SETTINGS_APPS = /^(settings|ms-settings|control( panel)?|regedit|gpedit|se
 
 const lower = (s) => String(s || '').toLowerCase();
 
+// Recipients and hosts inside free text (a typed message, a command line). Taint is checked
+// on each of these on its own, so wrapping an address in a sentence, changing its case or
+// putting it in a URL does not hide where it came from.
+const TLDS = 'com|net|org|io|co|dev|app|ai|me|info|biz|xyz|site|online|top|ru|cn|uk|de|fr|nl|my|sg|id|in|au|us|ca|example|test|invalid|local|onion';
+const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
+const URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/([^\s/:?#'"<>]+)/gi;
+const DOMAIN_RE = new RegExp(`\\b(?:[a-z0-9-]+\\.)+(?:${TLDS})(?!\\.?[a-z0-9-])`, 'gi');
+function refs(text) {
+  const t = String(text || '');
+  const out = new Set();
+  for (const m of t.matchAll(EMAIL_RE)) { out.add(m[0].toLowerCase()); out.add(m[0].split('@')[1].toLowerCase()); }
+  for (const m of t.matchAll(URL_RE)) out.add(m[1].replace(/^[^@]*@/, '').toLowerCase());
+  for (const m of t.replace(EMAIL_RE, ' ').matchAll(DOMAIN_RE)) out.add(m[0].toLowerCase());
+  return [...out];
+}
+
 function inside(p, folders) {
   const r = path.resolve(p);
   return folders.some((f) => r === f || r.startsWith(f.endsWith(path.sep) ? f : f + path.sep));
@@ -63,7 +79,7 @@ function classify(a, ctx = {}) {
     case 'run': {
       const c = AT.checkCommand(a.cmd);
       if (!c.ok) { reasons.push(`command refused: ${c.reason}`); return out(3, 'safeguards'); }
-      const targets = [c.argv.join(' '), c.argv[0]];
+      const targets = [c.argv.join(' '), c.argv[0], ...refs(a.cmd)];
       if (INSTALL_RE.test(a.cmd)) { reasons.push('installs software'); return out(2, 'install', targets); }
       if (ctx.sandbox === false) { reasons.push('no OS sandbox available'); return out(2, 'commands-unsandboxed', targets); }
       if (a.cwd && !inside(abs(a.cwd), g.folders)) { reasons.push('runs outside the granted folders'); return out(2, 'outside-scope', targets); }
@@ -93,7 +109,8 @@ function classify(a, ctx = {}) {
       if ((el && el.password) || CRED_RE.test(field)) { reasons.push('entering a password or code'); return out(3, 'credential'); }
       if (SECRET_TEXT_RE.test(a.text || '')) { reasons.push('the text contains what looks like a secret'); return out(3, 'credential'); }
       if (!appOk()) { reasons.push('typing into an app outside the grant'); return out(2, 'outside-scope'); }
-      return out(1, 'reversible', /@/.test(a.text || '') ? [a.text] : []);
+      const r = refs(a.text);
+      return out(1, 'reversible', /@/.test(a.text || '') || r.length ? [a.text, ...r] : []);
     }
     case 'press': case 'click': {
       const name = String(a.label || ctx.target || '');
@@ -110,4 +127,4 @@ function classify(a, ctx = {}) {
   }
 }
 
-module.exports = { classify, inside, CRED_RE, PAY_RE, SEND_RE, SECRET_TEXT_RE };
+module.exports = { classify, inside, refs, CRED_RE, PAY_RE, SEND_RE, SECRET_TEXT_RE };

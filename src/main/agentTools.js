@@ -150,7 +150,10 @@ class FileOps {
       fs.copyFileSync(f, entry.copy);
     }
     list.push(entry);
-    fs.writeFileSync(man, JSON.stringify(list, null, 1));
+    // Atomic: a crash mid-write must never leave a torn manifest (undo would then be impossible).
+    const tmp = `${man}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(list, null, 1));
+    fs.renameSync(tmp, man);
   }
 
   write(task, p, text) {
@@ -194,6 +197,7 @@ class FileOps {
     for (const e of list) {
       if (seen.has(e.path)) continue; // the first backup of a path is its original state
       seen.add(e.path);
+      try { fs.unlinkSync(`${e.path}.core-tmp`); } catch {} // a write cut off by a crash
       if (e.existed && e.copy) { fs.mkdirSync(path.dirname(e.path), { recursive: true }); fs.copyFileSync(e.copy, e.path); n++; }
       else if (!e.existed && fs.existsSync(e.path)) { fs.unlinkSync(e.path); n++; }
     }

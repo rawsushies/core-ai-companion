@@ -69,7 +69,7 @@ class Policy {
     // Targets that leave the machine or the scope must not come from untrusted content.
     // (Paths inside the granted folders are bounded by the grant and backed up, so a file
     // name read from a listing may be used there.)
-    const outward = OUTWARD.has(c.category) || action.type === 'fetch' || action.type === 'run' || (['type', 'fill'].includes(action.type) && /@/.test(action.text || ''));
+    const outward = OUTWARD.has(c.category) || action.type === 'fetch' || action.type === 'run' || (['type', 'fill'].includes(action.type) && c.targets.length > 0);
     const tainted = outward ? this.taint.check(c.targets) : [];
     const base = { cls: c.cls, category: c.category, reasons: [...c.reasons], tainted };
     if (ALWAYS_DENY.has(c.category)) return record({ decision: 'deny', ...base });

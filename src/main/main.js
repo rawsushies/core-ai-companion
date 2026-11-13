@@ -979,6 +979,7 @@ function savePhoneDevices(list) {
     const key = safeStorage.isEncryptionAvailable() ? `enc:${safeStorage.encryptString(k).toString('base64')}` : `plain:${k}`;
     return { id: d.id, name: d.name, key, ctr: d.ctr, created: d.created, lastSeen: d.lastSeen };
   }));
+  if (state.flush) state.flush(); // counters on disk at once: a crash must not roll them back (replay)
 }
 
 function phoneFeed(since) {
