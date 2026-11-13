@@ -510,6 +510,8 @@ test('phone as remote body: the mission and its approval reach the phone; answer
   let ask = null;
   for (let i = 0; i < 40 && !ask; i++) { ask = ((await api('sync', { since: 0 })).approvals || [])[0]; if (!ask) await wait(250); }
   assert.ok(ask && /Goal: keep an eye on things from my phone/.test(ask.label), 'the mission card reached the phone');
+  const notices = (await api('sync', { since: 0 })).notices || [];
+  assert.ok(notices.some((n) => n.kind === 'approval' && n.title === 'COre needs your answer' && !/keep an eye/.test(n.body)), 'a notice for the waiting request, without its details');
   assert.strictEqual((await api('approve', { id: ask.id, hash: ask.hash, answer: 'yes' })).ok, false, 'yes without the biometric is refused');
   assert.strictEqual((await api('approve', { id: ask.id, hash: 'f'.repeat(64), answer: 'yes', bio: true })).ok, false, 'an answer for another request is refused');
   assert.strictEqual((await api('approve', { id: ask.id, hash: ask.hash, answer: 'yes', bio: true })).ok, true);
@@ -525,6 +527,9 @@ test('phone as remote body: the mission and its approval reach the phone; answer
   const took = Date.now() - t0;
   if (took >= 1500) console.log('LOG23:', (await logText()).slice(-1200));
   assert.ok(took < 1500, `stopped from the phone in ${took} ms`);
+  let ended = null;
+  for (let i = 0; i < 20 && !ended; i++) { ended = ((await api('sync', { since: 0 })).notices || []).find((n) => n.kind === 'mission' && n.title === 'Mission stopped'); if (!ended) await wait(200); }
+  assert.ok(ended, 'the phone is told the mission stopped');
   await settings.evaluate((id) => window.settingsApi.action(`revokePhone:${id}`), deviceId);
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));

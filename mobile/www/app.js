@@ -115,6 +115,7 @@
         addMsg(e.role === 'notice' ? 'system' : e.role, e.text, e.role === 'core' && e.author && e.author !== 'prime' ? { name: e.name, color: e.color } : {});
       }
       renderMission(r);
+      notifyNew(r.notices);
       const s = r.status || {};
       setStatus(s.busy ? 'Thinking…' : s.speaking ? 'Speaking' : 'With your PC', '', s.busy ? 'thinking' : s.speaking ? 'speaking' : 'idle');
       if (Date.now() - (store.get('memoryAt', 0)) > 10 * 60e3) pullMemory();
@@ -128,6 +129,43 @@
     const visible = document.visibilityState === 'visible';
     syncTimer = setTimeout(syncPc, !visible ? 30000 : pcOnline ? 2000 : Math.min(30000, 3000 * failures));
   }
+
+  // Notifications (13.0 P3): the PC sends a short list of notices with every sync; each id is
+  // raised once, only while the app is in the background, on a private channel (the lock screen
+  // shows "COre", not the text). Off until Android's permission is granted; the switch turns it off.
+  const LN = () => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) || null;
+  const noticeInt = (id) => { let h = 7; for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h) % 2000000000 + 1; };
+  let notifyOk = false;
+  async function notifySetup(ask) {
+    const ln = LN();
+    notifyOk = false;
+    if (!ln || store.get('notify', true) === false) return renderNotify();
+    try {
+      await ln.createChannel({ id: 'core-alerts', name: 'COre', description: 'Requests waiting for you and missions that ended', importance: 4, visibility: 0 });
+      let p = await ln.checkPermissions();
+      if (p.display !== 'granted' && ask) p = await ln.requestPermissions();
+      notifyOk = p.display === 'granted';
+    } catch { notifyOk = false; }
+    renderNotify();
+  }
+  function renderNotify() {
+    $('notify').checked = store.get('notify', true) !== false;
+    $('notify').disabled = !LN();
+    $('notify-state').textContent = !LN() ? 'Notifications need the COre app (not the web page).'
+      : store.get('notify', true) === false ? 'Off.'
+        : notifyOk ? 'On. Only while COre is open or in the background on this phone. The lock screen shows "COre", not the details.'
+          : 'Android has not allowed notifications for COre yet. Turn this on again to ask, or allow it in Android settings.';
+  }
+  function notifyNew(list) {
+    const seen = store.get('noticesSeen', null);
+    const fresh = (list || []).filter((n) => n && typeof n.id === 'string' && !(seen || []).includes(n.id));
+    if (!fresh.length) return;
+    store.set('noticesSeen', [...(seen || []), ...fresh.map((n) => n.id)].slice(-80));
+    // The first sync after pairing or reinstalling only learns what is already there.
+    if (seen === null || !notifyOk || !document.hidden || !LN()) return;
+    LN().schedule({ notifications: fresh.slice(-3).map((n) => ({ id: noticeInt(n.id), title: n.title, body: n.body || 'Open COre to see more.', channelId: 'core-alerts', autoCancel: true })) }).catch(() => {});
+  }
+  $('notify').addEventListener('change', () => { store.set('notify', $('notify').checked); notifySetup(true); });
 
   // Missions (13.0): the plan as a checklist, requests waiting for an answer, and Stop.
   // Approving needs the phone's fingerprint/face (native BiometricConfirm); declining and
@@ -221,6 +259,8 @@
       store.set('pc', pc);
       $('pair-link').value = '';
       addMsg('system', 'Paired with your PC.');
+      store.del('noticesSeen'); // a new PC: learn its notices first, raise only new ones
+      notifySetup(true);
       renderSettings();
       syncPc();
       pullMemory();
@@ -333,5 +373,6 @@
 
   for (const h of history.slice(-10)) addMsg(h.role === 'model' ? 'core' : 'user', h.parts[0].text, h.role === 'model' ? { via: 'via Gemini' } : {});
   updateStatus();
+  notifySetup(!!pc); // asks Android once, only on a paired phone
   if (pc) syncPc();
 })();
