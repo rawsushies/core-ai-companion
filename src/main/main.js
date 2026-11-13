@@ -3409,7 +3409,10 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     }
     if (/^\/cortex\s*$/i.test(text)) {
       addTranscript('user', text);
-      gateway().status().then((st) => addTranscript('system', `Cortex: ${st.cortex}${st.pending ? ` · ${st.pending} waiting to be saved` : ''}${st.health ? `\n${st.health}` : ''}`)).catch(() => {});
+      const { vaultMismatch } = require('./obsidian');
+      const mm = vaultMismatch(cortexCfg().vault);
+      const vaultWarn = mm ? `\nTwo vault folders: COre uses ${mm.core}, but the Cortex app and your other AI apps use ${mm.cortex}. To use one brain everywhere, set COre's vault (Settings, Privacy and memory) to ${mm.cortex}, or run: cortex config vault "${mm.core}"` : '';
+      gateway().status().then((st) => addTranscript('system', `Cortex: ${st.cortex}${st.pending ? ` · ${st.pending} waiting to be saved` : ''}${st.dropped ? ` · ${st.dropped} dropped when the queue was full` : ''}${vaultWarn}${st.health ? `\n${st.health}` : ''}`)).catch(() => {});
       return;
     }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".
