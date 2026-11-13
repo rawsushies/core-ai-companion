@@ -1225,7 +1225,7 @@ async function memoryMaintain(arg = '') {
     if (!maintenancePlan || Date.now() - maintenancePlan.at > 3600_000) { addTranscript('system', 'Run /memory maintain first to see what would change.'); return; }
     const r = await gateway().applyMaintenance(maintenancePlan, { merge: true, retire: a === 'apply all', flush: true });
     toolAudit({ event: 'memory-maintenance', approved: a, ...r });
-    gateway().log(`Knowledge maintenance approved: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered}`, { kind: 'maintenance' }).catch(() => {});
+    gateway().log(`Knowledge maintenance approved: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered}`, { kind: 'maintenance', actor: 'maintenance' }).catch(() => {});
     maintenancePlan = null;
     toDock('dock:memory', memory.list());
     addTranscript('system', `Done: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered} to Cortex.`);
@@ -2133,7 +2133,7 @@ function startEventMonitor() {
       return { status: 'done', summary: `handled by COre with the ${pb.name} playbook`, verified: false };
     },
     report: (text) => { addTranscript('system', text); toOverlay('attention', { level: 'info', title: text.slice(0, 80) }); },
-    log: (entry) => { toolAudit(entry); if (entry.event === 'monitor-outcome') gateway().log(`Automation ${entry.rule}: ${entry.what} -> ${entry.status}${entry.verified ? ' (verified)' : ''}`, { kind: 'work' }).catch(() => {}); },
+    log: (entry) => { toolAudit(entry); if (entry.event === 'monitor-outcome') gateway().log(`Automation ${entry.rule}: ${entry.what} -> ${entry.status}${entry.verified ? ' (verified)' : ''}`, { kind: 'automation', actor: `automation:${entry.rule}` }).catch(() => {}); },
   }).start();
 }
 let playbookWatch = null;
@@ -2510,7 +2510,7 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
     if (okSteps.length >= 3) addTranscript('system', 'To reuse this task later, save it: /skill save a-short-name');
   }
   // Verified outcomes go to the shared logbook; lessons to the project in Cortex.
-  gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work' }).catch(() => {});
+  gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work', actor: 'agent' }).catch(() => {});
   try { conversationCapture().agentEvent(`Desktop task "${goal.slice(0, 200)}": ${r.status}${r.verified ? ' (verified)' : ''}${r.summary ? `. ${r.summary.slice(0, 600)}` : ''}`, { actor: 'agent' }); } catch {}
   // A task the agent re-checked and confirmed updates the project's knowledge
   // (Cortex, deduplicated). Unverified claims are never filed as knowledge.

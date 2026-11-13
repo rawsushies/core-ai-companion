@@ -22,6 +22,9 @@ const SECTION = { decision: 'Decisions', lesson: 'Lessons', knowledge: 'Notes', 
 const INGEST_TYPE = { decision: 'decision', lesson: 'lesson', knowledge: 'fact', research: 'note' };
 const QUEUE_MAX = 5000;
 
+// A helper's name for Cortex's logbook: core/<actor>, e.g. core/agent, core/automation:backup.
+function actorName(a) { return String(a || '').toLowerCase().replace(/[^a-z0-9_.:/-]+/g, '-').replace(/^[^a-z0-9]+|-+$/g, '').slice(0, 40); }
+
 const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 // A remembered sentence that is really a project decision belongs to Cortex.
@@ -114,7 +117,7 @@ class MemoryGateway {
     if (await this._has('ingest')) {
       const args = { text, type: INGEST_TYPE[kind] || 'note', source: verified ? 'user' : 'model', verified: verified !== false };
       if (project) args.project = project;
-      if (actor && await this._has('actor')) args.actor = actor;
+      if (actorName(actor) && await this._has('actor')) args.actor = actorName(actor);
       const { data } = await this._callData('brain_ingest', args);
       if (!data) throw new Error('Cortex returned no result');
       if (data.action === 'duplicate') return { stored: 'duplicate', detail: 'already in Cortex', path: data.duplicate_of };
@@ -157,9 +160,13 @@ class MemoryGateway {
   }
 
   // The shared logbook in Cortex: what COre did, for the user and other AIs.
-  async log(summary, { kind = 'work', target = '' } = {}) {
+  async log(summary, { kind = 'work', target = '', actor = '' } = {}) {
     if (!this.cortexOn()) return false;
-    try { await this.cortex.call('brain_log', { summary: String(summary).slice(0, 300), kind, ...(target ? { target } : {}) }); return true; } catch { return false; }
+    const modern = await this._has('actor'); // Cortex 1.6+: any short kind, and a helper name
+    // Older Cortex accepts only work/decision: anything else would be rejected (and lost).
+    const args = { summary: String(summary).slice(0, 300), kind: modern || kind === 'decision' ? kind : 'work', ...(target ? { target } : {}) };
+    if (modern && actorName(actor)) args.actor = actorName(actor);
+    try { await this.cortex.call('brain_log', args); return true; } catch { return false; }
   }
 
   _readQueue() { try { return JSON.parse(fs.readFileSync(this.queueFile, 'utf8')); } catch { return []; } }
@@ -234,4 +241,4 @@ class MemoryGateway {
   }
 }
 
-module.exports = { MemoryGateway, DESTINATION, isDecision };
+module.exports = { MemoryGateway, DESTINATION, isDecision, actorName };

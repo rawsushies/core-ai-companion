@@ -63,3 +63,18 @@ test('the offline queue counts what it has to drop instead of dropping silently'
   assert.strictEqual(g.dropped(), 3);
   assert.strictEqual(g._readQueue()[0].text, 'item 3'); // the oldest go first
 });
+
+test('helper names are cleaned for the logbook', () => {
+  const { actorName } = require('../src/main/memgate');
+  assert.strictEqual(actorName('automation:Nightly Backup!'), 'automation:nightly-backup');
+  assert.strictEqual(actorName('  Forge '), 'forge');
+  assert.strictEqual(actorName(''), '');
+});
+
+test('the logbook names which helper did the work', { skip, timeout: 120000 }, async () => {
+  const g = setup();
+  assert.ok(await g.gate.log('Exported the plans to PDF', { kind: 'work', actor: 'agent' }));
+  assert.ok(await g.gate.log('Backup rule ran', { kind: 'automation', actor: 'automation:Nightly Backup' }));
+  const acts = (await g.cortex.callData('brain_activity', { agent: 'core', limit: 5 })).data.entries;
+  assert.deepStrictEqual(acts.map((a) => [a.agent, a.action]), [['core/automation:nightly-backup', 'automation'], ['core/agent', 'did']]);
+});
