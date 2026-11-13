@@ -15,6 +15,45 @@ calculator and work out 18% of 2,450". It's **off by default** (Settings → Age
 
 Stop at any time: **Esc** (global while a task runs), the **Stop** button, or typing any message.
 
+## Safety policy (13.0)
+
+Every action passes one deterministic gate, `src/main/policy` (no model involved):
+
+| Class | Examples | What happens |
+|---|---|---|
+| R0 view | look, read, wait, scroll | runs |
+| R1 routine in scope | typing and clicking in granted apps, writing/renaming in the shared folder (backed up), sandboxed commands, granted websites | runs without asking under a grant, journaled |
+| R2 high impact | delete, send (outbox, Send buttons), install, other websites, unsandboxed commands, anything outside the folder | asks, unless the task's grant names the category (Settings → Agent → `grantCategories`) |
+| R3 boundary | payments, security settings | always asks |
+| — | passwords and codes, COre's own data folder, refused commands | refused |
+
+- **Grants**: "Approve every step" is manual mode (no grant). "Approve the plan" and "No questions" run under a
+  signed grant for the shared folder; **Allow all for this task** turns manual mode into such a grant (commands
+  still ask one by one). A grant can't be widened; it is checked on every step.
+- **Taint**: an email address, website or command that came from a file, page, email or screen text (not from
+  you) is never used without asking, even inside the grant. Detection of injected text is only a warning; this
+  rule is what stops it.
+- **Journal**: every step is written to `missions/<task>/journal.jsonl` before and after it runs (hash-chained,
+  fsync'd); `/do undo` restores every file the task changed.
+- **Stops**: Esc, Stop, the emergency hotkey (stops the policy itself), and a file named `STOP` in COre's data
+  folder, which refuses every action until it is deleted. `/diagnostics` shows how many steps ran, asked or
+  were refused.
+
+## Missions (13.0): `/autopilot GOAL`
+
+1. COre shows **one** card: the folders, what may happen without asking, the budget and the expiry. Approve once.
+2. It plans 1–10 subgoals, each with a check (a file that must exist or contain something). Each subgoal runs
+   through the same agent loop and safety policy as `/do`, so it can never do more than the grant allows.
+3. Each subgoal is verified from disk; only when no file can show it does Sentinel judge, and the report says so.
+4. A subgoal that fails is retried once with what went wrong; then the mission stops and asks you.
+5. The report lists every subgoal with its evidence. `/mission undo` puts back every file the mission changed;
+   `/mission stop`, Esc, Stop and the emergency hotkey end it.
+6. **Learning**: a verified mission is saved as a playbook route; a nearly identical goal reuses it (still checked
+   step by step). **Hands lease**: mouse and keyboard steps wait while you use the PC.
+7. **Standing missions**: `/mission allow NAME` lets a scheduled desktop playbook run on its own, under a grant you
+   approve once (30 days, signed, never widened). `/mission revoke NAME` ends it. The command center's Missions
+   card shows the plan, the evidence for each step, and Stop/Undo.
+
 ## Actions
 
 | Action | Limits |

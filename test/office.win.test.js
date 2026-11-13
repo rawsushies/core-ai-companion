@@ -37,13 +37,31 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
   fs.writeFileSync(path.join(profile, 'user', 'registrymodifications.xcu'), '<?xml version="1.0" encoding="UTF-8"?>\n<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n<item oor:path="/org.openoffice.Office.Common/Save/Document"><prop oor:name="WarnAlienFormat" oor:op="fuse"><value>false</value></prop></item>\n<item oor:path="/org.openoffice.Setup/Office"><prop oor:name="ooSetupInstCompleted" oor:op="fuse"><value>true</value></prop></item>\n</oor:items>\n');
   const shots = process.env.CORE_SHOTS || dir;
   const shot = (name) => { try { execFileSync('powershell.exe', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $i=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($i); $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); $i.Save('${path.join(shots, name).replace(/'/g, "''")}')`], { stdio: 'ignore', timeout: 20000 }); } catch {} };
-  const app = spawn(SOFFICE, [`-env:UserInstallation=file:///${profile.replace(/\\/g, '/')}`, '--calc', '--norestore', '--nologo', '--infilter=CSV:44,34,76,1', file], { stdio: 'ignore' });
+  const soArgs = [`-env:UserInstallation=file:///${profile.replace(/\\/g, '/')}`, '--calc', '--norestore', '--nologo', '--infilter=CSV:44,34,76,1', file];
+  let app = spawn(SOFFICE, soArgs, { stdio: 'ignore' });
   const uia = new UiaClient({ timeoutMs: 60000 });
   const keys = new WindowsDriver();
   const key = (combo) => keys.perform({ type: 'key', combo });
   try {
     let w = null;
-    for (let i = 0; i < 120 && !w; i++) { await wait(1000); w = (await uia.windows()).find((x) => /budget\.csv/i.test(x.name) && /LibreOffice/i.test(x.name)); }
+    let all = [];
+    let relaunchAt = 0;
+    for (let i = 0; i < 120 && !w; i++) {
+      await wait(1000);
+      all = await uia.windows();
+      w = all.find((x) => /budget\.csv/i.test(x.name) && /LibreOffice|Calc/i.test(x.name));
+      // LibreOffice 26 can open its updater or a first-start question before the sheet.
+      // The updater (a separate process) is closed; a soffice question is answered with Enter.
+      if (!w && i % 5 === 4) {
+        const upd = all.find((x) => /^LibreOffice Update/i.test(x.name) || /updater/i.test(String(x.process || '')));
+        if (upd) { console.log('LibreOffice updater closed:', upd.name); try { await uia.activate(upd.id); await key('escape'); } catch {} try { execFileSync('taskkill', ['/IM', `${upd.process || 'updater'}.exe`, '/F'], { stdio: 'ignore' }); } catch {} relaunchAt = i + 8; continue; }
+        // Closing the updater aborts that start: open the sheet again.
+        if (relaunchAt && i >= relaunchAt) { relaunchAt = 0; console.log('starting Calc again after the updater'); app = spawn(SOFFICE, soArgs, { stdio: 'ignore' }); }
+        const q = all.find((x) => x.process && /soffice/i.test(x.process) && !/budget\.csv/i.test(x.name));
+        if (q) { console.log('LibreOffice asks first:', q.name); try { await uia.activate(q.id); await key('enter'); } catch {} }
+      }
+    }
+    if (!w) { shot('calc-0-missing.png'); console.log('windows:', JSON.stringify(all.map((x) => ({ name: x.name, process: x.process, cls: x.cls })))); }
     assert.ok(w, 'the Calc window with budget.csv is on the desktop');
     console.log('window:', JSON.stringify({ name: w.name, cls: w.cls, process: w.process }));
     const prof = profileFor(w);
@@ -64,6 +82,19 @@ test('OFFICE: COre edits a real LibreOffice Calc sheet and verifies the saved fi
     await keys.perform({ type: 'type', text: '900000' }); await key('enter'); await wait(600);
     shot('calc-2-typed.png');
     await key('ctrl+s'); await wait(3000);
+    // Saving a CSV asks whether to keep the format. Older LibreOffice: "Keep Current Format"
+    // (Enter keeps it, and the profile setting turns it off); 26.x: "Use Text CSV Format",
+    // which ignores that setting. Answer it like COre's Calc profile does: find the button.
+    for (let i = 0; i < 5; i++) {
+      let snap = null;
+      try { snap = await uia.snapshot({ target: 'foreground' }); } catch {}
+      const btn = snap && (snap.elements || []).find((e) => /Button/i.test(e.type) && /Use Text CSV Format|Keep Current Format/i.test(String(e.name || '')));
+      if (!btn) { await wait(600); continue; }
+      console.log('format question answered:', btn.name);
+      try { await uia.invoke(btn.id); } catch { const c = btn.bounds; if (c) await keys.perform({ type: 'click', button: 'left' }, { x: c.x + Math.round(c.w / 2), y: c.y + Math.round(c.h / 2) }); }
+      await wait(2000);
+      break;
+    }
     shot('calc-3-saved.png');
 
     await wait(1500);

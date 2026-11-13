@@ -10,6 +10,32 @@ The earlier roadmap (versions 1 to 10) is kept in [docs/ROADMAP-HISTORY.md](docs
 **Overall estimated completion: 93%** (planning baseline 38%; recalculated from
 verified acceptance criteria below, last update 2026-11-12; unchanged by the 12.1 audit, which verified items already counted as pending work in the knowledge layer: 5 of 6 criteria verified, typing inside Obsidian untested).
 
+## 13.0 Trustworthy Autonomy (in progress)
+
+Plan: [docs/dev/PLAN-13.0.md](docs/dev/PLAN-13.0.md) (approved 2026-11-12). Four pillars: foundation & trust, Level 5
+autonomy within a declared domain, phone as remote body, Jarvis presence. Every row states the **tier** of its
+evidence: T1 simulated · T2 real components on Linux · T3 real Windows CI · T4 the user's own Windows machine.
+Level 5 is claimed only from a T4 run of the 100-task evaluation meeting every threshold; nothing else counts.
+
+**Autonomy level today: L1–L2** (12.x agent: approval per changing step, or one approval for a plan). Not yet measured
+against the 100-task suite beyond the sample below.
+
+| Phase | Criterion | Status | Tier | Evidence |
+|---|---|---|---|---|
+| P0 | 100-task suite (planned mix) + 20 injected variants; every reference solution passes, doing nothing fails | **Verified** | T1 | `test/eval.test.js`, `eval/autonomy/` |
+| P0 | Injection corpus v1, 64 fresh cases (file, web, email, screen, phone), not used for tuning | **Done**; advisory guard flags **8/64 (12.5%)** | T1 | `eval/results/security-detection-v1.md` |
+| P0 | Baseline of the 12.x agent on the suite | Sample only (free-tier model limits); full run needs the evaluation budget (decision 1 in the plan) | T2 | `eval/results/T2-baseline-12x-sample.md` |
+| P1 | One policy engine (grant, risk class, taint) replaces the scattered gates | **Verified** for the app's /do path: decision table, taint, 0/64 corpus attacks allowed, 3000-action property test; the real app's agent e2e tests run through it. The 12.x path stays only for the baseline evaluation | T1 + T2 (real app, Linux) | `test/policy.test.js`, `test/autonomy.test.js`, e2e "desktop agent" |
+| P1 | Write-ahead mission journal; replay after kill; compensation and undo | **Verified**: a real process running a mission is killed with SIGKILL at 5 random moments; each time the journal is intact, matches the disk exactly (finished steps present, only the in-flight step unknown) and undo restores the folder. Also: torn last line dropped, tampering detected. Killing the full Electron app on Windows is still to do | T1 + T2 (real process kill) | `test/autonomy.test.js`, `test/recovery.test.js` |
+| P1 | Emergency stop < 1 s from every source; dead-man | **Verified in the real app (Linux)**: a running mission stops in 17–66 ms from the hotkey, Esc, `/mission stop`, the command center, the STOP file and the phone (a step in progress, or one still being set up, is interrupted); dead-man and STOP refuse further actions. Fixed on the way: a stop during planning left the agent busy until restart (also in 12.x). Windows timing still to measure | T1 + T2 (real app) | e2e "emergency stop timing", "phone as remote body", `test/autonomy.test.js` |
+| P2 | Mission engine: one approval, planned subgoals with checks, run through the same agent loop and policy, deterministic verification first (Sentinel only without a check), one retry with the reason then ask, budgets, journal, report, `/mission undo`; **learning**: a verified mission is saved as a route (playbook) and a near-identical goal reuses it without planning, still verified per subgoal; second tries become lessons in Cortex; **Missions card** in the command center (plan checklist with evidence, policy counts, stop, undo); **hands lease**: mouse/keyboard steps wait while you use the PC, tool steps continue; **standing missions**: `/mission allow NAME` lets a scheduled desktop playbook run as a mission on its own under a signed 30-day grant (`/mission revoke` ends it) | **Implemented and verified with scripted reasoning**: unit (engine, budgets, retry, judge) and a real `/autopilot` mission in the app (one approval, zero step approvals, both subgoals verified from disk, journal intact, undo restores; a second similar mission reuses the saved route; a scheduled run under a standing grant needs no card, and stops running after revoke). With a real model: not yet measured (needs the evaluation budget) | T1 + T2 (real app, Linux) | `test/mission.test.js`, e2e "autopilot" |
+| P3 | Phone: mission feed, biometric-bound approvals, voice, tainted files, capabilities | **Started**: sealed `approve` (bound to the request hash, expires in 5 min, `yes` needs the phone's biometric) and `missionStop`; the feed carries the mission checklist and waiting requests; the phone app shows them; a native fingerprint/face/screen-lock prompt (androidx.biometric) is added to the Android build. Verified with a protocol client against the real app: card reaches the phone, wrong hash and missing biometric refused, approval starts the mission, phone stop ends it. Not yet: voice, files, capabilities, notifications; the PC cannot cryptographically verify the biometric flag (keystore-bound key is future work); not tested on a real phone | T1 + T2 (real app) | `test/companion.test.js`, e2e "phone as remote body" |
+| P4 | Presence: briefing, meeting prep, narration, heads-ups, continuity | Not started | — | — |
+| P5 | 100-task thresholds at T4; recovery and red-team suites | Not started | — | — |
+
+Blockers that only the user can clear: a model budget for the evaluation (free tiers rate-limit after a few tasks),
+access to the user's Windows PC for T4, and the decisions in PLAN-13.0 §9.
+
 ## Memory architecture status
 
 - **COre native memory** (`src/main/memory.js`) = active memory: profile,

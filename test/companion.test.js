@@ -170,3 +170,31 @@ test('the phone app origin may call the API (CORS), other web pages may not; mem
     assert.ok(!JSON.stringify(r.body).includes('green tea'));
   } finally { c.stop(); }
 });
+
+test('missions from the phone: the feed carries the mission and waiting requests; answers are bound to the request hash; stop works', async () => {
+  const hash = 'a'.repeat(64);
+  const answers = [];
+  const { c, sent } = companion({
+    getFeed: () => ({ events: [], status: {}, mission: { goal: 'tidy', status: 'running', subgoals: [{ text: 'sort files', status: 'running' }] }, approvals: [{ id: 'req-12345678', hash, step: '3', label: 'Delete a.tmp', why: 'deleting' }] }),
+    // The real check lives in main.js (answerFromPhone); here it records what arrives.
+    onApprove: (a, d) => { answers.push({ ...a, device: d.name }); return a.hash === hash ? (a.answer === 'yes' && !a.bio ? { ok: false, error: 'needs biometric' } : { ok: true }) : { ok: false, error: 'mismatch' }; },
+    onMissionStop: (d) => sent.push(['MISSION-STOP', d.name]),
+  });
+  const port = await c.start();
+  try {
+    const { deviceId, key } = await pairPhone(c, port);
+    let ctr = 1;
+    const api = async (op, extra = {}) => C.open((await post(port, '/api', { d: deviceId, ...C.seal({ op, ctr: ctr++, ts: Date.now(), ...extra }, key) })).body, key);
+    const feed = await api('sync', { since: 0 });
+    assert.strictEqual(feed.mission.subgoals[0].text, 'sort files');
+    assert.strictEqual(feed.approvals[0].hash, hash);
+    assert.strictEqual((await api('approve', { id: 'req-12345678', hash: 'b'.repeat(64), answer: 'yes', bio: true })).ok, false, 'another request\'s hash does not apply');
+    assert.strictEqual((await api('approve', { id: 'req-12345678', hash, answer: 'yes' })).ok, false, 'yes without the biometric is refused');
+    assert.strictEqual((await api('approve', { id: 'req-12345678', hash, answer: 'yes', bio: true })).ok, true);
+    assert.strictEqual((await api('approve', { id: 'x', hash, answer: 'yes', bio: true })).ok, false, 'malformed ids never reach COre');
+    assert.strictEqual(answers.length, 3);
+    assert.strictEqual(answers[2].device, 'Test phone');
+    await api('missionStop');
+    assert.deepStrictEqual(sent.slice(-1), [['MISSION-STOP', 'Test phone']]);
+  } finally { c.stop(); }
+});

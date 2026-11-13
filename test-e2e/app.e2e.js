@@ -447,6 +447,84 @@ test('emergency stop: the global hotkey halts a running agent task at once', { s
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
 
+test('emergency stop timing: a running mission halts within 1 s from every source (hotkey, Esc, chat, command center, STOP file)', { skip: process.platform !== 'linux' || !require('fs').existsSync('/usr/bin/xdotool') }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: '\\[mission-plan\\]', reply: '1. Keep watching the screen | check: exists never-made.md' },
+    { match: '\\[agent-plan\\]', reply: '1. Watch\nDone when: never' },
+    { match: 'Task: Keep watching', reply: 'Watching. [[act {"type":"wait","ms":4000}]]' },
+  ]));
+  const center = async () => { let c = app.windows().find((p) => p.url().includes('/command/')); if (!c) { await send('/center'); for (let i = 0; i < 40 && !c; i++) { await wait(250); c = app.windows().find((p) => p.url().includes('/command/')); } } return c; };
+  const sources = {
+    hotkey: () => require('child_process').execFileSync('xdotool', ['key', 'ctrl+alt+shift+x']),
+    esc: () => require('child_process').execFileSync('xdotool', ['key', 'Escape']),
+    chat: () => send('/mission stop'),
+    'command center': async () => (await center()).evaluate(() => window.center.action('missionStop')),
+    'STOP file': () => fs.writeFileSync(path.join(userData, 'STOP'), ''),
+  };
+  const times = {};
+  for (const [name, trigger] of Object.entries(sources)) {
+    await send('/autopilot keep an eye on things');
+    await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Goal: keep an eye/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+    await dock.click('#agent-yes');
+    await dock.waitForFunction(() => /Agent step 1: Wait/.test(document.getElementById('log').innerText.slice(document.getElementById('log').innerText.lastIndexOf('/autopilot keep an eye'))), null, { timeout: 30000 });
+    await wait(300); // in the middle of a 4 s step
+    const t0 = Date.now();
+    await trigger();
+    await dock.waitForFunction(() => { const t = document.getElementById('log').innerText; return /Mission (stopped|limit|failed)/.test(t.slice(t.lastIndexOf('/autopilot keep an eye'))); }, null, { timeout: 8000 });
+    times[name] = Date.now() - t0;
+    if (name === 'STOP file') fs.rmSync(path.join(userData, 'STOP'), { force: true });
+    await wait(500);
+  }
+  console.log('stop times (ms):', JSON.stringify(times));
+  for (const [name, ms] of Object.entries(times)) assert.ok(ms < 1000, `${name} stopped the mission in ${ms} ms`);
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('phone as remote body: the mission and its approval reach the phone; answers are bound to the request and need the biometric; the phone stops it', { skip: process.platform !== 'linux' }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: '\\[mission-plan\\]', reply: '1. Keep watching the screen | check: exists never-made.md' },
+    { match: '\\[agent-plan\\]', reply: '1. Watch\nDone when: never' },
+    { match: 'Task: Keep watching', reply: 'Watching. [[act {"type":"wait","ms":4000}]]' },
+  ]));
+  const r = await settings.evaluate(() => window.settingsApi.action('pairPhone'));
+  const u = new URL(r.pair.url);
+  const [pairId, secretB64] = u.hash.replace('#pair=', '').split('.');
+  const base = `${u.protocol}//${u.host}`;
+  const post = async (p, body) => { const res = await fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: res.status, body: await res.json() }; };
+  const deviceId = Buffer.from(nacl.randomBytes(18)).toString('base64url');
+  const key = nacl.randomBytes(32);
+  assert.strictEqual(C.open((await post('/pair', { pairId, deviceId, ...C.seal({ key: Buffer.from(key).toString('base64'), name: 'Mission phone' }, new Uint8Array(Buffer.from(secretB64, 'base64url'))) })).body, new Uint8Array(Buffer.from(secretB64, 'base64url'))).ok, true);
+  let ctr = 1;
+  const api = async (op, extra = {}) => C.open((await post('/api', { d: deviceId, ...C.seal({ op, ctr: ctr++, ts: Date.now(), ...extra }, key) })).body, key);
+  await send('/autopilot keep an eye on things from my phone');
+  let ask = null;
+  for (let i = 0; i < 40 && !ask; i++) { ask = ((await api('sync', { since: 0 })).approvals || [])[0]; if (!ask) await wait(250); }
+  assert.ok(ask && /Goal: keep an eye on things from my phone/.test(ask.label), 'the mission card reached the phone');
+  assert.strictEqual((await api('approve', { id: ask.id, hash: ask.hash, answer: 'yes' })).ok, false, 'yes without the biometric is refused');
+  assert.strictEqual((await api('approve', { id: ask.id, hash: 'f'.repeat(64), answer: 'yes', bio: true })).ok, false, 'an answer for another request is refused');
+  assert.strictEqual((await api('approve', { id: ask.id, hash: ask.hash, answer: 'yes', bio: true })).ok, true);
+  await dock.waitForFunction(() => /Approved from Mission phone/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'the card on the PC closed');
+  let feed = null;
+  for (let i = 0; i < 40 && !(feed && feed.mission && feed.mission.subgoals.length && feed.agentRunning); i++) { feed = await api('sync', { since: 0 }); await wait(250); }
+  assert.strictEqual(feed.mission.goal, 'keep an eye on things from my phone');
+  assert.strictEqual(feed.mission.subgoals[0].text, 'Keep watching the screen');
+  const t0 = Date.now();
+  await api('missionStop');
+  await dock.waitForFunction(() => { const t = document.getElementById('log').innerText; return /Mission stopped/.test(t.slice(t.lastIndexOf('/autopilot keep an eye on things from my phone'))); }, null, { timeout: 8000 });
+  const took = Date.now() - t0;
+  if (took >= 1500) console.log('LOG23:', (await logText()).slice(-1200));
+  assert.ok(took < 1500, `stopped from the phone in ${took} ms`);
+  await settings.evaluate((id) => window.settingsApi.action(`revokePhone:${id}`), deviceId);
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
 test('desktop agent: tools write a file and run a command (always asked), results come back, /do undo restores', { skip: process.platform !== 'linux' }, async () => {
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
   fs.writeFileSync(script, JSON.stringify([
@@ -457,7 +535,7 @@ test('desktop agent: tools write a file and run a command (always asked), result
     { match: 'Step 1 of', reply: 'Writing. [[act {"type":"write","path":"notes.txt","text":"agent notes","why":"save notes"}]]' },
   ]));
   await send('/do write my notes');
-  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write notes\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  try { await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Write notes\.txt/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 }); } catch (err) { console.log('LOG24:', (await logText()).slice(-1200)); throw err; }
   assert.ok(!(await dock.evaluate(() => document.getElementById('agent-all').hidden)), 'file steps can be allowed for the whole task');
   await dock.click('#agent-all');
   await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Run/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
@@ -475,6 +553,67 @@ test('desktop agent: tools write a file and run a command (always asked), result
   const pb = fs.readFileSync(path.join(userData, 'skills', 'note-writer', 'SKILL.md'), 'utf8');
   assert.match(pb, /agent: true/);
   assert.match(pb, /1\. Write notes\.txt/);
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
+  fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('autopilot: one approval, a planned mission runs its subgoals with no further questions, verified from disk; undo restores', { skip: process.platform !== 'linux' }, async () => {
+  await settings.evaluate(() => window.settingsApi.set('agent.enabled', true));
+  fs.writeFileSync(script, JSON.stringify([
+    ...baseRules,
+    { match: '\\[mission-plan\\]', reply: '1. Write minutes.md | check: contains minutes.md :: Attendees glass\n2. Write summary.md | check: exists summary.md' },
+    { match: '\\[agent-plan\\]', reply: '1. Write the file\nDone when: the file exists' },
+    { match: 'reply done again', reply: 'Verified. [[act {"type":"done","summary":"file written and checked"}]]' },
+    { match: 'Step 1 of[\\s\\S]*Task: Write minutes', reply: 'Writing. [[act {"type":"write","path":"minutes.md","text":"Attendees: Ana. Decisions: glass facade."}]]' },
+    { match: 'Step 1 of[\\s\\S]*Task: Write summary', reply: 'Writing. [[act {"type":"write","path":"summary.md","text":"We chose glass."}]]' },
+    { match: 'Step \\d of[\\s\\S]*Task: Write (minutes|summary)', reply: 'Done. [[act {"type":"done","summary":"file written"}]]' },
+  ]));
+  await send('/autopilot make the meeting minutes and a summary');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Goal: make the meeting minutes/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  assert.match(await dock.textContent('#agent-label'), /Always asks: passwords, payments/);
+  await dock.click('#agent-yes');
+  try { await dock.waitForFunction(() => /Mission complete: make the meeting minutes/.test(document.getElementById('log').innerText), null, { timeout: 60000 }); } catch (err) { console.log('LOG:', (await logText()).slice(-1500)); throw err; }
+  const log = await logText();
+  assert.match(log, /✓ Write minutes\.md \(verified/);
+  assert.match(log, /✓ Write summary\.md \(verified/);
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'no step needed an approval');
+  assert.match(fs.readFileSync(path.join(project, 'minutes.md'), 'utf8'), /glass facade/);
+  const missions = fs.readdirSync(path.join(userData, 'missions')).filter((d) => d.startsWith('m-'));
+  const j = require('../src/main/missions/journal').Journal.replay(path.join(userData, 'missions', missions[missions.length - 1], 'journal.jsonl'));
+  assert.ok(j.intact && j.status === 'done' && j.plan.length === 2, JSON.stringify({ intact: j.intact, status: j.status }));
+  await send('/mission undo');
+  await dock.waitForFunction(() => /Undone: 2 files from the mission/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  assert.ok(!fs.existsSync(path.join(project, 'minutes.md')) && !fs.existsSync(path.join(project, 'summary.md')));
+  // Learning: the verified mission was saved as a route; a near-identical goal reuses it (no planning call).
+  assert.match(await logText(), /Saved this mission's route as "mission-/);
+  fs.writeFileSync(script, JSON.stringify([...JSON.parse(fs.readFileSync(script, 'utf8')).filter((r) => !/mission-plan/.test(r.match))]));
+  await send('/autopilot make the meeting minutes and a short summary');
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Goal: make the meeting minutes and a short/.test(document.getElementById('agent-label').textContent), null, { timeout: 20000 });
+  await dock.click('#agent-yes');
+  await dock.waitForFunction(() => /Mission complete: make the meeting minutes and a short summary/.test(document.getElementById('log').innerText), null, { timeout: 60000 });
+  assert.match(await logText(), /Reusing what worked before \("mission-[^"]+", 2 steps\)/);
+  await send('/mission undo');
+  await dock.waitForFunction(() => (document.getElementById('log').innerText.match(/Undone: 2 files from the mission/g) || []).length === 2, null, { timeout: 8000 });
+  // Standing grant: the learned route runs on its schedule with no card, only after you allow it once.
+  const route = /Saved this mission's route as "([^"]+)"/.exec(await logText())[1];
+  await send(`/mission allow ${route}`);
+  await dock.waitForFunction(() => !document.getElementById('agent-card').hidden && /Standing mission|Playbook: mission-/.test(document.getElementById('agent-label').textContent), null, { timeout: 10000 });
+  assert.match(await dock.textContent('#agent-label'), /expires/);
+  await dock.click('#agent-yes');
+  await dock.waitForFunction((r) => document.getElementById('log').innerText.includes(`${r} will run on its own`), route, { timeout: 8000 });
+  const cc0 = app.windows().find((p) => p.url().includes('/command/'));
+  const fire = async () => { const c = cc0 || app.windows().find((p) => p.url().includes('/command/')); if (c) return c.evaluate((n) => window.center.action('runWorkflow', n), route); await send('/center'); };
+  if (!cc0) { await send('/center'); for (let i = 0; i < 40 && !app.windows().find((p) => p.url().includes('/command/')); i++) await wait(250); }
+  await fire();
+  await dock.waitForFunction((r) => { const t = document.getElementById('log').innerText; const i = t.lastIndexOf(`Workflow: ${r}`); return i >= 0 && /Mission complete: make the meeting minutes and a summary/.test(t.slice(i)); }, route, { timeout: 60000 });
+  assert.match((await logText()).slice((await logText()).lastIndexOf(`Workflow: ${route}`)), /Reusing what worked before/);
+  assert.ok(await dock.evaluate(() => document.getElementById('agent-card').hidden), 'a standing mission runs without a card');
+  assert.ok(fs.existsSync(path.join(project, 'minutes.md')), 'the scheduled mission did its work');
+  await send('/mission undo');
+  await send(`/mission revoke ${route}`);
+  await dock.waitForFunction((r) => document.getElementById('log').innerText.includes(`${r} no longer runs on its own`), route, { timeout: 8000 });
+  await fire();
+  await dock.waitForFunction((r) => document.getElementById('log').innerText.includes(`let it run on its own as a mission with /mission allow ${r}`), route, { timeout: 8000 });
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
 });
@@ -546,6 +685,15 @@ test('command center: shows cores, tasks, playbooks, memory, devices and the act
   assert.match(await cc.textContent('#playbooks'), /code-review → Sentinel/);
   assert.match(await cc.textContent('#playbooks'), /weekdays 08:45 \(off\)/);
   assert.match(await cc.textContent('#agent'), /Step \d+/, 'the last agent task is shown');
+  // Missions: the last /autopilot mission as a checklist with its evidence, plus the policy counts.
+  await cc.waitForFunction(() => /2\/2 verified/.test(document.getElementById('mission').textContent), null, { timeout: 8000 }); // the prebuilt window refreshes on show
+  const mission = await cc.textContent('#mission');
+  assert.match(mission, /make the meeting minutes and a summary/, 'the last mission (the scheduled one)');
+  assert.doesNotMatch(mission, /Undo mission/, 'undone from the chat: nothing left to undo');
+  assert.match(mission, /2\/2 verified · [1-9]\d* steps/);
+  assert.doesNotMatch(mission, /Stop mission/, 'a finished mission offers no stop');
+  assert.match(mission, /✓ Write minutes\.md[\s\S]*checked on disk/);
+  assert.match(await cc.textContent('#policy-stats'), /\d+ steps on their own, \d+ asked, \d+ refused/);
   assert.match(await cc.textContent('#files'), /No files yet|ready/);
   assert.match(await cc.textContent('#memory'), /\d+memories\d+pinned\d+replaced/, 'memory numbers are shown');
   await cc.waitForFunction(() => document.querySelectorAll('#audit li time').length > 3, null, { timeout: 5000 });

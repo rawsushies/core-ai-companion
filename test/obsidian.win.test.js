@@ -37,6 +37,8 @@ test('OBSIDIAN: COre sets up the vault and the real Obsidian opens it', { skip: 
     for (let i = 0; i < 90 && !w; i++) { await wait(1000); w = (await uia.windows()).find((x) => /COre Vault/i.test(x.name) && /Obsidian/i.test(x.name)); }
     console.log('windows:', JSON.stringify((await uia.windows()).map((x) => x.name)));
     assert.ok(w, 'Obsidian opened the COre vault');
+    // The vault window can appear before the note loads: give the title a moment to name it.
+    for (let i = 0; i < 20 && !/Tower|Welcome to COre/.test(w.name); i++) { await wait(1000); w = (await uia.windows()).find((x) => /COre Vault/i.test(x.name) && /Obsidian/i.test(x.name)) || w; }
     // The title names the open note and vault ("Tower - COre Vault - Obsidian"); the control
     // tree is extra evidence only (Electron's can be slow or empty to UI Automation).
     let text = '';

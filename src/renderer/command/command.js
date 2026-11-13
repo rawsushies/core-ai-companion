@@ -51,6 +51,34 @@
     if (row.childNodes.length) box.append(row);
   }
 
+  // Missions (/autopilot): the plan as a checklist with the evidence for every subgoal.
+  function renderMission(m, pol) {
+    const box = $('mission');
+    box.textContent = '';
+    $('policy-stats').textContent = pol ? `· ${pol.allowed} steps on their own, ${pol.asked} asked, ${pol.refused} refused${pol.halted ? ' · HALTED (STOP file)' : ''}` : '';
+    if (!m) { box.append(el('div', 'muted', 'No mission yet. Start one with /autopilot and a goal in the chat: you approve once, COre does the rest and checks every step.')); return; }
+    const head = el('ul', 'list');
+    const li = el('li');
+    li.append(el('span', 'grow muted', `${m.subgoals.filter((x) => x.status === 'done').length}/${m.subgoals.length} verified · ${m.steps || 0} steps · ${ago(m.startedAt)}`), el('span', `pill ${m.running ? 'running' : m.status === 'done' ? 'ok' : m.status === 'ask' ? '' : 'error'}`, m.running ? 'running' : m.status === 'ask' ? 'needs you' : m.status));
+    head.append(li);
+    box.append(el('div', 'goal', m.goal), head);
+    const ul = el('ul', 'list subgoals');
+    const icon = { done: '✓', failed: '✗', running: '…', pending: '·', waiting: '?' };
+    for (const sg of m.subgoals) {
+      const row = el('li', `sg ${sg.status}`);
+      const g = el('div', 'grow');
+      g.append(el('div', '', `${icon[sg.status] || '·'} ${sg.text}`), el('div', 'muted', sg.evidence ? `${sg.evidence.kind === 'deterministic' ? 'checked on disk' : sg.evidence.kind === 'judged' ? 'judged by Sentinel' : 'not verified'}: ${String(sg.evidence.detail || '').slice(0, 140)}${sg.attempts > 1 ? ` · ${sg.attempts} tries` : ''}` : sg.checked ? 'checked on disk when done' : 'Sentinel judges when done'));
+      row.append(g);
+      ul.append(row);
+    }
+    if (m.subgoals.length) box.append(ul);
+    if (m.question || m.reason) box.append(el('div', 'muted', m.question || m.reason));
+    const row = el('div', 'row');
+    if (m.running) row.append(button('Stop mission', () => act('missionStop', null, 'Stopping'), 'btn danger'));
+    if (!m.running && m.changed) row.append(button(`Undo mission (${m.changed} file${m.changed === 1 ? '' : 's'})`, () => act('missionUndo')));
+    if (row.childNodes.length) box.append(row);
+  }
+
   function renderBrains(r) {
     const ul = $('brains');
     ul.textContent = '';
@@ -182,6 +210,7 @@
     renderCores(s.cores);
     renderTasks(s.tasks);
     renderPlaybooks(s);
+    renderMission(s.mission, s.policy);
     renderMemory(s.memory);
     if (s.cortex) $('memory').append(el('div', 'muted', s.cortex.on ? `Cortex: connected${s.cortex.last ? ` · last recall ${s.cortex.last.cortex}` : ''}${s.cortex.pending ? ` · ${s.cortex.pending} waiting` : ''}` : 'Cortex: not connected (Settings, Privacy)'));
     renderDevices(s.devices, s.files);

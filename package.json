@@ -14,6 +14,8 @@
     "dist": "electron-builder --win nsis --x64",
     "e2e": "node --test --test-concurrency=1 test-e2e/app.e2e.js",
     "benchmark": "node scripts/benchmark.js --out docs/BENCHMARKS.md",
+    "eval:autonomy": "node eval/autonomy/run.js",
+    "eval:security": "node eval/security/run.js --out eval/results/security-detection-v1.md",
     "validate:providers": "node scripts/real-providers.js --out docs/REAL-PROVIDERS.md",
     "benchmark:latency": "node scripts/benchmark-latency.js --out docs/LATENCY.md"
   },

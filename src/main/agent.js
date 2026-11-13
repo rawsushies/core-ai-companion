@@ -20,6 +20,7 @@ const KEY_RE = /^((ctrl|control|alt|shift|super|win|cmd|meta)\+){0,3}([a-z0-9]|f
 const BLOCKED_KEYS = new Set(['ctrl+alt+delete', 'ctrl+alt+del', 'super+l', 'win+l', 'ctrl+shift+escape', 'ctrl+shift+esc', 'alt+f4']);
 
 const SAFE = new Set(['wait', 'scroll', 'move', 'done', 'ask', 'read', 'focus', 'expand']); // nothing changes beyond viewing
+const HANDS = new Set(['click', 'type', 'key', 'scroll', 'move', 'open', 'press', 'fill', 'focus', 'expand']); // take the mouse, keyboard or focus
 // Control actions (Windows UI Automation): target a control by its id from the
 // latest control list instead of by pixels.
 const UI = new Set(['press', 'fill', 'expand', 'focus']);
@@ -344,9 +345,15 @@ class AgentRunner {
   }
 
   // resume: a state saved by checkpoint() ({ goal, history, step, allowAll, verified }).
-  async run(goal, { resume = null } = {}) {
+  async run(goal, opts = {}) {
     if (this.running) throw new Error('The agent is already working on a task.');
     this.running = true;
+    this.goal = goal;
+    // Every way out (including a stop while still planning) clears the running flag.
+    try { return await this._run(goal, opts); } finally { this.running = false; }
+  }
+
+  async _run(goal, { resume = null } = {}) {
     this.ac = new AbortController();
     this.reason = null;
     const signal = this.ac.signal;
@@ -357,6 +364,9 @@ class AgentRunner {
     let changed = history.some((h) => h.changed);
     let first = resume && resume.step ? resume.step + 1 : 1;
     const report = (o) => { try { this.d.onStep(o); } catch {} };
+    // A model call that is slow to cancel never holds up a stop.
+    const yieldTo = (p) => Promise.race([p, new Promise((_, rej) => { const e = Object.assign(new Error('stopped'), { aborted: true }); if (signal.aborted) rej(e); else signal.addEventListener('abort', () => rej(e), { once: true }); })]);
+    const think = (args) => yieldTo(this.d.think(args));
     const save = (step, status = 'running') => { if (this.d.checkpoint) try { this.d.checkpoint({ goal, history, step, allowAll, status, plan, at: Date.now() }); } catch {} };
     const stopped = () => ({ status: 'stopped', reason: this.reason, steps: history });
     // Plan once (not when resuming a task that already has one).
@@ -367,7 +377,7 @@ class AgentRunner {
         let ui0 = null;
         if (this.d.uia) { try { ui0 = await this.d.uia.snapshot(); } catch {} }
         if (signal.aborted) return stopped();
-        plan = parsePlan(await this.d.think({ text: planPrompt(goal, shot0, this.d.experience || '', ui0 ? UIA.outline(ui0, { maxLines: 40 }) : ''), shot: shot0, signal }));
+        plan = parsePlan(await think({ text: planPrompt(goal, shot0, this.d.experience || '', ui0 ? UIA.outline(ui0, { maxLines: 40 }) : ''), shot: shot0, signal }));
       } catch (err) { if (signal.aborted) return stopped(); plan = null; }
       if (plan) report({ plan });
     }
@@ -382,13 +392,18 @@ class AgentRunner {
     try {
       for (let step = first; step <= this.d.maxSteps; step++) {
         if (signal.aborted) return stopped();
+        // Dead-man rule: a policy that was stopped or stopped beating ends the task.
+        if (this.d.policy && !this.d.policy.alive()) { save(step, 'stopped'); return { status: 'stopped', reason: 'the safety check was stopped, so nothing more is done', steps: history }; }
         const shot = await this.d.screenshot();
         if (signal.aborted) return stopped();
         let ui = null;
         if (this.d.uia) { try { ui = await this.d.uia.snapshot(); } catch { ui = null; } }
+        // Text on screen (control names and values) comes from apps, not from the user.
+        if (this.d.policy && ui) this.d.policy.taint.add((ui.elements || []).map((e) => `${e.name || ''} ${e.value || ''}`).join('\n'), 'screen');
         const note = verifying ? `You said the task is done. Look at this fresh screenshot (and the last results) and confirm${plan && plan.doneWhen ? ` against: ${plan.doneWhen}` : ''}: reply done again if it really is finished, otherwise keep going.` : advice;
         advice = '';
-        const reply = await this.d.think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '', controls: ui ? UIA.outline(ui) : '', plan }), shot, signal });
+        let reply;
+        try { reply = await think({ text: agentPrompt(goal, history, shot, step, this.d.maxSteps, { tools: !!this.d.tools, note, experience: this.d.experience || '', controls: ui ? UIA.outline(ui) : '', plan }), shot, signal }); } catch (err) { if (signal.aborted) return stopped(); throw err; }
         if (signal.aborted) return stopped();
         const ex = extractAction(reply);
         const v = ex.error ? ex : validateAction(ex.raw, shot, ui);
@@ -413,23 +428,58 @@ class AgentRunner {
           report({ step, error: `${label}: tool actions are off` });
           continue;
         }
-        const forced = TOOL.has(a.type) && this.d.tools.mustAsk && this.d.tools.mustAsk(a);
-        if ((!allowAll && !SAFE.has(a.type)) || forced) {
-          const answer = await this.d.approve(a, { step, label, shot, forced });
-          if (signal.aborted) return stopped();
-          if (answer === 'no') { save(step, 'stopped'); return { status: 'stopped', reason: 'you declined a step', steps: history }; }
-          if (answer === 'all' && !forced) allowAll = true;
+        let decision = null;
+        if (this.d.policy) {
+          // 13.0: one deterministic gate (src/main/policy). The model proposes; the policy decides.
+          const P = this.d.policy;
+          P.beat();
+          const focused = ui && (ui.elements || []).find((e) => e.focused);
+          decision = P.decide(a, { ui, window: shot && shot.window ? shot.window : null, focused: focused ? String(focused.name || '') : '' });
+          if (decision.decision === 'deny') {
+            history.push({ label, ok: false, error: `refused by COre's safety rules: ${decision.reasons.join('; ')}`, refused: true });
+            report({ step, action: a, label, error: `Refused: ${decision.reasons.join('; ')}`, policy: decision });
+            if (history.slice(-3).length === 3 && history.slice(-3).every((h) => h.refused)) { save(step, 'failed'); return { status: 'failed', reason: 'the safety rules refused the last three steps', steps: history }; }
+            continue;
+          }
+          if (decision.decision === 'escalate') {
+            const answer = await this.d.approve(a, { step, label, shot, forced: !decision.offerGrant, policy: decision });
+            if (signal.aborted) return stopped();
+            if (answer === 'all' && decision.offerGrant && this.d.onAllowAll) { try { await this.d.onAllowAll(); } catch {} }
+            if (answer === 'no') {
+              history.push({ label, ok: true, result: `The user declined this (${decision.reasons.join('; ')}). Do not try it again; finish what is allowed or ask.`, declined: true });
+              report({ step, action: a, label, declined: true, policy: decision });
+              save(step);
+              if (history.slice(-2).length === 2 && history.slice(-2).every((h) => h.declined)) { save(step, 'stopped'); return { status: 'stopped', reason: 'you declined two steps in a row', steps: history }; }
+              continue;
+            }
+          }
+          if (this.d.journal) this.d.journal({ phase: 'intent', step, action: a, decision });
+        } else {
+          const forced = TOOL.has(a.type) && this.d.tools.mustAsk && this.d.tools.mustAsk(a);
+          if ((!allowAll && !SAFE.has(a.type)) || forced) {
+            const answer = await this.d.approve(a, { step, label, shot, forced });
+            if (signal.aborted) return stopped();
+            if (answer === 'no') { save(step, 'stopped'); return { status: 'stopped', reason: 'you declined a step', steps: history }; }
+            if (answer === 'all' && !forced) allowAll = true;
+          }
         }
         report({ step, action: a, label, running: true, shot });
         let ok = true;
         let error = '';
         let result = '';
+        // Hands lease: steps that use the mouse or keyboard wait while the user is using
+        // the PC (missions run alongside you); tool steps carry on.
+        if (this.d.waitHands && HANDS.has(a.type)) {
+          try { await this.d.waitHands({ signal, step, label }); } catch {}
+          if (signal.aborted) return stopped();
+        }
         try {
-          if (a.type === 'wait') await new Promise((r) => setTimeout(r, a.ms));
+          if (a.type === 'wait') await new Promise((r) => { const t = setTimeout(r, a.ms); signal.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true }); }); // a stop ends the wait at once
           else if (a.type === 'open') await this.d.openApp(a.app);
           else if (UI.has(a.type)) result = await this._ui(a);
           else if (TOOL.has(a.type)) {
             const out = await this.d.tools[a.type](a, { signal });
+            if (this.d.policy && ['read', 'fetch', 'run'].includes(a.type)) this.d.policy.taint.add(String(out == null ? '' : out), a.type === 'fetch' ? `web page ${a.url}` : a.type === 'run' ? 'command output' : `file ${a.path}`);
             result = this.d.untrusted(String(out == null ? '' : out).slice(0, 6000), a.type === 'fetch' ? `web page ${a.url}` : a.type === 'run' ? 'command output' : `file ${a.path || a.to}`);
           } else {
             const p = ['click', 'move'].includes(a.type) || (a.type === 'scroll' && a.x != null) ? toScreen(a, shot) : null;
@@ -439,6 +489,7 @@ class AgentRunner {
         const did = ok && !['wait', 'read', 'fetch', 'move', 'scroll', 'focus', 'expand'].includes(a.type);
         if (did) changed = true;
         history.push({ label, ok, error, ...(result ? { result } : {}), ...(did ? { changed: true } : {}) });
+        if (this.d.journal && decision) this.d.journal({ phase: 'result', step, action: a, ok, error });
         if (this.d.log) this.d.log(`agent step ${step}: ${label}${ok ? '' : ` failed: ${error}`}`);
         report({ step, action: a, label, ok, error, result });
         save(step);
@@ -462,7 +513,7 @@ class AgentRunner {
       save(this.d.maxSteps, 'limit');
       return { status: 'limit', reason: `stopped after ${this.d.maxSteps} steps`, steps: history };
     } finally {
-      this.running = false;
+      // (run() clears the running flag.)
     }
   }
 }
