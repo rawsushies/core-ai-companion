@@ -35,7 +35,16 @@ jobs:
       - run: npm run check
       - name: Cortex knowledge vault for the memory gateway tests
         shell: bash
-        run: git clone --depth 1 https://github.com/rawsushies/cortex-ai-brain "$RUNNER_TEMP/cortex" && echo "CORTEX_DIR=$RUNNER_TEMP/cortex" >> "$GITHUB_ENV"
+        # The same pinned commit the installer bundles (scripts/ci/bundle.sh), not whatever main is today.
+        run: |
+          ref="${CORTEX_REF:-$(sed -n 's/^CORTEX_REF="\${CORTEX_REF:-\([0-9a-f]\{40\}\)}".*/\1/p' scripts/ci/bundle.sh)}"
+          test -n "$ref"
+          d="$RUNNER_TEMP/cortex"
+          git init -q "$d" && git -C "$d" remote add origin https://github.com/rawsushies/cortex-ai-brain
+          for i in 1 2 3; do git -C "$d" fetch -q --depth 1 origin "$ref" && break; [ "$i" = 3 ] && exit 1; sleep $((i * 10)); done
+          git -C "$d" checkout -q FETCH_HEAD
+          echo "Cortex for the tests: $ref"
+          echo "CORTEX_DIR=$d" >> "$GITHUB_ENV"
       - name: Sandbox backend for the agent's commands, Syncthing for the vault acceptance (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap syncthing >/dev/null && (bwrap --ro-bind / / --unshare-all true && echo bwrap works || echo "bwrap blocked here; sandbox tests will skip")

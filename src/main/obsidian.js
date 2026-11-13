@@ -19,6 +19,15 @@ function vaultPath(cfgVault, env = process.env, home = os.homedir()) {
   } catch { return ''; }
 }
 
+// COre and Cortex must use one vault: Cortex's own config (used by its app and every other AI app)
+// vs the folder COre starts Cortex with. -> null when they agree (or one is unknown), else both paths.
+function vaultMismatch(coreVault, env = process.env, home = os.homedir()) {
+  const cortexVault = vaultPath('', env, home);
+  if (!coreVault || !cortexVault) return null;
+  const n = (p) => { const r = path.resolve(p).replace(/[\\/]+$/, ''); return process.platform === 'win32' ? r.toLowerCase() : r; };
+  return n(coreVault) === n(cortexVault) ? null : { core: path.resolve(coreVault), cortex: cortexVault };
+}
+
 const isObsidianVault = (vault) => !!vault && fs.existsSync(path.join(vault, '.obsidian'));
 
 // A note reference from Cortex ("Projects/Lakeside.md") -> an obsidian:// link.
@@ -91,4 +100,4 @@ function registerVault(vault, { file = obsidianConfigPath(), now = Date.now(), i
 // Windows: Obsidian's official package through winget (only when the user asks).
 const OBSIDIAN_WINGET = ['install', '--id', 'Obsidian.Obsidian', '-e', '--silent', '--accept-source-agreements', '--accept-package-agreements'];
 
-module.exports = { vaultPath, isObsidianVault, noteUri, obsidianConfigPath, obsidianInstalled, ensureVault, registerVault, OBSIDIAN_WINGET };
+module.exports = { vaultPath, isObsidianVault, noteUri, obsidianConfigPath, obsidianInstalled, ensureVault, registerVault, OBSIDIAN_WINGET, vaultMismatch };

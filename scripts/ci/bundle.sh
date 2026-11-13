@@ -5,7 +5,7 @@
 # The Cortex commit is pinned (CORTEX_REF overrides it) and PyInstaller's version is pinned in
 # bundle-requirements.txt, so the same commit always builds the same Cortex.exe.
 set -euo pipefail
-CORTEX_REF="${CORTEX_REF:-87ca5374bb884a8b5f59fde0de36ac7e284868ec}" # rawsushies/cortex-ai-brain main after #1 (Syncthing conflicts)
+CORTEX_REF="${CORTEX_REF:-6b2abcd98cb9f731e0ee40e8d8dfa50c8608dfd4}" # rawsushies/cortex-ai-brain cortex-2: memory gateway, structured results, review (M1-M3); CI tests run against this same commit
 src="${RUNNER_TEMP:-/tmp}/cortex-src"
 rm -rf "$src" vendor/cortex vendor/models
 mkdir -p "$src"

@@ -23,6 +23,18 @@ function parseTasks(text) {
   return out;
 }
 
+// Cortex 1.6+ returns the tasks as data; older versions only as "- [ ] …" lines.
+async function openTasks(cortex) {
+  if (typeof cortex.callData === 'function') {
+    const { text, data } = await cortex.callData('brain_tasks', { action: 'list', status: 'open' });
+    if (data && Array.isArray(data.tasks)) {
+      return data.tasks.filter((t) => !t.done).map((t) => ({ text: String(t.text).replace(/\s*📅\s*\d{4}-\d{2}-\d{2}\s*$/u, '').trim(), due: t.due || '', overdue: !!t.overdue, path: t.path }));
+    }
+    return parseTasks(text);
+  }
+  return parseTasks(await cortex.call('brain_tasks', { action: 'list', status: 'open' }));
+}
+
 class Opportunities {
   // deps: agentTask() -> checkpoint|null; cortex: { call } | null; cortexOn() -> bool;
   //       automationHistory() -> { ruleId: [outcomes] }; pending() -> number; now()
@@ -44,7 +56,7 @@ class Opportunities {
     // Overdue and due-today to-dos from Cortex.
     if (this.d.cortex && this.d.cortexOn()) {
       try {
-        const tasks = parseTasks(await this.d.cortex.call('brain_tasks', { action: 'list', status: 'open' }));
+        const tasks = await openTasks(this.d.cortex);
         const today = new Date(now).toISOString().slice(0, 10);
         for (const t of tasks.filter((x) => x.overdue).slice(0, 3)) found.push({ id: `task:${t.path}:${t.text}`, source: 'cortex', score: 80, text: `Overdue since ${t.due}: "${t.text.slice(0, 90)}" (${t.path}).`, action: `/do ${t.text.slice(0, 120)}` });
         for (const t of tasks.filter((x) => !x.overdue && x.due === today).slice(0, 2)) found.push({ id: `task:${t.path}:${t.text}`, source: 'cortex', score: 70, text: `Due today: "${t.text.slice(0, 90)}" (${t.path}).`, action: `/do ${t.text.slice(0, 120)}` });
@@ -80,4 +92,4 @@ class Opportunities {
   }
 }
 
-module.exports = { Opportunities, parseTasks };
+module.exports = { openTasks,  Opportunities, parseTasks };

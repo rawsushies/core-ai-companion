@@ -73,3 +73,15 @@ test('automatic setup: the vault is added to Obsidian\'s vault list once, other 
   assert.match(registerVault(v, { file }), /left untouched/);
   assert.strictEqual(fs.readFileSync(file, 'utf8'), '{broken');
 });
+
+test('one vault: a mismatch between COre and Cortex is reported, matching or unknown folders are not', () => {
+  const { vaultMismatch } = require('../src/main/obsidian');
+  const home = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'core-vm-'));
+  require('fs').mkdirSync(require('path').join(home, '.config', 'cortex'), { recursive: true });
+  require('fs').writeFileSync(require('path').join(home, '.config', 'cortex', 'config.json'), JSON.stringify({ vault: '/data/Brain' }));
+  const P = require('path');
+  assert.strictEqual(vaultMismatch(P.resolve('/data/Brain/'), {}, home), null);
+  assert.deepStrictEqual(vaultMismatch('/docs/COre Vault', {}, home), { core: P.resolve('/docs/COre Vault'), cortex: P.resolve('/data/Brain') });
+  assert.strictEqual(vaultMismatch('', {}, home), null);
+  assert.strictEqual(vaultMismatch('/x', {}, require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'core-vm2-'))), null);
+});

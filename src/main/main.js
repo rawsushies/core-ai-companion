@@ -127,7 +127,7 @@ const policyStats = { allow: 0, journal: 0, escalate: 0, deny: 0, last: [] }; //
 const stopFile = () => path.join(app.getPath('userData'), 'STOP'); // present = every agent action is refused
 // Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
 const { CortexClient } = require('./cortex');
-const { MemoryGateway, isDecision } = require('./memgate');
+const { MemoryGateway, isDecision, userVouches } = require('./memgate');
 let cortexClient = null;
 let memGate = null;
 function cortexCfg() {
@@ -137,11 +137,38 @@ function cortexCfg() {
   const { command, args, vault } = require('./cortex').resolveCortex(c, { resourcesPath: app.isPackaged ? process.resourcesPath : '', documents });
   return { command, args, vault };
 }
+// COre's own chat, archived in Cortex like any other AI app's (see convcapture.js).
+let convCap = null;
+function conversationCapture() {
+  if (!convCap) {
+    const { ConversationCapture } = require('./convcapture');
+    convCap = new ConversationCapture({
+      cortex: { has: (f) => gateway().cortex.has(f), callData: (n, a) => gateway().cortex.callData(n, a) },
+      enabled: () => gateway().cortexOn() && config.data.memory.cortex.captureConversations !== false,
+      queueFile: path.join(app.getPath('userData'), 'cortex-conversations.json'),
+    });
+  }
+  return convCap;
+}
+
+// Cortex speaks first (notifications/cortex/*): due tasks become a card; changes and due tasks
+// can start automations (events.cortex, off until the user allows it). Changes COre made itself
+// never come back (Cortex filters them), so this can't loop on its own writes.
+function onCortexEvent(name, p = {}) {
+  try {
+    if (name === 'task_due' && Array.isArray(p.tasks) && p.tasks.length) {
+      const list = p.tasks.slice(0, 5).map((t) => `• ${String(t.text || '').replace(/\s*📅.*$/u, '')}${t.due ? ` (due ${t.due}${t.overdue ? ', overdue' : ''})` : ''}`).join('\n');
+      addTranscript('system', `From your Cortex vault, due now:\n${list}`, { kind: 'reminder' });
+    }
+    if (eventMonitor && (config.data.events || {}).cortex) eventMonitor.cortex(name, p);
+  } catch (err) { console.error('[core] cortex event:', err.message); }
+}
+
 function gateway() {
   const want = JSON.stringify(cortexCfg());
   if (!memGate || memGate.cfgKey !== want || memGate.memory !== memory) {
     if (cortexClient) cortexClient.dispose();
-    cortexClient = new CortexClient({ cfg: cortexCfg() });
+    cortexClient = new CortexClient({ cfg: cortexCfg(), onEvent: (name, p) => onCortexEvent(name, p) });
     memGate = new MemoryGateway({ memory, cortex: cortexClient, enabled: () => !!(config.data.memory.cortex && config.data.memory.cortex.enabled) && config.data.memory.enabled !== false, queueFile: path.join(app.getPath('userData'), 'cortex-queue.json') });
     memGate.cfgKey = want;
   }
@@ -234,6 +261,7 @@ function addTranscript(role, text, meta = {}) {
   const entry = { role, text, ts: Date.now(), ...meta, seq: ++transcriptSeq };
   transcript.push(entry);
   if (transcript.length > 200) transcript.shift();
+  try { if (memory && config.data.memory.enabled !== false) conversationCapture().add(entry); } catch {}
   state.set('transcript', transcript.slice(-100));
   toPanel('transcript:add', entry);
   // Prime's own replies reach the dock as a live stream instead.
@@ -1257,7 +1285,7 @@ async function memoryMaintain(arg = '') {
     if (!maintenancePlan || Date.now() - maintenancePlan.at > 3600_000) { addTranscript('system', 'Run /memory maintain first to see what would change.'); return; }
     const r = await gateway().applyMaintenance(maintenancePlan, { merge: true, retire: a === 'apply all', flush: true });
     toolAudit({ event: 'memory-maintenance', approved: a, ...r });
-    gateway().log(`Knowledge maintenance approved: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered}`, { kind: 'maintenance' }).catch(() => {});
+    gateway().log(`Knowledge maintenance approved: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered}`, { kind: 'maintenance', actor: 'maintenance' }).catch(() => {});
     maintenancePlan = null;
     toDock('dock:memory', memory.list());
     addTranscript('system', `Done: merged ${r.merged}, retired ${r.retired}, delivered ${r.delivered} to Cortex.`);
@@ -1801,8 +1829,12 @@ function handleActionTag(item) {
     // Project decisions belong to long-term knowledge (Cortex) when it is connected.
     const proj = /^#([\p{L}\p{N}_-]+)\s+/u.exec(item.text);
     if (gateway().cortexOn() && isDecision(item.text)) {
-      gateway().remember(item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, ''), { kind: 'decision', project: proj ? proj[1] : currentProject() }).then((w) => {
-        toDock('dock:message', { role: 'system', text: w.stored === 'cortex' ? `Saved to Cortex: ${w.detail}` : w.stored === 'duplicate' ? 'Already in Cortex.' : `Kept for Cortex (${w.detail}).` });
+      // Verified when the user asked to keep it or said it themselves; a decision the model came up
+      // with on its own waits in Cortex's review until the user accepts it.
+      const lastUser = [...transcript].reverse().find((e) => e.role === 'user');
+      const text = item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, '');
+      gateway().remember(text, { kind: 'decision', project: proj ? proj[1] : currentProject(), verified: userVouches(lastUser && lastUser.text, text), actor: 'prime' }).then((w) => {
+        toDock('dock:message', { role: 'system', text: w.stored === 'cortex' ? `Saved to Cortex: ${w.detail}` : w.stored === 'review' ? `Saved to Cortex for your review: ${w.detail}` : w.stored === 'duplicate' ? 'Already in Cortex.' : `Kept for Cortex (${w.detail}).` });
       }).catch(() => {});
       return true;
     }
@@ -2130,7 +2162,7 @@ function automationHistory() { try { return JSON.parse(fs.readFileSync(automatio
 function startEventMonitor() {
   if (eventMonitor) eventMonitor.stop();
   const ev = config.data.events || {};
-  if (!ev.files && !ev.windows) { eventMonitor = null; return; }
+  if (!ev.files && !ev.windows && !ev.cortex) { eventMonitor = null; return; }
   eventMonitor = new EventMonitor({
     getRules: () => ((config.data.events || {}).rules || []).map((r, i) => ({ id: r.id || `rule-${i + 1}`, name: r.name || r.playbook || `Rule ${i + 1}`, workflow: r.playbook, ...r })),
     permitted: (src) => !!(config.data.events || {})[src],
@@ -2161,7 +2193,7 @@ function startEventMonitor() {
       return { status: 'done', summary: `handled by COre with the ${pb.name} playbook`, verified: false };
     },
     report: (text) => { addTranscript('system', text); toOverlay('attention', { level: 'info', title: text.slice(0, 80) }); },
-    log: (entry) => { toolAudit(entry); if (entry.event === 'monitor-outcome') gateway().log(`Automation ${entry.rule}: ${entry.what} -> ${entry.status}${entry.verified ? ' (verified)' : ''}`, { kind: 'work' }).catch(() => {}); },
+    log: (entry) => { toolAudit(entry); if (entry.event === 'monitor-outcome') gateway().log(`Automation ${entry.rule}: ${entry.what} -> ${entry.status}${entry.verified ? ' (verified)' : ''}`, { kind: 'automation', actor: `automation:${entry.rule}` }).catch(() => {}); },
   }).start();
 }
 let playbookWatch = null;
@@ -2590,12 +2622,13 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
     if (okSteps.length >= 3) addTranscript('system', 'To reuse this task later, save it: /skill save a-short-name');
   }
   // Verified outcomes go to the shared logbook; lessons to the project in Cortex.
-  gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work' }).catch(() => {});
+  gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work', actor: 'agent' }).catch(() => {});
+  try { conversationCapture().agentEvent(`Desktop task "${goal.slice(0, 200)}": ${r.status}${r.verified ? ' (verified)' : ''}${r.summary ? `. ${r.summary.slice(0, 600)}` : ''}`, { actor: 'agent' }); } catch {}
   // A task the agent re-checked and confirmed updates the project's knowledge
   // (Cortex, deduplicated). Unverified claims are never filed as knowledge.
   if (r.status === 'done' && r.verified && r.summary) {
     const proj = (agentSituation && agentSituation.projects[0] && agentSituation.projects[0].project) || currentProject();
-    if (proj) gateway().remember(`Verified on the desktop: ${r.summary.slice(0, 200)} (task "${goal.slice(0, 80)}")`, { kind: 'knowledge', project: proj }).catch(() => {});
+    if (proj) gateway().remember(`Verified on the desktop: ${r.summary.slice(0, 200)} (task "${goal.slice(0, 80)}")`, { kind: 'knowledge', project: proj, actor: 'agent' }).catch(() => {});
   }
   // Learn from mistakes: what failed on the way, and what finally worked.
   const failed = (r.steps || []).filter((h) => !h.ok && !/^invalid/.test(h.label)).map((h) => `${h.label} (${String(h.error || '').slice(0, 60)})`);
@@ -2603,7 +2636,7 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
     const worked = (r.steps || []).filter((h) => h.ok && h.changed).slice(-2).map((h) => h.label).join(', ');
     const lesson = `Lesson from desktop task "${goal.slice(0, 80)}": ${failed.slice(0, 3).join('; ')} did not work${r.status === 'done' && worked ? `; what worked: ${worked}` : ''}.`;
     noteEpisode(lesson);
-    if (r.status === 'done') gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop' }).catch(() => {});
+    if (r.status === 'done') gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop', actor: 'agent' }).catch(() => {});
   }
   if (!mission && config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
   return r;
@@ -3604,12 +3637,15 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       startEventMonitor(); // picks up edited rules
       const ev = config.data.events || {};
       const rules = ev.rules || [];
-      addTranscript('system', `Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}.${rules.length ? `\n${rules.map((r) => `• ${r.name || r.playbook}: ${r.source} "${r.match}" -> ${r.playbook} (${r.mode || 'ask'})${r.enabled === false ? ' (off)' : ''}`).join('\n')}` : ' No rules yet: add them under events.rules in Settings, Advanced.'}`);
+      addTranscript('system', `Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}, cortex ${ev.cortex ? 'on' : 'off'}.${rules.length ? `\n${rules.map((r) => `• ${r.name || r.playbook}: ${r.source} "${r.match}" -> ${r.playbook} (${r.mode || 'ask'})${r.enabled === false ? ' (off)' : ''}`).join('\n')}` : ' No rules yet: add them under events.rules in Settings, Advanced.'}`);
       return;
     }
     if (/^\/cortex\s*$/i.test(text)) {
       addTranscript('user', text);
-      gateway().status().then((st) => addTranscript('system', `Cortex: ${st.cortex}${st.pending ? ` · ${st.pending} waiting to be saved` : ''}${st.health ? `\n${st.health}` : ''}`)).catch(() => {});
+      const { vaultMismatch } = require('./obsidian');
+      const mm = vaultMismatch(cortexCfg().vault);
+      const vaultWarn = mm ? `\nTwo vault folders: COre uses ${mm.core}, but the Cortex app and your other AI apps use ${mm.cortex}. To use one brain everywhere, set COre's vault (Settings, Privacy and memory) to ${mm.cortex}, or run: cortex config vault "${mm.core}"` : '';
+      gateway().status().then((st) => addTranscript('system', `Cortex: ${st.cortex}${st.pending ? ` · ${st.pending} waiting to be saved` : ''}${st.dropped ? ` · ${st.dropped} dropped when the queue was full` : ''}${vaultWarn}${st.health ? `\n${st.health}` : ''}`)).catch(() => {});
       return;
     }
     // /stop or /merge, optionally for named cores: "/stop @Scout", "/merge @Forge @Sentinel".

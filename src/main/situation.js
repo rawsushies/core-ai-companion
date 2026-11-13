@@ -115,8 +115,17 @@ class Situation {
     if (this.gateway && query) { try { memory = await this.gateway.context(query); } catch {} }
     const projects = Situation.matchProjects(obs, this._knownProjects(memory.sources));
     for (const p of projects) add(`Project in view: ${p.project}`, 'inferred', p.evidence);
-    for (const s of memory.sources) add(s.system === 'cortex' ? `Long-term note: ${s.path}` : 'Active memory has related entries', s.system === 'cortex' ? 'cortex' : 'memory', s.path);
-    return { facts, projects, memory, obs, prompt: Situation.prompt(facts, memory) };
+    for (const s of memory.sources) add(s.system === 'cortex' ? `Long-term note: ${s.path}${s.verified === false ? ' (unverified suggestions)' : ''}` : 'Active memory has related entries', s.system === 'cortex' ? 'cortex' : 'memory', s.path);
+    // The project on screen: its decisions and open tasks straight from Cortex (one call).
+    let project = null;
+    if (projects.length && this.gateway && typeof this.gateway.projectContext === 'function') {
+      try { project = await this.gateway.projectContext(projects[0].project); } catch {}
+      if (project) {
+        for (const d of (project.decisions || []).slice(0, 3)) add(`Decision in ${projects[0].project}: ${clip(d.text, 140)}${d.verified === false ? ' (unverified)' : ''}`, 'cortex', d.path || project.path);
+        for (const t of (project.tasks || []).slice(0, 3)) add(`Open task in ${projects[0].project}: ${clip(String(t.text).replace(/\s*📅.*$/u, ''), 120)}${t.due ? ` (due ${t.due}${t.overdue ? ', overdue' : ''})` : ''}`, 'cortex', t.path || project.path);
+      }
+    }
+    return { facts, projects, memory, obs, project, prompt: Situation.prompt(facts, memory) };
   }
 
   // The block the brain receives. Observations are data (window titles can be

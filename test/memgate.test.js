@@ -146,3 +146,11 @@ test('12: knowledge maintenance reports first and changes only what is approved'
   assert.ok(!a.memory.items.some((i) => i.kind === 'episode'));
   void old;
 });
+
+test('logbook entries of any kind reach Cortex (older versions get kind work)', { skip, timeout: 60000 }, async () => {
+  const g = setup();
+  assert.ok(await g.gate.log('Weekly tidy done', { kind: 'maintenance', actor: 'maintenance' }));
+  const text = await g.cortex.call('brain_activity', { limit: 3 });
+  assert.match(text, /Weekly tidy done/);
+  g.cortex.dispose();
+});

@@ -65,7 +65,7 @@ const DEFAULTS = {
     // Cortex: your long-term knowledge vault (github.com/rawsushies/cortex-ai-brain),
     // reached through its MCP server. command: 'python' (or 'python3' / Cortex.exe),
     // script: path to Cortex's run.py (empty for Cortex.exe), vault: the vault folder.
-    cortex: { enabled: false, command: '', script: '', vault: '' },
+    cortex: { enabled: false, command: '', script: '', vault: '', captureConversations: true }, // captureConversations: COre's chat is archived in Cortex (Conversations/COre)
     enabled: true, // COre remembers facts about you across conversations (⚙ → Memory)
     autoCapture: true, // save clear statements like "my name is…" / "I prefer…" from your messages (shown in the chat)
     semantic: true, // semantic search with a small local model (downloads ~23 MB once)
@@ -133,7 +133,7 @@ const DEFAULTS = {
   // Proactive automations: permitted event sources start playbooks. Sources are
   // off until the user turns them on. rules: [{ name, source: 'files'|'windows',
   // match: glob, on?: 'created'|'changed', playbook, mode: 'ask'|'auto', cooldownMin }]
-  events: { files: false, windows: false, rules: [] },
+  events: { files: false, windows: false, cortex: false, rules: [] }, // cortex: Cortex's own events (a note changed, a task due) may start automations
   agent: {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'plan' = OK the plan once; 'task-auto' = no questions. Under 'plan' and 'task-auto' the task runs under a grant (src/main/policy): routine work in the project folder runs, deleting/sending/installing/outside it still ask
