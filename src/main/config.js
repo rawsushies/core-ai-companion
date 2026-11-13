@@ -133,7 +133,7 @@ const DEFAULTS = {
   // Proactive automations: permitted event sources start playbooks. Sources are
   // off until the user turns them on. rules: [{ name, source: 'files'|'windows',
   // match: glob, on?: 'created'|'changed', playbook, mode: 'ask'|'auto', cooldownMin }]
-  events: { files: false, windows: false, rules: [] },
+  events: { files: false, windows: false, cortex: false, rules: [] }, // cortex: Cortex's own events (a note changed, a task due) may start automations
   agent: {
     enabled: false, // the desktop agent: COre clicks and types to finish a task you start with /do
     approve: 'every', // 'every' = you OK each step that changes something; 'task-auto' = no questions (not recommended)

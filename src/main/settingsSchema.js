@@ -133,6 +133,7 @@ const SECTIONS = [
       { key: 'agent.background', label: 'Let scheduled desktop playbooks start the agent on their own (approvals still apply)', type: 'toggle' },
       { key: 'agent.autoResume', label: 'Resume an interrupted desktop task by itself after a restart (needs the option above)', type: 'toggle' },
       { key: 'events.files', label: 'Automations may watch my shared folders for new or changed files (rules: /automations)', type: 'toggle' },
+      { key: 'events.cortex', label: 'Automations may react to my Cortex vault (a note changed by another AI or in Obsidian, a task came due)', type: 'toggle' },
       { key: 'events.windows', label: 'Automations may watch for new window titles (titles only, no screenshots)', type: 'toggle' },
       { key: 'agent.tools', label: 'Also let it run commands, edit files in the project folder and read web pages (commands always ask; file changes can be undone with /do undo)', type: 'toggle' },
     ],

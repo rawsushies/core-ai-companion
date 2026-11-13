@@ -8,7 +8,10 @@
 //     ->  workflow (ask first, or run if the rule allows it)  ->  verified report
 //
 // Sources: 'files' (new or changed files under the folders the user shared),
-// 'windows' (a window title appears). Every source is off until the user
+// 'windows' (a window title appears), 'cortex' (Cortex's own events: a note
+// changed in the vault, by another AI or in Obsidian, or a task came due;
+// rule.match is a glob on the note path, or on the task text, rule.on is
+// 'changed' or 'task_due'). Every source is off until the user
 // allows it; a rule never widens what its workflow may do: the workflow runs
 // through COre's normal tools and approval policy. Only the event text itself
 // is untrusted data (file names and window titles can be written by anyone).
@@ -16,7 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SOURCES = ['files', 'windows'];
+const SOURCES = ['files', 'windows', 'cortex'];
 
 // "*.pdf", "invoices/**/*.xlsx", "Error*" -> RegExp (case-insensitive)
 function globRe(glob) {
@@ -37,7 +40,20 @@ function ruleMatches(rule, ev) {
   const re = globRe(rule.match);
   if (ev.source === 'files') return (!rule.on || rule.on === ev.kind) && (re.test(ev.rel) || re.test(path.basename(ev.rel)));
   if (ev.source === 'windows') return re.test(ev.title);
+  if (ev.source === 'cortex') return (!rule.on || rule.on === ev.kind) && (re.test(ev.rel || '') || re.test(path.basename(ev.rel || '')) || re.test(ev.title || ''));
   return false;
+}
+
+// Cortex push notification -> monitor events. Only the paths and task text are used (data, never
+// instructions); at most 20 per notification so a bulk sync can't flood the rules.
+function cortexEvents(name, params = {}) {
+  if (name === 'changed') {
+    return (Array.isArray(params.paths) ? params.paths : []).slice(0, 20).map((p) => ({ source: 'cortex', kind: 'changed', rel: String(p), actor: String(params.actor || ''), outside: !!params.outside }));
+  }
+  if (name === 'task_due') {
+    return (Array.isArray(params.tasks) ? params.tasks : []).slice(0, 20).map((t) => ({ source: 'cortex', kind: 'task_due', rel: String(t.path || ''), title: String(t.text || '').replace(/\s*📅.*$/u, ''), due: String(t.due || '') }));
+  }
+  return [];
 }
 
 class EventMonitor {
@@ -110,8 +126,12 @@ class EventMonitor {
   }
 
   describe(ev) {
+    if (ev.source === 'cortex') return ev.kind === 'task_due' ? `Cortex task due ${ev.due}: "${ev.title}" (${ev.rel})` : `Cortex note changed${ev.outside ? ' outside Cortex' : ev.actor ? ` by ${ev.actor}` : ''}: ${ev.rel}`;
     return ev.source === 'files' ? `File ${ev.kind}: ${ev.rel}` : `Window opened: "${ev.title}"`;
   }
+
+  // A Cortex push notification (see cortex.js onEvent).
+  cortex(name, params) { return cortexEvents(name, params).map((ev) => this.emit(ev)).filter(Boolean); }
 
   // An event arrived. Runs one at a time so workflows never overlap.
   emit(ev) {
@@ -158,4 +178,4 @@ class EventMonitor {
   }
 }
 
-module.exports = { EventMonitor, globRe, ruleMatches, SOURCES };
+module.exports = { EventMonitor, globRe, ruleMatches, cortexEvents, SOURCES };

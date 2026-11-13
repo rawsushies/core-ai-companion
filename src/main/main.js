@@ -148,11 +148,24 @@ function conversationCapture() {
   return convCap;
 }
 
+// Cortex speaks first (notifications/cortex/*): due tasks become a card; changes and due tasks
+// can start automations (events.cortex, off until the user allows it). Changes COre made itself
+// never come back (Cortex filters them), so this can't loop on its own writes.
+function onCortexEvent(name, p = {}) {
+  try {
+    if (name === 'task_due' && Array.isArray(p.tasks) && p.tasks.length) {
+      const list = p.tasks.slice(0, 5).map((t) => `• ${String(t.text || '').replace(/\s*📅.*$/u, '')}${t.due ? ` (due ${t.due}${t.overdue ? ', overdue' : ''})` : ''}`).join('\n');
+      addTranscript('system', `From your Cortex vault, due now:\n${list}`, { kind: 'reminder' });
+    }
+    if (eventMonitor && (config.data.events || {}).cortex) eventMonitor.cortex(name, p);
+  } catch (err) { console.error('[core] cortex event:', err.message); }
+}
+
 function gateway() {
   const want = JSON.stringify(cortexCfg());
   if (!memGate || memGate.cfgKey !== want || memGate.memory !== memory) {
     if (cortexClient) cortexClient.dispose();
-    cortexClient = new CortexClient({ cfg: cortexCfg() });
+    cortexClient = new CortexClient({ cfg: cortexCfg(), onEvent: (name, p) => onCortexEvent(name, p) });
     memGate = new MemoryGateway({ memory, cortex: cortexClient, enabled: () => !!(config.data.memory.cortex && config.data.memory.cortex.enabled) && config.data.memory.enabled !== false, queueFile: path.join(app.getPath('userData'), 'cortex-queue.json') });
     memGate.cfgKey = want;
   }
@@ -2102,7 +2115,7 @@ function automationHistory() { try { return JSON.parse(fs.readFileSync(automatio
 function startEventMonitor() {
   if (eventMonitor) eventMonitor.stop();
   const ev = config.data.events || {};
-  if (!ev.files && !ev.windows) { eventMonitor = null; return; }
+  if (!ev.files && !ev.windows && !ev.cortex) { eventMonitor = null; return; }
   eventMonitor = new EventMonitor({
     getRules: () => ((config.data.events || {}).rules || []).map((r, i) => ({ id: r.id || `rule-${i + 1}`, name: r.name || r.playbook || `Rule ${i + 1}`, workflow: r.playbook, ...r })),
     permitted: (src) => !!(config.data.events || {})[src],
@@ -3391,7 +3404,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       startEventMonitor(); // picks up edited rules
       const ev = config.data.events || {};
       const rules = ev.rules || [];
-      addTranscript('system', `Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}.${rules.length ? `\n${rules.map((r) => `• ${r.name || r.playbook}: ${r.source} "${r.match}" -> ${r.playbook} (${r.mode || 'ask'})${r.enabled === false ? ' (off)' : ''}`).join('\n')}` : ' No rules yet: add them under events.rules in Settings, Advanced.'}`);
+      addTranscript('system', `Automations: files ${ev.files ? 'on' : 'off'}, windows ${ev.windows ? 'on' : 'off'}, cortex ${ev.cortex ? 'on' : 'off'}.${rules.length ? `\n${rules.map((r) => `• ${r.name || r.playbook}: ${r.source} "${r.match}" -> ${r.playbook} (${r.mode || 'ask'})${r.enabled === false ? ' (off)' : ''}`).join('\n')}` : ' No rules yet: add them under events.rules in Settings, Advanced.'}`);
       return;
     }
     if (/^\/cortex\s*$/i.test(text)) {
