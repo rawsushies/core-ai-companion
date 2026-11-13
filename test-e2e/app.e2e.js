@@ -374,7 +374,12 @@ test('Navigator plans a desktop task and leaves /do in the box for you to start'
 
 test('Archivist answers from memory and the file shelf', async () => {
   await send('@Archivist what do you know about my tea');
-  await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-archivist .msg')].some((m) => /Archivist checked: green tea/.test(m.innerText)), null, { timeout: 20000 });
+  try {
+    await dock.waitForFunction(() => [...document.querySelectorAll('.row.by-archivist .msg')].some((m) => /Archivist checked: green tea/.test(m.innerText)), null, { timeout: 20000 });
+  } catch (err) {
+    const seen = await dock.evaluate(() => ({ log: document.getElementById('log').innerText.slice(-700), input: document.getElementById('input').value }));
+    throw new Error(`${err.message}\nlast messages: ${JSON.stringify(seen)}`);
+  }
 });
 
 test('the History panel shows the conversation', async () => {

@@ -135,6 +135,7 @@ class Companion {
   stop() {
     if (!this.server) return;
     try { this.server.close(); } catch {}
+    try { this.server.closeAllConnections(); } catch {} // a restart must not wait on idle keep-alive sockets
     this.server = null;
   }
 
@@ -193,7 +194,13 @@ class Companion {
     }
     if (req.method !== 'POST') return this._send(res, 404, { error: 'not found' });
     let body;
-    try { body = await this._body(req); } catch { return this._send(res, 413, { error: 'too big' }); }
+    try { body = await this._body(req); } catch {
+      // Answer, then cut the upload off: otherwise the rest of an oversized body keeps the socket busy.
+      res.setHeader('connection', 'close');
+      this._send(res, 413, { error: 'too big' });
+      res.on('finish', () => req.destroy());
+      return undefined;
+    }
     if (!body) return this._send(res, 400, { error: 'bad request' });
     if (url.pathname === '/pair') return this._pair(res, body);
     if (url.pathname === '/api') return this._api(res, body);
@@ -233,7 +240,10 @@ class Companion {
     d.ctr = m.ctr;
     const seenBefore = d.lastSeen;
     d.lastSeen = t;
-    if (t - seenBefore > 60000) this._save(); // persist counters now and then, not on every poll
+    // Persist the counter now and then for polls, but at once for anything that acts (a send,
+    // an approval, a stop): otherwise a restart would roll the counter back and a captured
+    // message could be replayed within the clock window.
+    if (t - seenBefore > 60000 || !['sync', 'memory'].includes(m.op)) this._save();
     let reply = { ok: true };
     if (m.op === 'sync') reply = { ok: true, ...this.o.getFeed(Number(m.since) || 0) };
     else if (m.op === 'send') {
