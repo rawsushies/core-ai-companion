@@ -200,10 +200,12 @@ const toDock = (c, p) => { if (c === 'dock:agent-approve') notePending(p); retur
 // Approvals waiting for an answer, mirrored to a paired phone (13.0 P3). Each carries a hash of
 // exactly what it approves, so a phone's answer can only apply to that action, and expires.
 const pendingApprovals = new Map();
+const phoneNotices = new (require('./notices').Notices)(); // 13.0 P3: what the phone raises as a notification
 function notePending(p) {
   if (!p) { for (const id of pendingApprovals.keys()) if (!agentApprovals.has(id)) pendingApprovals.delete(id); return; }
   if (!p.id) return;
   const hash = require('crypto').createHash('sha256').update(`${p.id}|${p.step}|${p.label}|${p.why}`).digest('hex');
+  if (!pendingApprovals.has(p.id)) phoneNotices.add('approval', 'COre needs your answer', 'A step is waiting for your approval. Open COre to approve or decline.');
   pendingApprovals.set(p.id, { id: p.id, step: String(p.step || ''), label: String(p.label || '').slice(0, 600), why: String(p.why || '').slice(0, 300), hash, expires: Date.now() + 5 * 60000 });
 }
 // -> { ok, error }
@@ -995,6 +997,7 @@ function phoneFeed(since) {
     mission: m ? { goal: m.goal, status: missionEngine ? 'running' : m.status, subgoals: (m.subgoals || []).map((x) => ({ text: x.text.slice(0, 160), status: x.status, verified: x.evidence ? x.evidence.kind : null })), steps: m.steps || 0 } : null,
     approvals: [...pendingApprovals.values()].filter((p) => agentApprovals.has(p.id) && Date.now() <= p.expires).map((p) => ({ id: p.id, hash: p.hash, step: p.step, label: p.label, why: p.why, expires: p.expires })),
     agentRunning: !!((agentRunner && agentRunner.running) || missionEngine),
+    notices: phoneNotices.recent(),
   };
 }
 
@@ -2574,6 +2577,7 @@ async function startAgent(goal, { remote = false, instructions = '', mission = n
   if (mission) addTranscript('system', `Mission step ${r.status === 'done' ? 'done' : r.status}: ${goal.split('\n')[0].slice(0, 120)}${r.summary ? ` (${r.summary.slice(0, 100)})` : ''}`, { kind: 'progress' });
   else {
     addTranscript('core', msg);
+    phoneNotices.add('task', r.status === 'done' ? 'Task done' : r.status === 'ask' ? 'COre needs you' : 'Task stopped', goal.split('\n')[0]);
     try { if (agentFiles().changed(taskId).length) addTranscript('system', 'Files were changed. Type /do undo to put them back.'); } catch {}
     if (r.status !== 'done' && r.status !== 'ask') addTranscript('system', 'Type /do resume to continue this task later.');
     toDock('dock:message', { role: 'core', text: msg, author: 'prime' });
@@ -2725,6 +2729,7 @@ async function startMission(goal, { standing = null, plan: givenPlan = null, sou
   try { missionLive.changed = agentFiles().changed(taskId).length; } catch {}
   state.set('missionLive', missionLive);
   addTranscript('core', E.formatReport(r), { direct: true });
+  phoneNotices.add('mission', r.status === 'done' ? 'Mission complete' : r.status === 'ask' ? 'The mission needs you' : 'Mission stopped', goal);
   try { if (agentFiles().changed(taskId).length) addTranscript('system', 'Files were changed. Type /mission undo to put everything back.'); } catch {}
   state.set('lastMission', { id: taskId, goal, status: r.status, at: Date.now() });
   gateway().log(`Mission "${goal.slice(0, 120)}": ${r.status}, ${r.subgoals.filter((x) => x.status === 'done').length}/${r.subgoals.length} subgoals verified`, { kind: 'work' }).catch(() => {});

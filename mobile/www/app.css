@@ -56,3 +56,7 @@ video { width: 100%; border-radius: 12px; background: #000; }
 .approval-label { font-weight: 600; }
 .approval-why { font-size: 13px; opacity: .8; margin: 2px 0 6px; }
 #mission-stop { margin-top: 8px; width: 100%; }
+
+/* A switch-like row: the checkbox beside its text, not above it. */
+label.check { display: flex; align-items: center; gap: 10px; }
+label.check input { width: auto; margin: 0; }
