@@ -155,7 +155,25 @@ jobs:
         env:
           ONNXRUNTIME_NODE_INSTALL: skip
       - name: Install LibreOffice
-        run: choco install libreoffice-fresh -y --no-progress
+        # The newest stable build from The Document Foundation's mirror network, with retries and
+        # a time limit (the Chocolatey package's archive download can hang for the whole job);
+        # Chocolatey only if that fails.
+        timeout-minutes: 15
+        run: |
+          $base = 'https://download.documentfoundation.org/libreoffice/stable/'
+          try {
+            $v = (Invoke-WebRequest $base -UseBasicParsing -TimeoutSec 30).Links.href | Where-Object { $_ -match '^\d+\.\d+\.\d+/$' } | ForEach-Object { $_.TrimEnd('/') } | Sort-Object { [version]$_ } | Select-Object -Last 1
+            $msi = "LibreOffice_${v}_Win_x86-64.msi"
+            Write-Host "LibreOffice $v"
+            curl.exe -fsSL --retry 3 --retry-delay 5 --connect-timeout 20 --max-time 600 -o "$env:RUNNER_TEMP\lo.msi" "$base$v/win/x86_64/$msi"
+            if ($LASTEXITCODE -ne 0) { throw "download failed ($LASTEXITCODE)" }
+            $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$env:RUNNER_TEMP\lo.msi`"", '/qn', '/norestart' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "msiexec exit $($p.ExitCode)" }
+          } catch {
+            Write-Host "Direct install failed: $_ ; trying Chocolatey"
+            choco install libreoffice-fresh -y --no-progress
+          }
+          if (-not (Test-Path 'C:\Program Files\LibreOffice\program\soffice.exe')) { throw 'LibreOffice is not installed' }
       - run: node --test test/office.win.test.js
         env:
           CORE_OFFICE: '1'
