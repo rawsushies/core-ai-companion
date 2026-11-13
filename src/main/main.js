@@ -1754,8 +1754,9 @@ function handleActionTag(item) {
     // Project decisions belong to long-term knowledge (Cortex) when it is connected.
     const proj = /^#([\p{L}\p{N}_-]+)\s+/u.exec(item.text);
     if (gateway().cortexOn() && isDecision(item.text)) {
-      gateway().remember(item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, ''), { kind: 'decision', project: proj ? proj[1] : currentProject() }).then((w) => {
-        toDock('dock:message', { role: 'system', text: w.stored === 'cortex' ? `Saved to Cortex: ${w.detail}` : w.stored === 'duplicate' ? 'Already in Cortex.' : `Kept for Cortex (${w.detail}).` });
+      // The model proposed this itself: Cortex keeps it for the user's review until they accept it.
+      gateway().remember(item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, ''), { kind: 'decision', project: proj ? proj[1] : currentProject(), verified: false, actor: 'prime' }).then((w) => {
+        toDock('dock:message', { role: 'system', text: w.stored === 'cortex' ? `Saved to Cortex: ${w.detail}` : w.stored === 'review' ? `Saved to Cortex for your review: ${w.detail}` : w.stored === 'duplicate' ? 'Already in Cortex.' : `Kept for Cortex (${w.detail}).` });
       }).catch(() => {});
       return true;
     }
@@ -2499,7 +2500,7 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
   // (Cortex, deduplicated). Unverified claims are never filed as knowledge.
   if (r.status === 'done' && r.verified && r.summary) {
     const proj = (agentSituation && agentSituation.projects[0] && agentSituation.projects[0].project) || currentProject();
-    if (proj) gateway().remember(`Verified on the desktop: ${r.summary.slice(0, 200)} (task "${goal.slice(0, 80)}")`, { kind: 'knowledge', project: proj }).catch(() => {});
+    if (proj) gateway().remember(`Verified on the desktop: ${r.summary.slice(0, 200)} (task "${goal.slice(0, 80)}")`, { kind: 'knowledge', project: proj, actor: 'agent' }).catch(() => {});
   }
   // Learn from mistakes: what failed on the way, and what finally worked.
   const failed = (r.steps || []).filter((h) => !h.ok && !/^invalid/.test(h.label)).map((h) => `${h.label} (${String(h.error || '').slice(0, 60)})`);
@@ -2507,7 +2508,7 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
     const worked = (r.steps || []).filter((h) => h.ok && h.changed).slice(-2).map((h) => h.label).join(', ');
     const lesson = `Lesson from desktop task "${goal.slice(0, 80)}": ${failed.slice(0, 3).join('; ')} did not work${r.status === 'done' && worked ? `; what worked: ${worked}` : ''}.`;
     noteEpisode(lesson);
-    if (r.status === 'done') gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop' }).catch(() => {});
+    if (r.status === 'done') gateway().remember(lesson, { kind: 'lesson', project: currentProject() || 'Desktop', actor: 'agent' }).catch(() => {});
   }
   if (config.data.voice.speakTyped !== false) speakLine(msg.replace(/^Agent /, ''));
   return r;

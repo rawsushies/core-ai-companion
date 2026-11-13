@@ -18,6 +18,9 @@ const { conflictOriginal } = require('./vaultsync');
 
 const DESTINATION = { profile: 'native', preference: 'native', fact: 'native', episode: 'native', project: 'native', decision: 'cortex', lesson: 'cortex', knowledge: 'cortex', research: 'cortex' };
 const SECTION = { decision: 'Decisions', lesson: 'Lessons', knowledge: 'Notes', research: 'Research' };
+// COre kinds -> Cortex record types (brain_ingest, Cortex 1.8+).
+const INGEST_TYPE = { decision: 'decision', lesson: 'lesson', knowledge: 'fact', research: 'note' };
+const QUEUE_MAX = 5000;
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
@@ -53,15 +56,23 @@ class MemoryGateway {
     let cortex = 'off';
     if (this.cortexOn()) {
       try {
-        const r = await this._withTimeout(this.cortex.call('brain_recall', { query: String(query).slice(0, 500), budget: Math.max(300, Math.round(budget * 0.6)), hops: 1 }));
-        const paths = [...String(r).matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()).slice(0, 8);
+        const res = await this._withTimeout(this._callData('brain_recall', { query: String(query).slice(0, 500), budget: Math.max(300, Math.round(budget * 0.6)), hops: 1 }));
+        const r = res.text;
+        // Cortex 1.6+ returns the passages as data (clean paths, plus external/unverified flags); older
+        // versions only as text, where the paths are the "## " lines.
+        const passages = res.data && Array.isArray(res.data.passages) ? res.data.passages : null;
+        const paths = passages ? [...new Set(passages.map((p) => String(p.path)))].slice(0, 8)
+          : [...String(r).matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()).slice(0, 8);
+        const flag = (p, key) => !!(passages && passages.some((x) => x.path === p && (key === 'unverified' ? x.verified === false : x[key])));
         if (paths.length) {
           const g = GUARD.untrusted(String(r).slice(0, budget * 5), 'long-term notes (Cortex)');
           // A sync conflict copy (two devices edited one note): say both versions exist, never pick one silently.
           const conflicts = paths.map((p) => ({ copy: p, original: conflictOriginal(p) })).filter((c) => c.original);
-          const warn = conflicts.length ? `\n[Sync conflict] ${conflicts.map((c) => `${c.copy} is a second version of ${c.original}`).join('; ')}. Both versions are kept until the user merges them: if they differ, show both and do not choose.` : '';
+          let warn = conflicts.length ? `\n[Sync conflict] ${conflicts.map((c) => `${c.copy} is a second version of ${c.original}`).join('; ')}. Both versions are kept until the user merges them: if they differ, show both and do not choose.` : '';
+          const unverified = paths.filter((p) => flag(p, 'unverified'));
+          if (unverified.length) warn += `\n[Unverified] ${unverified.join(', ')} hold suggestions the user has not confirmed yet: say so if you use them.`;
           blocks.push(`[Knowledge] From the user's long-term notes in Cortex. Cite the note path when you use it.${warn}\n${g.text}`);
-          for (const p of paths) sources.push({ system: 'cortex', path: p, ...(conflictOriginal(p) ? { conflictOf: conflictOriginal(p) } : {}) });
+          for (const p of paths) sources.push({ system: 'cortex', path: p, ...(conflictOriginal(p) ? { conflictOf: conflictOriginal(p) } : {}), ...(flag(p, 'external') ? { external: true } : {}), ...(flag(p, 'unverified') ? { verified: false } : {}) });
           cortex = 'ok';
         } else cortex = 'empty';
         this._flushQueue().catch(() => {});
@@ -74,19 +85,43 @@ class MemoryGateway {
   // Store something in its one authoritative place. kind: profile | preference |
   // fact | episode | decision | lesson | knowledge | research. project: name.
   // -> { stored: 'native'|'cortex'|'queued'|'duplicate', detail }
-  async remember(text, { kind = 'fact', project = '', source = 'core' } = {}) {
+  // verified: false for what COre's model proposed on its own (it then waits in Cortex's review,
+  // Inbox/Review.md, until the user accepts it); true for what the user said or a re-checked result.
+  // actor: which helper inside COre (forge, scout, agent…), shown in Cortex's logbook.
+  async remember(text, { kind = 'fact', project = '', source = 'core', verified = true, actor = '' } = {}) {
     const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 600);
     if (!t) return { stored: 'nothing' };
     const dest = DESTINATION[kind] || 'native';
     if (dest === 'native' || !this.cortexOn()) {
-      if (dest === 'cortex' && this.cortex && this.enabled() && this.cortex.configured()) return this._queue({ text: t, kind, project });
+      if (dest === 'cortex' && this.cortex && this.enabled() && this.cortex.configured()) return this._queue({ text: t, kind, project, verified, actor });
       const r = this.memory ? this.memory.remember(t, { source: { via: source }, kind: kind === 'decision' || kind === 'lesson' ? 'project' : undefined }) : null;
       return { stored: 'native', detail: r && r.created === false ? 'reinforced' : 'saved' };
     }
-    try { return await this._cortexWrite({ text: t, kind, project }); } catch (err) { return this._queue({ text: t, kind, project, error: err.message }); }
+    try { return await this._cortexWrite({ text: t, kind, project, verified, actor }); } catch (err) { return this._queue({ text: t, kind, project, verified, actor, error: err.message }); }
   }
 
-  async _cortexWrite({ text, kind, project }) {
+  async _callData(name, args) {
+    if (typeof this.cortex.callData === 'function') return this.cortex.callData(name, args);
+    return { text: await this.cortex.call(name, args), data: null };
+  }
+
+  async _has(feature) {
+    try { return typeof this.cortex.has === 'function' && await this.cortex.has(feature); } catch { return false; }
+  }
+
+  async _cortexWrite({ text, kind, project, verified = true, actor = '' }) {
+    // Cortex 1.8+: one call stores it in the right place, deduplicates, links, and keeps provenance.
+    if (await this._has('ingest')) {
+      const args = { text, type: INGEST_TYPE[kind] || 'note', source: verified ? 'user' : 'model', verified: verified !== false };
+      if (project) args.project = project;
+      if (actor && await this._has('actor')) args.actor = actor;
+      const { data } = await this._callData('brain_ingest', args);
+      if (!data) throw new Error('Cortex returned no result');
+      if (data.action === 'duplicate') return { stored: 'duplicate', detail: 'already in Cortex', path: data.duplicate_of };
+      if (data.action === 'review') return { stored: 'review', detail: `${data.path} (waiting for the user's review)`, path: data.path, changeset: data.changeset };
+      const where = data.project ? `${data.path} › ${SECTION[kind] || 'Notes'}` : data.path;
+      return { stored: 'cortex', detail: where, path: data.path, changeset: data.changeset };
+    }
     // No duplicates: the same statement already in the vault is not written again.
     const hits = String(await this.cortex.call('brain_search', { query: text.slice(0, 200), scope: 'notes', limit: 5 }));
     // Results are "- path | title" lines with snippets (matches marked «»); "No notes match" means none.
@@ -121,13 +156,18 @@ class MemoryGateway {
   _writeQueue(q) {
     if (!this.queueFile) return;
     fs.mkdirSync(path.dirname(this.queueFile), { recursive: true });
+    if (q.length > QUEUE_MAX) {  // never silently: the number dropped is kept and shown in status()
+      try { fs.writeFileSync(`${this.queueFile}.dropped`, String(this.dropped() + q.length - QUEUE_MAX)); } catch {}
+      q = q.slice(-QUEUE_MAX);
+    }
     const tmp = `${this.queueFile}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(q.slice(-200)));
+    fs.writeFileSync(tmp, JSON.stringify(q));
     fs.renameSync(tmp, this.queueFile);
   }
+  dropped() { try { return Number(fs.readFileSync(`${this.queueFile}.dropped`, 'utf8')) || 0; } catch { return 0; } }
   _queue(item) {
     const q = this._readQueue();
-    if (!q.some((x) => norm(x.text) === norm(item.text))) q.push({ text: item.text, kind: item.kind, project: item.project, at: Date.now() });
+    if (!q.some((x) => norm(x.text) === norm(item.text))) q.push({ text: item.text, kind: item.kind, project: item.project, at: Date.now(), ...(item.verified === false ? { verified: false } : {}), ...(item.actor ? { actor: item.actor } : {}) });
     this._writeQueue(q);
     return { stored: 'queued', detail: item.error ? `Cortex unavailable (${item.error}); will retry` : 'waiting for Cortex' };
   }
@@ -176,7 +216,7 @@ class MemoryGateway {
   }
 
   async status() {
-    const s = { cortex: 'off', pending: this.pending(), last: this.last };
+    const s = { cortex: 'off', pending: this.pending(), dropped: this.dropped(), last: this.last };
     if (!this.cortex || !this.enabled()) return s;
     if (!this.cortex.configured()) return { ...s, cortex: 'not set up' };
     try { s.health = (await this._withTimeout(this.cortex.call('brain_health', {}))).slice(0, 800); s.cortex = 'connected'; } catch (err) { s.cortex = `unavailable: ${err.message}`; }
