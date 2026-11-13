@@ -84,7 +84,12 @@ test(`rogue phone: ${N} hostile messages never reach a handler; the server never
       else if (kind === 6) status = await post(port, { d: id, ...C.seal({ op: 'send', text: 'clock', ctr: ctr + 5000 + i, ts: now() - 600000 }, key) }); // stale timestamp
       else if (kind === 7) status = await post(port, { d: id, nonce: b64(nacl.randomBytes(24)), box: b64(nacl.randomBytes(80)) }); // random bytes
       else status = await post(port, { d: [id], nonce: {}, box: null }); // wrong types
-    } catch (err) { failures.push(`kind ${kind}: request failed: ${err.message}`); continue; }
+    } catch (err) {
+      // An oversized upload is cut off by the server; depending on the OS the client then sees
+      // the 413 or a reset connection. Both mean refused. Any other failed request is a failure.
+      if (kind === 4) status = 413;
+      else { failures.push(`kind ${kind}: request failed: ${err.message}`); continue; }
+    }
     if (status >= 500) failures.push(`kind ${kind}: server error ${status}`);
   }
   if (calls.length !== before) failures.push(`${calls.length - before} hostile message(s) reached a handler: ${JSON.stringify(calls.slice(before, before + 3))}`);
