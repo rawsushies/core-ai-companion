@@ -165,6 +165,7 @@ const SECTIONS = [
       { key: 'memory.enabled', label: 'Remember things about me', type: 'toggle' },
       { key: 'memory.maintenance', label: 'Knowledge maintenance check', type: 'select', options: [['off', 'Only when I ask (/memory maintain)'], ['weekly', 'Prepare a report every week; nothing changes until I approve']] },
       { key: 'memory.cortex.enabled', label: 'Connect my Cortex knowledge vault (long-term notes, project decisions, lessons) through its MCP server', type: 'toggle' },
+      { key: 'memory.cortex.captureConversations', label: 'Keep my COre conversations in Cortex too (Conversations/COre, one note per day, passwords removed), so other AI apps can find them', type: 'toggle' },
       { key: 'memory.cortex.command', label: 'Cortex program (empty: the Cortex built into COre; or python, python3, or the path to Cortex.exe)', type: 'text', maxLength: 300, optional: true },
       { key: 'memory.cortex.script', label: "Cortex run.py path (leave empty for Cortex.exe)", type: 'text', maxLength: 400, optional: true },
       { key: 'memory.cortex.vault', label: 'Knowledge vault folder (empty: the vault Cortex already uses, else Documents\\COre Vault). Open the same folder in Obsidian; share it between devices with Syncthing', type: 'text', maxLength: 400, optional: true },

@@ -134,6 +134,20 @@ function cortexCfg() {
   const { command, args, vault } = require('./cortex').resolveCortex(c, { resourcesPath: app.isPackaged ? process.resourcesPath : '', documents });
   return { command, args, vault };
 }
+// COre's own chat, archived in Cortex like any other AI app's (see convcapture.js).
+let convCap = null;
+function conversationCapture() {
+  if (!convCap) {
+    const { ConversationCapture } = require('./convcapture');
+    convCap = new ConversationCapture({
+      cortex: { has: (f) => gateway().cortex.has(f), callData: (n, a) => gateway().cortex.callData(n, a) },
+      enabled: () => gateway().cortexOn() && config.data.memory.cortex.captureConversations !== false,
+      queueFile: path.join(app.getPath('userData'), 'cortex-conversations.json'),
+    });
+  }
+  return convCap;
+}
+
 function gateway() {
   const want = JSON.stringify(cortexCfg());
   if (!memGate || memGate.cfgKey !== want || memGate.memory !== memory) {
@@ -204,6 +218,7 @@ function addTranscript(role, text, meta = {}) {
   const entry = { role, text, ts: Date.now(), ...meta, seq: ++transcriptSeq };
   transcript.push(entry);
   if (transcript.length > 200) transcript.shift();
+  try { if (memory && config.data.memory.enabled !== false) conversationCapture().add(entry); } catch {}
   state.set('transcript', transcript.slice(-100));
   toPanel('transcript:add', entry);
   // Prime's own replies reach the dock as a live stream instead.
@@ -2496,6 +2511,7 @@ async function startAgent(goal, { remote = false, instructions = '' } = {}) {
   }
   // Verified outcomes go to the shared logbook; lessons to the project in Cortex.
   gateway().log(`Desktop task "${goal.slice(0, 120)}": ${r.status}${r.summary ? `, ${r.summary.slice(0, 120)}` : ''}`, { kind: 'work' }).catch(() => {});
+  try { conversationCapture().agentEvent(`Desktop task "${goal.slice(0, 200)}": ${r.status}${r.verified ? ' (verified)' : ''}${r.summary ? `. ${r.summary.slice(0, 600)}` : ''}`, { actor: 'agent' }); } catch {}
   // A task the agent re-checked and confirmed updates the project's knowledge
   // (Cortex, deduplicated). Unverified claims are never filed as knowledge.
   if (r.status === 'done' && r.verified && r.summary) {
