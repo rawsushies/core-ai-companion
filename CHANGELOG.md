@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+## 13.0.0 — Trustworthy autonomy (first release)
+
+### Missions you approve once
+- **`/autopilot <goal>`**: approve a mission once, with a signed grant naming the folders, apps and websites it
+  may use. COre plans subgoals, each with a check it can verify on disk, works through them in the desktop agent,
+  retries once with what went wrong, then asks you. Every subgoal is reported with its evidence.
+- **One safety policy for every agent step.** Routine work inside the grant runs without asking. Sending,
+  deleting, installing, anything outside the grant, payments and security settings ask. Passwords and COre's
+  own safeguards are refused outright.
+- **Hidden instructions cannot choose where data goes.** A recipient, website or command taken from a document,
+  web page or screen asks you first, however the agent wraps it.
+- **Crash-safe journal and undo.** Every step is journalled before it runs. `/mission undo` puts every file back,
+  even after a crash or power loss.
+- **Stops in well under a second** from the hotkey, Esc, `/mission stop`, the command center, a STOP file or your
+  phone.
+- **Learns routes.** A verified mission is saved; a near-identical goal reuses it, still checked step by step.
+- **Pauses mouse and keyboard steps while you use the PC**; file and tool steps continue.
+- **Standing missions**: `/mission allow NAME` lets a scheduled playbook run on its own for 30 days;
+  `/mission revoke` ends it.
+- **Missions card** in the command center: the plan, its evidence, stop and undo.
+
+### Your phone as a remote
+- The phone shows the running mission and any request waiting for you.
+- **Approve with your fingerprint or face**; each answer is bound to the exact request and expires after five
+  minutes. Decline and Stop never need it.
+- **Notifications** when a request is waiting or a mission or task ends (the lock screen shows only "COre").
+- Replayed or forged phone messages are refused, also after a COre restart.
+
+### Memory: Cortex 2
+- The installer bundles **Cortex 2.0**: structured recall with sources, COre's own conversations archived in
+  the vault, change notifications, and a review list for decisions the model proposes.
+- Unverified and external sources are labelled when COre answers from them.
+
+### Reliability
+- Four new simulations run with every test: random safety-policy decisions, stop races, a hostile device on the
+  network, and an unreliable model that claims work it did not do.
+- Fixed: stopping a task while it was still planning left the agent busy until restart.
+- CI installs LibreOffice from The Document Foundation's mirrors (the old download could hang for 25 minutes).
+
 ## 12.1.1 — Tutorials hosted by COre
 
 - **Tutorials** (`/tutorial`, tray menu → Tutorials): COre teaches five short lessons itself, in the chat with its
