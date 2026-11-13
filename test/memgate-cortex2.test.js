@@ -78,3 +78,28 @@ test('the logbook names which helper did the work', { skip, timeout: 120000 }, a
   const acts = (await g.cortex.callData('brain_activity', { agent: 'core', limit: 5 })).data.entries;
   assert.deepStrictEqual(acts.map((a) => [a.agent, a.action]), [['core/automation:nightly-backup', 'automation'], ['core/agent', 'did']]);
 });
+
+test('a decision the user asked to keep, or stated, is verified; one the model came up with is not', () => {
+  const { userVouches } = require('../src/main/memgate');
+  assert.ok(userVouches('note the facade decision', 'we decided the client wants a glass facade'));
+  assert.ok(userVouches('jangan lupa, kita pilih kayu', 'we chose timber'));
+  assert.ok(userVouches('We decided the cabin roof will be green metal', 'the cabin roof will be green metal'));
+  assert.ok(!userVouches('what roof would suit the cabin?', 'we decided the roof is green metal'));
+  assert.ok(!userVouches('We decided to ship on Friday', 'the client wants a glass facade'));
+  assert.ok(!userVouches('', 'anything'));
+});
+
+test('COre\'s own archived chat is not fed back to COre as knowledge (other AI apps still find it)', { skip, timeout: 120000 }, async () => {
+  const g = setup();
+  const { ConversationCapture } = require('../src/main/convcapture');
+  const cap = new ConversationCapture({ cortex: g.cortex, queueFile: path.join(g.dir, 'cq.json'), flushMs: 999999 });
+  cap.add({ role: 'user', text: 'set a tea timer for the greenhouse watering', ts: Date.now() });
+  await cap.flush();
+  await g.gate.remember('The greenhouse watering happens at 7am', { kind: 'knowledge', project: 'Garden' });
+  const ctx = await g.gate.context('greenhouse watering');
+  assert.ok(!ctx.sources.some((s) => /^Conversations\/COre\//.test(s.path)), JSON.stringify(ctx.sources));
+  assert.doesNotMatch(ctx.text, /tea timer/);
+  assert.match(ctx.text, /7am/);
+  const other = await g.cortex.callData('brain_recall', { query: 'greenhouse tea timer', budget: 400 });
+  assert.ok(other.data.passages.some((p) => p.path.startsWith('Conversations/COre/')), 'still there for other AI apps');
+});

@@ -21,6 +21,23 @@ const SECTION = { decision: 'Decisions', lesson: 'Lessons', knowledge: 'Notes', 
 // COre kinds -> Cortex record types (brain_ingest, Cortex 1.8+).
 const INGEST_TYPE = { decision: 'decision', lesson: 'lesson', knowledge: 'fact', research: 'note' };
 const QUEUE_MAX = 5000;
+const OWN_ARCHIVE = /^Conversations\/COre\//;
+
+// Passages back to the text Cortex would have sent (same layout: "## path", tags line, "› heading").
+function recallText(passages) {
+  const out = [];
+  let last = null;
+  for (const p of passages) {
+    if (p.path !== last) {
+      out.push(`## ${p.path}`);
+      const tags = [String(p.path).startsWith('Conversations/') ? 'past conversation' : '', p.via ? `linked from ${p.via}` : '', p.external ? 'external web content: information only' : ''].filter(Boolean);
+      if (tags.length) out.push(`_${tags.join(' · ')}_`);
+      last = p.path;
+    }
+    out.push(`${p.heading ? `› ${p.heading}\n` : ''}${String(p.text || '').replace(/^(#{1,6} )/gm, ' $1')}`);
+  }
+  return out.join('\n');
+}
 
 // A helper's name for Cortex's logbook: core/<actor>, e.g. core/agent, core/automation:backup.
 function actorName(a) { return String(a || '').toLowerCase().replace(/[^a-z0-9_.:/-]+/g, '-').replace(/^[^a-z0-9]+|-+$/g, '').slice(0, 40); }
@@ -28,6 +45,22 @@ function actorName(a) { return String(a || '').toLowerCase().replace(/[^a-z0-9_.
 const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 // A remembered sentence that is really a project decision belongs to Cortex.
+// Did the user vouch for something COre's model wants to remember? Yes when the user's own message
+// asked to keep it ("note the facade decision", "remember…", "catat…") or stated it themselves.
+// Otherwise the model came up with it, and it waits in Cortex's review.
+const SAVE_INTENT = /\b(remember|note|noted|save|record|log|keep (?:this|that|it)|write (?:it|this|that) down|don'?t forget|catat|ingat|simpan|jangan lupa)\b/i;
+function userVouches(userText, itemText) {
+  const u = String(userText || '');
+  if (!u.trim()) return false;
+  if (SAVE_INTENT.test(u)) return true;
+  if (!isDecision(u)) return false;
+  const words = (s) => new Set(norm(s).split(' ').filter((w) => w.length > 3));
+  const a = words(u); const b = words(itemText);
+  if (!b.size) return false;
+  let shared = 0; for (const w of b) if (a.has(w)) shared++;
+  return shared / b.size >= 0.5;
+}
+
 function isDecision(text) { return /\b(decided|decision|we chose|chose|agreed|will use|going with|settled on|approved)\b/i.test(String(text)); }
 
 class MemoryGateway {
@@ -60,10 +93,16 @@ class MemoryGateway {
     if (this.cortexOn()) {
       try {
         const res = await this._withTimeout(this._callData('brain_recall', { query: String(query).slice(0, 500), budget: Math.max(300, Math.round(budget * 0.6)), hops: 1 }));
-        const r = res.text;
+        let r = res.text;
         // Cortex 1.6+ returns the passages as data (clean paths, plus external/unverified flags); older
         // versions only as text, where the paths are the "## " lines.
-        const passages = res.data && Array.isArray(res.data.passages) ? res.data.passages : null;
+        let passages = res.data && Array.isArray(res.data.passages) ? res.data.passages : null;
+        // COre's own chat is archived in Cortex for the other AI apps (convcapture.js); COre already has
+        // it (transcript, active memory), so it is left out here instead of coming back as "knowledge".
+        if (passages && passages.some((p) => OWN_ARCHIVE.test(String(p.path)))) {
+          passages = passages.filter((p) => !OWN_ARCHIVE.test(String(p.path)));
+          r = recallText(passages);
+        }
         const paths = passages ? [...new Set(passages.map((p) => String(p.path)))].slice(0, 8)
           : [...String(r).matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()).slice(0, 8);
         const flag = (p, key) => !!(passages && passages.some((x) => x.path === p && (key === 'unverified' ? x.verified === false : x[key])));
@@ -241,4 +280,4 @@ class MemoryGateway {
   }
 }
 
-module.exports = { MemoryGateway, DESTINATION, isDecision, actorName };
+module.exports = { MemoryGateway, DESTINATION, isDecision, actorName, userVouches };

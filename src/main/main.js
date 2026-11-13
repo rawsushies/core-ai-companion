@@ -124,7 +124,7 @@ const { Tutorial, fill: fillTutorial } = require('./tutorial'); // lessons COre 
 let tutorial = null; // created once state is loaded (tutorialHost())
 // Memory gateway: COre's active memory + Cortex long-term knowledge behind one interface.
 const { CortexClient } = require('./cortex');
-const { MemoryGateway, isDecision } = require('./memgate');
+const { MemoryGateway, isDecision, userVouches } = require('./memgate');
 let cortexClient = null;
 let memGate = null;
 function cortexCfg() {
@@ -1782,8 +1782,11 @@ function handleActionTag(item) {
     // Project decisions belong to long-term knowledge (Cortex) when it is connected.
     const proj = /^#([\p{L}\p{N}_-]+)\s+/u.exec(item.text);
     if (gateway().cortexOn() && isDecision(item.text)) {
-      // The model proposed this itself: Cortex keeps it for the user's review until they accept it.
-      gateway().remember(item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, ''), { kind: 'decision', project: proj ? proj[1] : currentProject(), verified: false, actor: 'prime' }).then((w) => {
+      // Verified when the user asked to keep it or said it themselves; a decision the model came up
+      // with on its own waits in Cortex's review until the user accepts it.
+      const lastUser = [...transcript].reverse().find((e) => e.role === 'user');
+      const text = item.text.replace(/^#[\p{L}\p{N}_-]+\s+/u, '');
+      gateway().remember(text, { kind: 'decision', project: proj ? proj[1] : currentProject(), verified: userVouches(lastUser && lastUser.text, text), actor: 'prime' }).then((w) => {
         toDock('dock:message', { role: 'system', text: w.stored === 'cortex' ? `Saved to Cortex: ${w.detail}` : w.stored === 'review' ? `Saved to Cortex for your review: ${w.detail}` : w.stored === 'duplicate' ? 'Already in Cortex.' : `Kept for Cortex (${w.detail}).` });
       }).catch(() => {});
       return true;
