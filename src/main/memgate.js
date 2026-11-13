@@ -146,6 +146,16 @@ class MemoryGateway {
     return { stored: 'cortex', detail: "today's daily note" };
   }
 
+  // One project's knowledge in one call (Cortex 1.9+ brain_project): decisions (with verified flags),
+  // open tasks, linked notes and related conversations from any AI app. null if unavailable.
+  async projectContext(name, { budget = 600 } = {}) {
+    if (!this.cortexOn() || !name || !(await this._has('project_context'))) return null;
+    try {
+      const { data } = await this._withTimeout(this._callData('brain_project', { name: String(name).slice(0, 120), budget }));
+      return data && data.path ? data : null;
+    } catch { return null; }
+  }
+
   // The shared logbook in Cortex: what COre did, for the user and other AIs.
   async log(summary, { kind = 'work', target = '' } = {}) {
     if (!this.cortexOn()) return false;
