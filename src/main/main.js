@@ -3205,10 +3205,19 @@ function ensureHelper(coreId) {
   const r = cloneRadius();
   const d = primaryDisplay();
   const from = { x: d.bounds.x + orbBounds.x, y: d.bounds.y + orbBounds.y };
-  const slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: CLONE_WIN, near: from }); // the whole window stays clear
-  if (!slot) { addTranscript('system', `No free spot on the screen for ${core.name}.`, { kind: 'error' }); return null; }
+  let slot = CL.placeClone({ area: d.workArea, avoid: cloneObstacles(), size: CLONE_WIN, near: from }); // the whole window stays clear
+  if (!slot) {
+    // A small screen is full: the specialist idle the longest merges back and the new one takes its
+    // place. Specialists that are working are never sent away.
+    const victim = [...clones.values()].filter((x) => !x.merging && !x.busy && x.slot).sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0))[0];
+    if (!victim) { addTranscript('system', `No free spot on the screen for ${core.name}: every specialist on screen is busy. Try again when one finishes.`, { kind: 'error' }); return null; }
+    slot = victim.slot;
+    mergeClone(victim.id); // animates from its slot back to the orb
+    victim.slot = null; // from now on the spot belongs to the newcomer
+    addTranscript('system', `${victim.name} merged back to make room for ${core.name}.`, { kind: 'progress' });
+  }
   const look = { name: core.name, tint: hexTint(core.color), color: core.color, voice: core.voice, semitones: core.semitones };
-  const c = { id: core.id, core, look, name: core.name, r, slot, state: 'idle', brain: null, win: null, ac: new AbortController(), queue: Promise.resolve(), busy: 0 };
+  const c = { id: core.id, core, look, name: core.name, r, slot, state: 'idle', brain: null, win: null, ac: new AbortController(), queue: Promise.resolve(), busy: 0, lastUsed: Date.now() };
   clones.set(core.id, c);
 
   c.win = new BrowserWindow({
@@ -3329,6 +3338,7 @@ function askCore(coreId, text, { task, review = false } = {}) {
   const run = async () => {
     if (c.merging || !clones.has(c.id)) return { ok: false, error: 'merged back' };
     c.busy++;
+    c.lastUsed = Date.now();
     c.state = 'working';
     toClone(c, 'state', 'thinking');
     const ac = new AbortController();
@@ -3379,6 +3389,7 @@ function askCore(coreId, text, { task, review = false } = {}) {
       return { ok: false, error: err.message };
     } finally {
       c.busy--;
+      c.lastUsed = Date.now();
       if (!c.busy) {
         c.state = 'idle';
         toClone(c, 'state', 'idle');
