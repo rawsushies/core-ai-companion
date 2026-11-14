@@ -68,3 +68,19 @@ test('the morning briefing says only what it has a source for, once a day, when 
   assert.strictEqual(B.due({ now, lastDay: '', idleSec: 600 }), null, 'only when you are at the PC');
   assert.strictEqual(B.due({ now: new Date(2026, 10, 14, 5), lastDay: '', idleSec: 5 }), null, 'not before the morning');
 });
+
+test('mission narration: milestones only (halfway, complete, needs you, stopped), never each step', () => {
+  const { narrate } = require('../src/main/narration');
+  const live = { subgoals: [{ status: 'done' }, { status: 'running' }, { status: 'pending' }, { status: 'pending' }] };
+  assert.strictEqual(narrate({ type: 'verify', ok: true, index: 0 }, live), null, '1 of 4 is not a milestone');
+  live.subgoals[1].status = 'done';
+  assert.deepStrictEqual(narrate({ type: 'verify', ok: true, index: 1 }, live), { kind: 'mission-progress', importance: 'low', line: 'Halfway through the mission: 2 of 4 steps verified.' });
+  assert.strictEqual(narrate({ type: 'verify', ok: true, index: 1 }, live), null, 'said once');
+  assert.strictEqual(narrate({ type: 'verify', ok: false, index: 2 }, live), null, 'a failed try is retried silently');
+  assert.strictEqual(narrate({ type: 'verify', ok: true }, { subgoals: [{ status: 'done' }, { status: 'pending' }] }), null, 'short missions only report the end');
+  assert.strictEqual(narrate({ type: 'end', status: 'ask' }, live).importance, 'urgent');
+  assert.match(narrate({ type: 'end', status: 'limit', reason: 'the step budget (60) is used up' }, live).line, /stopped: the step budget \(60\) is used up\. 2 of 4 steps were verified/);
+  live.subgoals.forEach((x) => { x.status = 'done'; });
+  assert.strictEqual(narrate({ type: 'end', status: 'done' }, live).line, 'Mission complete: all 4 steps verified.');
+  assert.strictEqual(narrate({ type: 'subgoal', index: 3 }, live), null);
+});

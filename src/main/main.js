@@ -2774,6 +2774,7 @@ async function startMission(goal, { standing = null, plan: givenPlan = null, sou
       if (L && e.type === 'subgoal' && L.subgoals[e.index]) Object.assign(L.subgoals[e.index], { status: 'running', attempts: e.attempt });
       if (L && e.type === 'verify' && L.subgoals[e.index]) Object.assign(L.subgoals[e.index], { status: e.ok ? 'done' : 'failed', evidence: e.evidence });
       if (L && e.type === 'end') L.status = e.status;
+      try { const nr = require('./narration').narrate(e, L); if (nr) announce(nr); } catch {}
       if (e.type === 'plan') addTranscript('system', `Mission plan:\n${e.plan.map((x, i) => `${i + 1}. ${x.text}${x.check ? '' : ' (checked by Sentinel)'}`).join('\n')}`, { kind: 'progress' }); },
   });
   addTranscript('system', `Mission started: "${goal.slice(0, 120)}". Esc, Stop or the emergency hotkey ends it.`, { kind: 'progress' });
@@ -2802,7 +2803,6 @@ async function startMission(goal, { standing = null, plan: givenPlan = null, sou
   try { if (agentFiles().changed(taskId).length) addTranscript('system', 'Files were changed. Type /mission undo to put everything back.'); } catch {}
   state.set('lastMission', { id: taskId, goal, status: r.status, at: Date.now() });
   gateway().log(`Mission "${goal.slice(0, 120)}": ${r.status}, ${r.subgoals.filter((x) => x.status === 'done').length}/${r.subgoals.length} subgoals verified`, { kind: 'work' }).catch(() => {});
-  if (config.data.voice.speakTyped !== false) speakLine(r.status === 'done' ? 'Mission complete.' : r.status === 'ask' ? 'The mission needs you.' : `The mission stopped: ${r.reason || r.status}.`);
   return r;
 }
 
@@ -3649,6 +3649,18 @@ async function briefingTick() {
   addTranscript('core', b.text, { direct: true });
   toDock('dock:message', { role: 'core', text: b.text, author: 'prime' });
   if (d.channel === 'speak' && config.data.voice.tts !== false) speakLine(b.spoken);
+}
+
+// One way to speak up (13.0 P4): the interruption model picks now/later/drop and the channel.
+// 'later' items are not queued: a milestone that is not worth saying now is not worth saying later.
+function announce({ kind, importance, line }) {
+  const p = config.data.presence || {};
+  const d = INT.decide({ kind, importance, state: interruptState(), history: interruptHistory().snapshot(), cfg: { quietFrom: p.quietFrom ?? 22, quietTo: p.quietTo ?? 8 } });
+  if (d.act !== 'now') return d;
+  interruptHistory().delivered(kind, importance);
+  if (d.channel === 'speak' && config.data.voice.tts !== false && config.data.voice.speakTyped !== false) speakLine(line);
+  else if (d.channel === 'phone' && kind !== 'mission-end') phoneNotices.add(kind, line, ''); // a mission's end already has its own phone notice
+  return d;
 }
 
 function startPresence() {
