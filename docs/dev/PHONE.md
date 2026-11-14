@@ -58,3 +58,30 @@ network, and the phone clears it from the address bar after pairing.
 - `missionStop`: ends the mission and any desktop task at once (the same path as the emergency stop).
 - Known limit: the PC trusts the phone's `bio` flag; it cannot verify it cryptographically. A key held in the
   Android keystore that only unlocks after biometric confirmation would close this and is planned.
+
+## Phone Inbox (13.0 P3)
+
+The phone can send COre a file (the paperclip beside the message box, up to 10 MB):
+- **Transfer:** the file travels in sealed `filePut` chunks of 256 KB, each checked against the declared size,
+  count and order. A damaged, missing or late chunk cancels the upload, and nothing is written until the whole
+  file has arrived. A phone has at most two uploads in progress; an unfinished upload expires after two minutes.
+- **Storage:** the file is saved as `userData/PhoneInbox/<date>/<name>` under a safe name (path dropped, reserved
+  and control characters removed) and never over an existing file.
+- **Handling:** it goes on the file shelf like a dropped file. Its text is read as data, and instruction-like text
+  is flagged. For the desktop agent's policy, anything read from it is untrusted: a website or recipient taken
+  from it asks before use, even under a mission grant.
+- **Tests:** `test/phone-inbox.test.js`; `test/sim.rogue-phone.test.js` (60 malformed uploads from the paired
+  phone itself never reach the app); e2e "a phone pairs…" (the file lands in the inbox and on the shelf).
+
+## Voice from the phone (13.0 P3)
+
+Tap the microphone beside the message box, speak, and tap again (30 seconds at most).
+- **On the phone:** the audio is resampled to 16 kHz 16-bit mono and sent sealed, through the same chunked path
+  as files (`filePut` with `kind: 'voice'`, its own 30-second cap). It never lands on the file shelf.
+- **On the PC:** COre transcribes it with its own speech recognition and handles the text like a message typed
+  on the phone. The phone reads COre's next reply aloud with Android's speech.
+- **Android permissions:** the build adds `RECORD_AUDIO`; Android asks the first time the microphone is tapped.
+- **Known limits:**
+  - The reply is spoken in Android's voice, not COre's own voice. Streaming COre's voice to the phone is future
+    work.
+  - Not yet tried on a real phone.

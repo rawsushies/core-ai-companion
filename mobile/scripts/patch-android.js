@@ -1,5 +1,5 @@
 'use strict';
-// After `cap add/sync android`: camera permission for QR pairing. Cleartext
+// After `cap add/sync android`: camera permission for QR pairing, microphone for voice turns. Cleartext
 // HTTP (for the PC on your Wi-Fi) comes from capacitor.config.json.
 const fs = require('fs');
 const path = require('path');
@@ -10,6 +10,13 @@ let changed = false;
 if (!xml.includes('android.permission.CAMERA')) {
   xml = xml.replace('<application', '<uses-permission android:name="android.permission.CAMERA" />\n    <application');
   changed = true;
+}
+// Voice turns from the phone (13.0 P3): the microphone, asked for the first time the user taps it.
+for (const perm of ['RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS']) {
+  if (!xml.includes(`android.permission.${perm}`)) {
+    xml = xml.replace('<application', `<uses-permission android:name="android.permission.${perm}" />\n    <application`);
+    changed = true;
+  }
 }
 // The PC companion is plain HTTP on your own network (messages are sealed end to end).
 if (!xml.includes('usesCleartextTraffic')) {
