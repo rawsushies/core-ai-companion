@@ -107,7 +107,10 @@
           for (const n of m.files) { const c = document.createElement('span'); c.className = 'file-chip'; c.textContent = n; fl.append(c); }
           el.prepend(fl);
         }
-        log.appendChild(el);
+        // A note that arrives while COre's reply has not started yet ("Groq failed, switching to
+        // Gemini") goes above the waiting reply bubble, so it reads in the order it happened.
+        if (role === 'system' && streaming && !streaming.text.trim() && streaming.row && streaming.row.parentNode === log) log.insertBefore(el, streaming.row);
+        else log.appendChild(el);
       }
       trim();
     });

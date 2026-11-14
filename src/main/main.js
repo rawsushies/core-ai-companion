@@ -1884,13 +1884,14 @@ function handleActionTag(item) {
   if (item.name === 'forget') {
     const gone = memory && memory.forget(item.text);
     if (gone) noteMemoryRemoved(gone.text);
-    if (gone) toDock('dock:message', { role: 'system', text: `Forgot: ${gone.text}` });
+    // Say so when nothing matched, so a model's "done, forgotten" can't stand unchecked.
+    toDock('dock:message', { role: 'system', text: gone ? `Forgot: ${gone.text}` : `Nothing in my memory matched "${String(item.text).slice(0, 80)}", so nothing was removed.` });
     toDock('dock:memory', memory ? memory.list() : []);
     return true;
   }
   if (item.name === 'remind') {
     const r = reminders.add(item.when, item.text);
-    toDock('dock:message', { role: 'system', text: r ? `Reminder set for ${fmtTime(r.at)}: ${r.text}` : `I couldn't understand the time "${item.when}".` });
+    toDock('dock:message', { role: 'system', text: r ? `Reminder set for ${fmtTime(r.at)}: ${r.text}` : `No reminder was set: I couldn't read a time in "${item.when || item.text}". Say it like "tomorrow 9am", "18:30" or "in 20 minutes".` });
     toDock('dock:reminders', reminders.items);
     return true;
   }
@@ -2839,7 +2840,25 @@ function quickReply(text, { typed }) {
   const now = new Date();
   if (q.kind === 'time') line = `It's ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
   else if (q.kind === 'date') line = `It's ${now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}.`;
-  else if (q.kind === 'timers') {
+  else if (q.kind === 'weather') {
+    if (config.data.skills.weather === false) return false;
+    addTranscript('user', text);
+    if (presence) presence.noteInteraction();
+    SK.runSkill('weather', q.city, skillCtx()).then((r) => {
+      if (r.glance) showGlance(r.glance);
+      const say = r.error ? `I couldn't get the weather: ${r.error}` : String(r.result || '').replace(/(\d+) C\b/g, '$1 °C');
+      addTranscript(r.error ? 'system' : 'core', say);
+      if (!r.error) toDock('dock:message', { role: 'core', text: say, author: 'prime' });
+    }).catch((err) => addTranscript('system', `I couldn't get the weather: ${err.message}`));
+    return true;
+  } else if (q.kind === 'timer') {
+    const r = reminders.add(q.when, q.label);
+    if (!r) return false; // let the brain explain what it could not parse
+    toDock('dock:reminders', reminders.items);
+    glanceCountdown(r.at, r.text);
+    const secs = Math.round((r.at - Date.now()) / 1000);
+    line = `Timer set: ${r.text}, ${secs >= 3600 ? `${Math.floor(secs / 3600)} h ${Math.round((secs % 3600) / 60)} min` : secs >= 120 ? `${Math.round(secs / 60)} minutes` : `${secs} seconds`}.`;
+  } else if (q.kind === 'timers') {
     const next = reminders.items.filter((x) => x.at > Date.now()).sort((a, b) => a.at - b.at)[0];
     if (next) { glanceCountdown(next.at, next.text); line = `${next.text}: ${Math.max(1, Math.round((next.at - Date.now()) / 60000))} minutes left.`; } else line = 'No timers running.';
   } else if (q.kind === 'glance') {
@@ -3087,7 +3106,7 @@ function makeVoicePipeline({ speak }) {
   // Until the voice model has loaded (first run downloads ~90 MB), speak with
   // the system voice instead of making every reply wait.
   const useKokoro = speak && v.tts !== false && v.engine !== 'system' && !tts.failed && tts.ready;
-  if (speak && v.engine !== 'system' && !tts.ready && !tts.failed) tts.warm();
+  if (speak && v.tts !== false && v.engine !== 'system' && !tts.ready && !tts.failed) tts.warm();
   return new OrderedVoicePipeline({
     synth: useKokoro ? (text) => tts.synth(text, { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed }) : null,
     forward: (item) => {
@@ -3799,6 +3818,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     abortCurrent();
     toOverlay('speech:stop');
   }
+  const turnEntered = Date.now();
   const mySkills = [];
   turnSkills = mySkills;
   turnVia = internal ? 'COre' : typed ? 'chat' : 'voice';
@@ -3835,6 +3855,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // (Never let a context problem stop the message itself.)
   const contextBlocks = [];
   let situationNow = null;
+  contextBlocks.push(GL.nowLine());
   try {
     // Memory recall and the desktop read run at the same time (both are on the path to the first word).
     const memP = memory && config.data.memory.enabled !== false ? gateway().context(text).catch(() => null) : null; // active memory + long-term knowledge
@@ -3873,6 +3894,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   const ac = new AbortController();
   current = ac;
   const turnStart = Date.now();
+  if (process.env.CORE_DEBUG) console.log(`[core] turn start ${JSON.stringify(text.slice(0, 60))} context ${Date.now() - turnEntered}ms`);
   let firstTextAt = 0;
   timingTurnStart = turnStart;
   const speak = !typed || config.data.voice.speakTyped !== false;
@@ -3912,8 +3934,9 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
         pipeline.push(item);
       },
       onStatus: (s) => {
+        if (process.env.CORE_DEBUG) console.log(`[core] status ${JSON.stringify(s)} +${Date.now() - turnStart}ms`);
         toPanel('status', s);
-        if (s.kind === 'fallback') addTranscript('system', `${s.from} failed: ${s.reason} Switching to ${s.to}.`);
+        if (s.kind === 'fallback') addTranscript('system', `${s.from} failed: ${String(s.reason || '').replace(/[.\s]*$/, '.')} Switching to ${s.to}.`);
       },
     });
     if (reply) addTranscript('core', reply);

@@ -94,11 +94,14 @@ class Brain {
     const since = this.seen[p.id] || 0;
     const missed = this.turns.filter((t) => t.seq > since).slice(-10);
     if (!missed.length) return '';
-    return `[Earlier in this conversation] (another model answered these turns; continue naturally, do not mention the switch)\n${missed.map((t) => `${t.role === 'user' ? 'User' : 'COre'}: ${t.text.length > 600 ? `${t.text.slice(0, 600)}…` : t.text}`).join('\n')}`;
+    return `[Earlier in this conversation] (another model answered these turns; they are finished, so do not redo anything in them. Answer only the new message below, naturally, without mentioning the switch)\n${missed.map((t) => `${t.role === 'user' ? 'User' : 'COre'}: ${t.text.length > 600 ? `${t.text.slice(0, 600)}…` : t.text}`).join('\n')}`;
   }
 
   _logTurn(p, user, reply) {
-    for (const [role, text] of [['user', user], ['core', reply]]) if (text) this.turns.push({ seq: ++this.seq, role, text: String(text).slice(0, 2000) });
+    // A reply that was only actions (a [[forget]], a timer) still answered the message: without a
+    // COre line the recap shows it as unanswered and the next model does it again.
+    const said = String(reply || '').trim() || (user ? '(done with an action; nothing left to do)' : '');
+    for (const [role, text] of [['user', user], ['core', said]]) if (text) this.turns.push({ seq: ++this.seq, role, text: String(text).slice(0, 2000) });
     if (this.turns.length > 30) this.turns.splice(0, this.turns.length - 30);
     this.seen[p.id] = this.seq;
   }
@@ -187,7 +190,7 @@ class Brain {
       if (decision) {
         if (this.profile !== 'strong') need.depth = decision.complexity === 'complex' || decision.effort === 'high' ? 'strong' : 'fast';
         if (decision.modelIndex >= 0 && pool[decision.modelIndex]) need.prefer = pool[decision.modelIndex].id;
-        const hints = routeHints(decision);
+        const hints = routeHints(decision, { agentEnabled });
         if (hints) context = context ? `${context}\n\n${hints}` : hints;
       }
     }
@@ -201,7 +204,8 @@ class Brain {
     let lastErr;
     for (let i = 0; i < providers.length; i++) {
       const p = providers[i];
-      const planner = new SpeechPlanner(onItem, { onText });
+      let acted = false; // a reply of only actions ([[forget]], a timer) is still an answer
+      const planner = new SpeechPlanner((it) => { if (it && it.type !== 'say' && it.type !== 'end') acted = true; onItem(it); }, { onText });
       let streamed = false;
       const started = Date.now();
       let firstTokenMs = null;
@@ -223,7 +227,9 @@ class Brain {
         await p.ask({
           model: model && model !== (p.cfg && p.cfg.model) ? model : undefined,
           effort: decision ? decision.effort : (this.profile === 'strong' ? 'high' : undefined),
-          prompt: buildPrompt(p, `${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}${recap ? `\n\n${recap}` : ''}`, shot),
+          // The recap goes first and the new message after it: placed last, the recap ends on a "COre: ..."
+          // line and models carry on that transcript, answering twice (seen with Gemini after a Groq rate limit).
+          prompt: buildPrompt(p, `${recap ? `${recap}\n\n[New message]\n` : ''}${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}`, shot),
           tone,
           image: shot && shot.base64 ? { base64: shot.base64, mediaType: shot.mediaType || 'image/png' } : null,
           signal: wd.signal,
@@ -238,6 +244,9 @@ class Brain {
         clearTimeout(timer);
         if (stalled) throw new Error(stalled); // provider ignored the abort but we already gave up on it
         const reply = planner.finish();
+        // An empty answer (a reasoning model that spent its budget thinking, a filtered reply) is a
+        // failure, not a silent success: the next brain gets the turn.
+        if (!String(reply || '').trim() && !acted) throw Object.assign(new Error(`${p.name || p.label} gave an empty answer`), { empty: true });
         this._record(p, true, { firstTokenMs });
         this.router.success(p.id, { firstTokenMs });
         this._logTurn(p, text, reply);
@@ -252,7 +261,7 @@ class Brain {
         this._record(p, false, { error: err.message });
         this.router.failure(p.id, err, { retryAfterMs: err.retryAfterMs || 0 });
         failures.push(`${p.name || p.label}: ${err.message}`);
-        if (streamed) {
+        if (streamed && !err.empty) {
           // Keep what was already said instead of throwing it away.
           const reply = planner.finish();
           this._logTurn(p, text, reply);
@@ -260,9 +269,15 @@ class Brain {
         }
         if (i === providers.length - 1) {
           planner.finish();
-          const e = new Error(failures.length > 1
-            ? `No brain could answer. ${failures.join(' | ')} — connect one in ⚙ → Brain.`
-            : `${failures[0]} — connect another brain in ⚙ → Brain.`);
+          // Every brain busy on its free-tier limit is not a setup problem: say so, and when to retry.
+          const limited = this.chain.filter((c) => this.router.cooling(c.id));
+          const allLimited = failures.every((f) => /rate limit/i.test(f)) && limited.length >= Math.min(this.chain.length, 2);
+          const soonest = allLimited ? Math.min(...limited.map((c) => this.router._s(c.id).until)) - this.router.now() : 0;
+          const e = new Error(allLimited
+            ? `All your brains are rate limited right now (free-tier limits). Try again in ${soonest > 90e3 ? `about ${Math.ceil(soonest / 60e3)} minutes` : 'a minute'}, or add a paid key in ⚙ → Brain. Timers and the time still work.`
+            : failures.length > 1
+              ? `No brain could answer. ${failures.join(' | ')} — connect one in ⚙ → Brain.`
+              : `${failures[0]} — connect another brain in ⚙ → Brain.`);
           e.failures = failures;
           throw e;
         }
@@ -277,10 +292,16 @@ class Brain {
 
 // A few words for the main brain about what the decision layer saw. Advice
 // only: it may delegate or suggest /do, never act on its own because of this.
-function routeHints(d) {
+function routeHints(d, { agentEnabled = false } = {}) {
   const out = [];
   if (d.specialist && d.specialist !== 'none') out.push(`a specialist fits: ${d.specialist} (delegate if it helps)`);
-  if (d.actsOnSystem >= 0.6 && d.task === 'desktop') out.push('this asks to act on the computer: if the desktop agent can do it, tell the user to start it with /do and a short instruction');
+  // A skill (open an app, music, a timer, a note) is done at once with its tag; /do is only worth
+  // suggesting when the desktop agent is on and no skill covers it. With it off, never point at /do.
+  if (d.actsOnSystem >= 0.6 && d.task === 'desktop') {
+    out.push(agentEnabled
+      ? 'this asks to act on the computer: if one of your skills does it (open, music, timer, note), use its [[do ...]] tag now; otherwise tell the user to start the desktop agent with /do and a short instruction'
+      : 'this asks to act on the computer: if one of your skills does it (open, music, timer, note), use its [[do ...]] tag now; otherwise say plainly you cannot do that yet (the desktop agent is off in Settings), and never tell the user to type a command');
+  }
   if (d.underspecified >= 0.6) out.push('the request is vague: ask one short clarifying question first');
   if (d.complexity === 'complex') out.push('this is complex: plan briefly, then answer step by step');
   return out.length ? `[Route] ${out.join('; ')}.` : '';

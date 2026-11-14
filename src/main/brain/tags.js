@@ -67,8 +67,11 @@ function parseTag(body) {
   }
   if ((name === 'remember' || name === 'forget') && rest) return { name, text: rest.slice(0, 300) };
   if (name === 'remind') {
-    const r = /^((?:\d+\s*(?:h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\s*)+|(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+([\s\S]+)$/i.exec(rest);
-    return r ? { name, when: r[1].trim(), text: r[2].trim().slice(0, 200) } : null;
+    // WHEN: a delay (10m, 1h30m) or a clock time, optionally with a day ("tomorrow 9am", "9am tomorrow").
+    const r = /^((?:\d+\s*(?:h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\s*)+|(?:(?:today|tomorrow)\s+)?(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?|(?:today|tomorrow))\s+([\s\S]+)$/i.exec(rest);
+    // A time COre can't read is still a reminder the model promised: keep it (with no time) so the
+    // user is told it was not set, instead of the tag vanishing behind a "done".
+    return r ? { name, when: r[1].trim(), text: r[2].trim().slice(0, 200) } : rest ? { name, when: '', text: rest.slice(0, 200) } : null;
   }
   if (name === 'open') {
     const url = rest.split(/\s+/)[0];
@@ -84,15 +87,49 @@ function parseTag(body) {
   return null;
 }
 
+// COre marks typed messages "[typed]" for the model; models sometimes echo the marker at the start
+// of their answer. It is input-only and never shown or spoken.
+const ECHO = '[typed]';
+// Input markers a model may echo at the very start: [typed], and [skill] (the marker of real skill
+// results, which a model must never imitate to pass off an answer as looked up).
+const HEAD_ECHOES = [ECHO, '[skill]'];
+
 class TagStreamParser {
   constructor() {
     this.buf = '';
+    this.head = true; // still at the start of the reply (an echoed marker may be arriving)
   }
 
   // Returns an array of {type:'text', text} | {type:'tag', tag}.
   feed(chunk) {
     this.buf += chunk;
     const out = [];
+    if (this.head) {
+      const lead = this.buf.trimStart();
+      const low = lead.toLowerCase();
+      if (HEAD_ECHOES.some((m) => lead.length < m.length && m.startsWith(low))) return out; // could still be a marker
+      const m = HEAD_ECHOES.find((x) => low.startsWith(x));
+      if (m) this.buf = lead.slice(m.length).replace(/^\s+/, '');
+      this.head = false;
+    }
+    // The marker later in the reply starts a second version of the same answer (Gemini writes one for
+    // the voice and one for the chat). It is never shown, and its tags never run: a [[remember]] in it
+    // would undo a [[forget]] the first version just did.
+    if (this.done) { this.buf = ''; return out; }
+    let tail = '';
+    const at = this.buf.toLowerCase().indexOf(ECHO);
+    if (at >= 0) { this.buf = this.buf.slice(0, at).replace(/\s+$/, ''); this.done = true; }
+    else {
+      for (let k = ECHO.length - 1; k >= 2; k--) {
+        if (this.buf.toLowerCase().endsWith(ECHO.slice(0, k))) { tail = this.buf.slice(-k); this.buf = this.buf.slice(0, -k); break; }
+      }
+    }
+    this._drain(out);
+    if (!this.done) this.buf += tail;
+    return out;
+  }
+
+  _drain(out) {
     for (;;) {
       const open = this.buf.indexOf('[[');
       if (open === -1) {
@@ -104,7 +141,7 @@ class TagStreamParser {
           pushText(out, this.buf);
           this.buf = '';
         }
-        return out;
+        return;
       }
       pushText(out, this.buf.slice(0, open));
       this.buf = this.buf.slice(open);
@@ -116,7 +153,7 @@ class TagStreamParser {
           this.buf = this.buf.slice(2);
           continue;
         }
-        return out; // wait for more input
+        return; // wait for more input
       }
       const tag = parseTag(this.buf.slice(2, close));
       if (tag) out.push({ type: 'tag', tag });
@@ -128,6 +165,8 @@ class TagStreamParser {
   // End of stream: whatever is left can only be text.
   flush() {
     const out = [];
+    if (this.head && HEAD_ECHOES.some((m) => m.startsWith(this.buf.trim().toLowerCase()))) this.buf = '';
+    this.head = false;
     // An unclosed run is plain text, unless it's clearly a cut-off tag.
     const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|delegate|do|read|list|find|mood|remember|forget|remind|open|copy|board)\b/i.test(this.buf);
     const rest = cutTag ? '' : this.buf;
@@ -145,7 +184,7 @@ function pushText(out, text) {
 }
 
 function stripTags(text) {
-  return text.replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  return text.replace(/^\s*\[(typed|skill)\]\s*/i, '').replace(/\s*\[typed\][\s\S]*$/i, '').replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 module.exports = { TagStreamParser, parseTag, stripTags };
