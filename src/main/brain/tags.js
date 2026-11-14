@@ -84,15 +84,26 @@ function parseTag(body) {
   return null;
 }
 
+// COre marks typed messages "[typed]" for the model; models sometimes echo the marker at the start
+// of their answer. It is input-only and never shown or spoken.
+const ECHO = '[typed]';
+
 class TagStreamParser {
   constructor() {
     this.buf = '';
+    this.head = true; // still at the start of the reply (an echoed marker may be arriving)
   }
 
   // Returns an array of {type:'text', text} | {type:'tag', tag}.
   feed(chunk) {
     this.buf += chunk;
     const out = [];
+    if (this.head) {
+      const lead = this.buf.trimStart();
+      if (lead.length < ECHO.length && ECHO.startsWith(lead.toLowerCase())) return out; // could still be the marker
+      if (lead.toLowerCase().startsWith(ECHO)) this.buf = lead.slice(ECHO.length).replace(/^\s+/, '');
+      this.head = false;
+    }
     for (;;) {
       const open = this.buf.indexOf('[[');
       if (open === -1) {
@@ -128,6 +139,8 @@ class TagStreamParser {
   // End of stream: whatever is left can only be text.
   flush() {
     const out = [];
+    if (this.head && ECHO.startsWith(this.buf.trim().toLowerCase())) this.buf = '';
+    this.head = false;
     // An unclosed run is plain text, unless it's clearly a cut-off tag.
     const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|delegate|do|read|list|find|mood|remember|forget|remind|open|copy|board)\b/i.test(this.buf);
     const rest = cutTag ? '' : this.buf;
@@ -145,7 +158,7 @@ function pushText(out, text) {
 }
 
 function stripTags(text) {
-  return text.replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  return text.replace(/^\s*\[typed\]\s*/i, '').replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 module.exports = { TagStreamParser, parseTag, stripTags };
