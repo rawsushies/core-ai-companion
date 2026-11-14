@@ -25,6 +25,7 @@ async function setup() {
     devices: [{ id, name: 'Phone', key, ctr: 0, created: Date.now(), lastSeen: Date.now() }],
     saveDevices: () => {}, confirmPair: async () => true, getFeed: () => ({ events: [] }),
     onFile: (f, d) => { files.push({ ...f, device: d.name }); return { name: f.name }; },
+    onVoice: async (v, d) => { files.push({ voice: true, bytes: v.pcm.length, device: d.name }); },
   });
   await c.start();
   let ctr = 1;
@@ -93,4 +94,20 @@ test('what a phone file says is untrusted: a website or recipient in it asks bef
   assert.strictEqual(policy.decide({ type: 'fetch', url: 'https://drop.evil-files.example/u' }).decision, 'escalate');
   assert.strictEqual(policy.decide({ type: 'type', text: 'Sending to PAY@evil-files.example now' }).decision, 'escalate');
   assert.strictEqual(policy.decide({ type: 'fetch', url: 'https://example.org/' }).decision, 'journal', 'a website the user granted (not from the file) still works');
+});
+
+test('a voice turn travels like a file but goes to speech recognition, never to the file shelf; 30 s at most', async () => {
+  const { c, api, files } = await setup();
+  const pcm = Buffer.alloc(16000 * 2 * 2); // two seconds of 16 kHz 16-bit PCM
+  const r = await api('filePut', { kind: 'voice', id: 'voice-0001', index: 0, total: 1, size: pcm.length, name: 'ignored.exe', data: pcm.toString('base64') });
+  assert.strictEqual(r.voice, true);
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepStrictEqual(files, [{ voice: true, bytes: pcm.length, device: 'Phone' }]);
+  assert.match((await api('filePut', { kind: 'voice', id: 'voice-0002', index: 0, total: 4, size: C.VOICE_MAX + 2, data: '' })).error, /30 seconds/);
+  assert.match((await api('filePut', { kind: 'voice', id: 'voice-0003', index: 0, total: 1, size: 3, data: 'AAAA' })).error, /30 seconds/, 'an odd byte count is not 16-bit audio');
+  // An upload cannot switch kind halfway.
+  const part = Buffer.alloc(C.CHUNK_MAX, 0).toString('base64');
+  await api('filePut', { id: 'mixed-0001', index: 0, total: 2, size: C.CHUNK_MAX + 2, name: 'a.bin', data: part });
+  assert.strictEqual((await api('filePut', { kind: 'voice', id: 'mixed-0001', index: 1, total: 2, size: C.CHUNK_MAX + 2, data: 'AAA=' })).error, 'bad request');
+  c.stop();
 });

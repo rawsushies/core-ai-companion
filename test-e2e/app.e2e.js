@@ -266,6 +266,13 @@ test('a phone pairs, chats and is locked out after removal', async () => {
   for (let i = 0; i < 40 && !card; i++) { card = (await dock.evaluate(() => window.dock.files())).find((f) => f.name === 'site visit.txt'); if (!card) await wait(150); }
   assert.ok(card, 'the phone file is on the file shelf');
   await dock.evaluate((id) => window.dock.filesRemove(id), card.id); // later tests count the shelf's cards
+  // A voice turn from the phone reaches COre's speech recognition on the PC (no speech model in this
+  // environment, so COre says it could not understand; with the model, the text becomes a message).
+  const tone = Buffer.alloc(16000 * 2);
+  for (let i = 0; i < 16000; i++) tone.writeInt16LE(Math.round(6000 * Math.sin(i / 6)), i * 2);
+  const vr = C.open((await api('filePut', { kind: 'voice', id: 'e2e-voice-1', index: 0, total: 1, size: tone.length, data: tone.toString('base64') })).body, key);
+  assert.strictEqual(vr.voice, true, JSON.stringify(vr));
+  await dock.waitForFunction(() => /voice message|E2E phone/.test(document.getElementById('log').innerText.slice(-400)) && /understand|voice message/.test(document.getElementById('log').innerText.slice(-400)), null, { timeout: 15000 });
   await dock.waitForFunction(() => document.querySelectorAll('#file-cards .fcard').length === 0, null, { timeout: 5000 }).catch(() => {});
   const list = await settings.evaluate(() => window.settingsApi.action('phoneDevices'));
   assert.strictEqual(list.devices[0].name, 'E2E phone');
