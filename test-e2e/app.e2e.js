@@ -91,7 +91,7 @@ test.before(async () => {
     },
     ...(CORTEX_DIR ? { memory: { cortex: { enabled: true, command: process.platform === 'win32' ? 'python' : 'python3', script: path.join(CORTEX_DIR, 'run.py'), vault: cortexVault } } } : {}),
     voice: { tts: false },
-    presence: { chitchat: false },
+    presence: { chitchat: false, briefing: false },
     update: { enabled: false },
     phone: { host: '127.0.0.1', port: 0 },
     tools: { projectRoot: project, enabled: true, allowWrites: true },
@@ -533,6 +533,14 @@ test('phone as remote body: the mission and its approval reach the phone; answer
   await settings.evaluate((id) => window.settingsApi.action(`revokePhone:${id}`), deviceId);
   await settings.evaluate(() => window.settingsApi.set('agent.enabled', false));
   fs.writeFileSync(script, JSON.stringify(baseRules));
+});
+
+test('morning briefing: /briefing lists only what COre has a source for (here: its own mission record)', async () => {
+  await send('/briefing');
+  await dock.waitForFunction(() => { const t = document.getElementById('log').innerText; const i = t.lastIndexOf('/briefing'); return i >= 0 && /Good morning\. Here is|Nothing to brief you on/.test(t.slice(i)); }, null, { timeout: 15000 });
+  const tail = await dock.evaluate(() => { const t = document.getElementById('log').innerText; return t.slice(t.lastIndexOf('/briefing')); });
+  assert.ok(!/Calendar/.test(tail), 'no calendar feed is connected, so no calendar section');
+  if (/Good morning/.test(tail)) assert.match(tail, /Since yesterday \(COre's mission records\)/);
 });
 
 test('desktop agent: tools write a file and run a command (always asked), results come back, /do undo restores', { skip: process.platform !== 'linux' }, async () => {

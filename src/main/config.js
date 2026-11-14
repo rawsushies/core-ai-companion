@@ -54,6 +54,8 @@ const DEFAULTS = {
   presence: {
     suggestions: true, // daily mention of unfinished work; only suggests, never acts
     chitchat: true, // after a quiet while COre starts a short conversation on its own
+    briefing: true, // once a day, the first time you are at the PC after briefingFrom: calendar, due to-dos, recent missions
+    briefingFrom: 6,
     minutes: 25, // quiet minutes before it does (doubles each time it's ignored)
     quietFrom: 22, // no chit-chat from this hour...
     quietTo: 8, // ...until this hour

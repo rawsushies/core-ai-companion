@@ -3565,6 +3565,45 @@ async function startChitchat({ quietMinutes }) {
   handleUserText(prompt, { internal: true });
 }
 
+// Morning briefing (13.0 P4): built from sources COre can name (calendar feed, Cortex to-dos, its
+// own mission records); offered once a day when the interruption model says it is a good moment.
+const INT = require('./interrupt');
+const BRIEF = require('./briefing');
+let interrupts = null;
+function interruptHistory() { if (!interrupts) interrupts = new INT.InterruptHistory({ store: state }); return interrupts; }
+function interruptState() {
+  let idleSec = 0;
+  try { idleSec = powerMonitor.getSystemIdleTime(); } catch {}
+  return { hour: new Date().getHours(), idleSec, typingSec: idleSec, hidden: orbHidden, busy: !!current || !!listening, phonePaired: !!(companion && companion.devices && companion.devices.size) };
+}
+async function buildBriefing() {
+  let calendar = null;
+  if (getSecret('calendar')) {
+    try { const r = await require('./skills').runSkill('calendar', 'today', skillCtx()); if (r && r.result && !r.error) calendar = /^Nothing on the calendar/.test(r.result) ? [] : String(r.result).split('; ').filter(Boolean); } catch {}
+  }
+  let tasks = null;
+  if (gateway().cortexOn()) { try { tasks = await require('./opportunities').openTasks(gateway().cortex); } catch {} }
+  const lm = state.get('lastMission');
+  return BRIEF.build({ calendar, tasks, missions: lm ? [lm] : [], now: new Date() });
+}
+async function briefingTick() {
+  const p = config.data.presence || {};
+  if (p.briefing === false || !brain) return;
+  const st = interruptState();
+  const day = BRIEF.due({ now: new Date(), lastDay: state.get('briefingDay') || '', idleSec: st.idleSec, fromHour: Number.isInteger(p.briefingFrom) ? p.briefingFrom : 6 });
+  if (!day) return;
+  const d = INT.decide({ kind: 'briefing', importance: 'normal', state: st, history: interruptHistory().snapshot(), cfg: { quietFrom: p.quietFrom ?? 22, quietTo: p.quietTo ?? 8 } });
+  if (d.act === 'later') return;
+  state.set('briefingDay', day); // decided for today (delivered or dropped)
+  if (d.act === 'drop') return;
+  const b = await buildBriefing();
+  if (b.empty) return;
+  interruptHistory().delivered('briefing', 'normal');
+  addTranscript('core', b.text, { direct: true });
+  toDock('dock:message', { role: 'core', text: b.text, author: 'prime' });
+  if (d.channel === 'speak' && config.data.voice.tts !== false) speakLine(b.spoken);
+}
+
 function startPresence() {
   presence = new Presence({
     getConfig: () => config.data.presence || {},
@@ -3575,6 +3614,7 @@ function startPresence() {
     onChat: startChitchat,
   });
   presence.start();
+  setInterval(() => { briefingTick().catch((err) => console.warn('[core] briefing:', err.message)); }, 60_000);
 }
 
 function playGame(name) {
@@ -3611,6 +3651,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     if (/^\/skills?\b/i.test(text) && playbookCommand(text, { files })) return;
     if (/^\/(center|command|status)\s*$/i.test(text)) { openCommandCenter(); return; }
     if (/^\/monitor\s*$/i.test(text)) { openMonitor(); return; }
+    if (/^\/briefing\s*$/i.test(text)) { addTranscript('user', text); buildBriefing().then((b) => addTranscript('core', b.empty ? 'Nothing to brief you on: no calendar feed, no due to-dos in Cortex and no recent missions.' : b.text, { direct: true })).catch((err) => addTranscript('system', `Could not build the briefing: ${err.message}`)); return; }
     if (/^\/(diagnostics|diag|health)\s*$/i.test(text)) { addTranscript('user', text); diagnosticsReport().then((r) => addTranscript('system', r)).catch((err) => addTranscript('system', `Diagnostics failed: ${err.message}`)); return; }
     { const sg = /^\/suggest(?:ions?)?\b\s*(?:hide\s+(\d+))?\s*$/i.exec(text); if (sg) {
       addTranscript('user', text);
