@@ -254,6 +254,19 @@ test('a phone pairs, chats and is locked out after removal', async () => {
     if (!reply) await wait(500);
   }
   assert.ok(reply, 'the phone sees the reply');
+  // Phone Inbox: a file from the phone lands in userData/PhoneInbox and on the file shelf, as data.
+  const note = Buffer.from('Meeting notes from my phone: the site visit moved to Friday.');
+  const up = C.open((await api('filePut', { id: 'e2e-upload-1', index: 0, total: 1, size: note.length, name: '../site visit.txt', data: note.toString('base64') })).body, key);
+  assert.strictEqual(up.ok, true, JSON.stringify(up));
+  assert.strictEqual(up.name, 'site visit.txt');
+  await dock.waitForFunction(() => /E2E phone sent site visit\.txt/.test(document.getElementById('log').innerText), null, { timeout: 8000 });
+  const inbox = path.join(userData, 'PhoneInbox', new Date().toISOString().slice(0, 10), 'site visit.txt');
+  assert.strictEqual(fs.readFileSync(inbox, 'utf8'), note.toString());
+  let card = null;
+  for (let i = 0; i < 40 && !card; i++) { card = (await dock.evaluate(() => window.dock.files())).find((f) => f.name === 'site visit.txt'); if (!card) await wait(150); }
+  assert.ok(card, 'the phone file is on the file shelf');
+  await dock.evaluate((id) => window.dock.filesRemove(id), card.id); // later tests count the shelf's cards
+  await dock.waitForFunction(() => document.querySelectorAll('#file-cards .fcard').length === 0, null, { timeout: 5000 }).catch(() => {});
   const list = await settings.evaluate(() => window.settingsApi.action('phoneDevices'));
   assert.strictEqual(list.devices[0].name, 'E2E phone');
   // Regression: closing a card beside the orb used to stop the phone server.

@@ -235,6 +235,25 @@ function notePending(p) {
   if (!pendingApprovals.has(p.id)) phoneNotices.add('approval', 'COre needs your answer', 'A step is waiting for your approval. Open COre to approve or decline.');
   pendingApprovals.set(p.id, { id: p.id, step: String(p.step || ''), label: String(p.label || '').slice(0, 600), why: String(p.why || '').slice(0, 300), hash, expires: Date.now() + 5 * 60000 });
 }
+// Phone Inbox (13.0 P3): a file sent from the phone. It is saved under userData/PhoneInbox/<date>/
+// (never over an existing file) and goes on the file shelf like a dropped file: its text is read
+// as data, instruction-like text is flagged, and the agent's policy treats anything read from it
+// as untrusted (a recipient or website in it asks before use).
+function fileFromPhone({ name, data }, device) {
+  const day = new Date().toISOString().slice(0, 10);
+  const dir = path.join(app.getPath('userData'), 'PhoneInbox', day);
+  fs.mkdirSync(dir, { recursive: true });
+  const ext = path.extname(name);
+  const base = path.basename(name, ext);
+  let file = path.join(dir, name);
+  for (let i = 2; fs.existsSync(file) && i < 1000; i++) file = path.join(dir, `${base} (${i})${ext}`);
+  fs.writeFileSync(file, data, { flag: 'wx' });
+  toolAudit({ event: 'phone-file', device: device.name, name: path.basename(file), bytes: data.length });
+  addTranscript('system', `${device.name} sent ${path.basename(file)} (${Math.max(1, Math.round(data.length / 1024))} KB). It is on the file shelf; COre reads it as data, not instructions.`, { kind: 'progress' });
+  addFiles([file]).catch(() => {});
+  return { name: path.basename(file) };
+}
+
 // -> { ok, error }
 function answerFromPhone({ id, hash, answer, bio }, device) {
   const p = pendingApprovals.get(String(id));
@@ -1055,6 +1074,7 @@ function ensureCompanion() {
     onMessage: (text, device) => { handleUserText(text, { typed: true, remote: true }); toolAudit(`phone ${device.name}: message`); },
     onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
     onApprove: (a, device) => answerFromPhone(a, device),
+    onFile: (f, device) => fileFromPhone(f, device),
     onMissionStop: (device) => { toolAudit({ event: 'phone-stop', device: device.name }); if (missionEngine) missionEngine.stop(`stopped from ${device.name}`); stopAgent(`stopped from ${device.name}`); addTranscript('system', `Stopped from ${device.name}.`, { kind: 'progress' }); },
     onMedia: (action) => {
       if (config.data.skills.music === false) return;
