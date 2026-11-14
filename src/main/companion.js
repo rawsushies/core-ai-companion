@@ -282,6 +282,7 @@ const FILE_MAX = 10 * 1024 * 1024; // whole file
 const CHUNK_MAX = 256 * 1024; // decoded bytes per chunk
 const FILE_BODY_MAX = 520 * 1024; // a sealed chunk (base64 inside a base64 box) fits
 const UPLOAD_TTL = 2 * 60000;
+const VOICE_MAX = 16000 * 2 * 30; // a voice turn: 16 kHz 16-bit mono PCM, at most 30 seconds
 
 // A file name that is safe to create anywhere: the last path segment, no control or reserved
 // characters, no leading dots, no Windows device names, at most 80 characters.
@@ -300,16 +301,18 @@ Companion.prototype._filePut = function _filePut(m, d) {
   const total = Number(m.total);
   const size = Number(m.size);
   if (!/^[\w-]{8,40}$/.test(id) || !Number.isInteger(index) || !Number.isInteger(total) || !Number.isInteger(size)) return { ok: false, error: 'bad request' };
+  const voice = m.kind === 'voice';
+  if (voice && (size > VOICE_MAX || size % 2)) return { ok: false, error: 'A voice message can be up to 30 seconds.' };
   if (size < 1 || size > FILE_MAX) return { ok: false, error: 'Files up to 10 MB can be sent.' };
   if (total < 1 || total > Math.ceil(FILE_MAX / CHUNK_MAX) || total !== Math.ceil(size / CHUNK_MAX) || index < 0 || index >= total) return { ok: false, error: 'bad request' };
   let u = this.uploads.get(id);
   if (!u) {
     if (index !== 0) return { ok: false, error: 'That upload expired. Send the file again.' };
     if ([...this.uploads.values()].filter((x) => x.device === d.id).length >= 2) return { ok: false, error: 'One file at a time, please.' };
-    u = { device: d.id, name: safeName(m.name), size, total, parts: [], bytes: 0, at: t };
+    u = { device: d.id, voice, name: voice ? 'voice.pcm' : safeName(m.name), size, total, parts: [], bytes: 0, at: t };
     this.uploads.set(id, u);
   }
-  if (u.device !== d.id || u.size !== size || u.total !== total) return { ok: false, error: 'bad request' };
+  if (u.device !== d.id || u.size !== size || u.total !== total || u.voice !== voice) return { ok: false, error: 'bad request' };
   if (index !== u.parts.length) return { ok: false, error: 'out of order', expect: u.parts.length };
   const chunk = Buffer.from(String(m.data || ''), 'base64');
   const want = index < total - 1 ? CHUNK_MAX : size - CHUNK_MAX * (total - 1);
@@ -320,8 +323,12 @@ Companion.prototype._filePut = function _filePut(m, d) {
   if (u.parts.length < total) return { ok: true, next: u.parts.length };
   this.uploads.delete(id);
   const data = Buffer.concat(u.parts);
-  if (data.length !== size || !this.o.onFile) return { ok: false, error: 'The file arrived damaged. Send it again.' };
-  try { return { ok: true, done: true, ...(this.o.onFile({ name: u.name, data }, { id: d.id, name: d.name }) || {}) }; } catch (err) { return { ok: false, error: String(err.message || err).slice(0, 120) }; }
+  const handler = u.voice ? this.o.onVoice : this.o.onFile;
+  if (data.length !== size || !handler) return { ok: false, error: u.voice ? 'Voice is not available.' : 'The file arrived damaged. Send it again.' };
+  // A voice turn: the PC transcribes it and answers as a message from the phone (onVoice may be async;
+  // the reply comes through the feed, so the phone is answered at once).
+  if (u.voice) { Promise.resolve().then(() => handler({ pcm: data }, { id: d.id, name: d.name })).catch(() => {}); return { ok: true, done: true, voice: true }; }
+  try { return { ok: true, done: true, ...(handler({ name: u.name, data }, { id: d.id, name: d.name }) || {}) }; } catch (err) { return { ok: false, error: String(err.message || err).slice(0, 120) }; }
 };
 
-module.exports = { APP_ORIGINS, Companion, safeName, FILE_MAX, CHUNK_MAX, seal, open, pairCode, isPrivate, lanAddress, b64url, fromB64url };
+module.exports = { APP_ORIGINS, Companion, safeName, FILE_MAX, CHUNK_MAX, VOICE_MAX, seal, open, pairCode, isPrivate, lanAddress, b64url, fromB64url };

@@ -113,6 +113,7 @@
       for (const e of r.events || []) {
         since = Math.max(since, e.seq || 0);
         addMsg(e.role === 'notice' ? 'system' : e.role, e.text, e.role === 'core' && e.author && e.author !== 'prime' ? { name: e.name, color: e.color } : {});
+        if (speakNext && e.role === 'core') speakReply(e.text);
       }
       renderMission(r);
       notifyNew(r.notices);
@@ -127,6 +128,7 @@
     }
     $('media').hidden = !pcOnline;
     $('attach').hidden = !pcOnline;
+    $('talk').hidden = !pcOnline || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
     const visible = document.visibilityState === 'visible';
     syncTimer = setTimeout(syncPc, !visible ? 30000 : pcOnline ? 2000 : Math.min(30000, 3000 * failures));
   }
@@ -156,6 +158,67 @@
   }
   $('attach').addEventListener('click', () => $('attach-file').click());
   $('attach-file').addEventListener('change', () => { const f = $('attach-file').files[0]; $('attach-file').value = ''; sendFile(f); });
+
+  // Voice turns (13.0 P3): tap to talk, tap again to send (30 s at most). The audio is resampled
+  // to 16 kHz 16-bit mono on the phone and sent sealed like a file; COre's own speech recognition
+  // on the PC turns it into a message. COre's next reply is read aloud on the phone.
+  let rec = null;
+  let speakNext = false;
+  function toPcm16(chunks, rate) {
+    const len = chunks.reduce((a, c) => a + c.length, 0);
+    const all = new Float32Array(len);
+    let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    const n = Math.min(Math.floor(len * 16000 / rate), 16000 * 30);
+    const out = new Uint8Array(n * 2);
+    const dv = new DataView(out.buffer);
+    for (let i = 0; i < n; i++) {
+      const v = Math.max(-1, Math.min(1, all[Math.min(len - 1, Math.floor(i * rate / 16000))] || 0));
+      dv.setInt16(i * 2, Math.round(v * 32767), true);
+    }
+    return out;
+  }
+  async function talkStart() {
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); } catch { addMsg('system', 'COre needs the microphone to hear you. Allow it in Android settings.'); return; }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ctx.createMediaStreamSource(stream);
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    const chunks = [];
+    node.onaudioprocess = (e) => { chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+    src.connect(node); node.connect(ctx.destination);
+    rec = { stream, ctx, node, chunks, timer: setTimeout(talkStop, 30000) };
+    $('talk').classList.add('on');
+    setStatus('Listening…', '', 'listening');
+  }
+  async function talkStop() {
+    if (!rec) return;
+    const r = rec; rec = null;
+    clearTimeout(r.timer);
+    $('talk').classList.remove('on');
+    try { r.node.disconnect(); r.stream.getTracks().forEach((t) => t.stop()); } catch {}
+    const rate = r.ctx.sampleRate;
+    r.ctx.close().catch(() => {});
+    const pcm = toPcm16(r.chunks, rate);
+    if (pcm.length < 16000 * 2 * 0.3) { setStatus('With your PC', '', 'idle'); return; }
+    const id = b64url(nacl.randomBytes(12));
+    const total = Math.ceil(pcm.length / CHUNK);
+    try {
+      for (let i = 0; i < total; i++) {
+        const res = await call('filePut', { kind: 'voice', id, index: i, total, size: pcm.length, data: b64big(pcm.subarray(i * CHUNK, (i + 1) * CHUNK)) });
+        if (!res.ok) throw new Error(res.error || 'refused');
+        if (i < total - 1) await pause(300);
+      }
+      speakNext = true;
+      setStatus('Thinking…', '', 'thinking');
+      setTimeout(syncPc, 500);
+    } catch (err) { addMsg('system', `Could not send your voice message: ${err.message}`); }
+  }
+  function speakReply(text) {
+    speakNext = false;
+    try { const u = new SpeechSynthesisUtterance(String(text).replace(/[*_`#>]/g, '').slice(0, 600)); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {}
+  }
+  $('talk').addEventListener('click', () => { if (rec) talkStop(); else talkStart(); });
 
   // Notifications (13.0 P3): the PC sends a short list of notices with every sync; each id is
   // raised once, only while the app is in the background, on a private channel (the lock screen

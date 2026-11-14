@@ -254,6 +254,21 @@ function fileFromPhone({ name, data }, device) {
   return { name: path.basename(file) };
 }
 
+// A voice turn from the phone (13.0 P3): 16 kHz 16-bit PCM, transcribed by COre's own speech
+// recognition on the PC and handled like a message typed on the phone; the reply goes back through
+// the feed (the phone reads replies to its voice turns aloud).
+async function voiceFromPhone({ pcm }, device) {
+  const n = Math.floor(pcm.length / 2);
+  if (n < 16000 * 0.3) { addTranscript('system', `${device.name} sent a voice message that was too short to understand.`, { kind: 'progress' }); return; }
+  const f = new Float32Array(n);
+  for (let i = 0; i < n; i++) f[i] = pcm.readInt16LE(i * 2) / 32768;
+  let text = '';
+  try { text = String(await stt.transcribe(f) || '').trim(); } catch (err) { addTranscript('system', `Could not understand ${device.name}'s voice message: ${err.message}`, { kind: 'error' }); return; }
+  toolAudit({ event: 'phone-voice', device: device.name, seconds: Math.round(n / 1600) / 10, chars: text.length });
+  if (!text) { addTranscript('system', `Could not understand ${device.name}'s voice message.`, { kind: 'progress' }); return; }
+  handleUserText(text, { typed: true, remote: true });
+}
+
 // -> { ok, error }
 function answerFromPhone({ id, hash, answer, bio }, device) {
   const p = pendingApprovals.get(String(id));
@@ -1075,6 +1090,7 @@ function ensureCompanion() {
     onStop: () => { abortCurrent(); toOverlay('speech:stop'); },
     onApprove: (a, device) => answerFromPhone(a, device),
     onFile: (f, device) => fileFromPhone(f, device),
+    onVoice: (v, device) => voiceFromPhone(v, device),
     onMissionStop: (device) => { toolAudit({ event: 'phone-stop', device: device.name }); if (missionEngine) missionEngine.stop(`stopped from ${device.name}`); stopAgent(`stopped from ${device.name}`); addTranscript('system', `Stopped from ${device.name}.`, { kind: 'progress' }); },
     onMedia: (action) => {
       if (config.data.skills.music === false) return;
