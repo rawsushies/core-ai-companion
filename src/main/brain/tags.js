@@ -90,6 +90,9 @@ function parseTag(body) {
 // COre marks typed messages "[typed]" for the model; models sometimes echo the marker at the start
 // of their answer. It is input-only and never shown or spoken.
 const ECHO = '[typed]';
+// Input markers a model may echo at the very start: [typed], and [skill] (the marker of real skill
+// results, which a model must never imitate to pass off an answer as looked up).
+const HEAD_ECHOES = [ECHO, '[skill]'];
 
 class TagStreamParser {
   constructor() {
@@ -103,8 +106,10 @@ class TagStreamParser {
     const out = [];
     if (this.head) {
       const lead = this.buf.trimStart();
-      if (lead.length < ECHO.length && ECHO.startsWith(lead.toLowerCase())) return out; // could still be the marker
-      if (lead.toLowerCase().startsWith(ECHO)) this.buf = lead.slice(ECHO.length).replace(/^\s+/, '');
+      const low = lead.toLowerCase();
+      if (HEAD_ECHOES.some((m) => lead.length < m.length && m.startsWith(low))) return out; // could still be a marker
+      const m = HEAD_ECHOES.find((x) => low.startsWith(x));
+      if (m) this.buf = lead.slice(m.length).replace(/^\s+/, '');
       this.head = false;
     }
     // The marker later in the reply starts a second version of the same answer (Gemini writes one for
@@ -160,7 +165,7 @@ class TagStreamParser {
   // End of stream: whatever is left can only be text.
   flush() {
     const out = [];
-    if (this.head && ECHO.startsWith(this.buf.trim().toLowerCase())) this.buf = '';
+    if (this.head && HEAD_ECHOES.some((m) => m.startsWith(this.buf.trim().toLowerCase()))) this.buf = '';
     this.head = false;
     // An unclosed run is plain text, unless it's clearly a cut-off tag.
     const cutTag = /^\[\[\s*(point|explain|gesture|form|clone|delegate|do|read|list|find|mood|remember|forget|remind|open|copy|board)\b/i.test(this.buf);
@@ -179,7 +184,7 @@ function pushText(out, text) {
 }
 
 function stripTags(text) {
-  return text.replace(/^\s*\[typed\]\s*/i, '').replace(/\s*\[typed\][\s\S]*$/i, '').replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  return text.replace(/^\s*\[(typed|skill)\]\s*/i, '').replace(/\s*\[typed\][\s\S]*$/i, '').replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 module.exports = { TagStreamParser, parseTag, stripTags };

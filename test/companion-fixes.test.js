@@ -85,3 +85,25 @@ test('a remind tag with a day is understood, and one with an unreadable time is 
   assert.deepStrictEqual(parseTag('remind 10m tea'), { name: 'remind', when: '10m', text: 'tea' });
   assert.deepStrictEqual(parseTag('remind next friday dentist'), { name: 'remind', when: '', text: 'next friday dentist' }, 'kept, so COre can say it was not set');
 });
+
+test('timers are set on the PC without a brain, however they are asked', () => {
+  const cases = {
+    'set a timer for 90 seconds called pasta': { when: '90s', label: 'pasta' },
+    'Set a timer for 5 minutes for tea.': { when: '5m', label: 'tea' },
+    'start a 25 minute timer': { when: '25m', label: 'Timer' },
+    'set a timer for 1 hour and 30 minutes': { when: '1h30m', label: 'Timer' },
+    '5-minute timer for the eggs': { when: '5m', label: 'eggs' },
+  };
+  for (const [say, want] of Object.entries(cases)) assert.deepStrictEqual(quickIntent(say), { kind: 'timer', ...want }, say);
+  for (const say of ['set a timer', 'set a timer for the meeting', 'what is a timer?']) assert.notStrictEqual((quickIntent(say) || {}).kind, 'timer', say);
+});
+
+test('a model imitating a [skill] result never shows the marker, and weather questions go to the weather service', () => {
+  assert.strictEqual(stripTags('[skill] One moment... The weather is partly cloudy.'), 'One moment... The weather is partly cloudy.');
+  const p = new TagStreamParser();
+  const out = [...p.feed('[sk'), ...p.feed('ill] One moment.'), ...p.flush()];
+  assert.strictEqual(out.filter((i) => i.type === 'text').map((i) => i.text).join(''), 'One moment.');
+  assert.deepStrictEqual(quickIntent("what's the weather in Kuala Lumpur today?"), { kind: 'weather', city: 'kuala lumpur', day: 'today' });
+  assert.deepStrictEqual(quickIntent('weather'), { kind: 'weather', city: '', day: 'today' });
+  assert.strictEqual(quickIntent('is the weather nice for a picnic in the park this weekend'), null, 'open questions still go to the brain');
+});

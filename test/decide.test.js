@@ -125,6 +125,11 @@ test('decisions steer the brain: complex work escalates Claude to its strong mod
   await b.ask({ text: 'cool, thanks', decide: true });
   assert.strictEqual(seen[1].model, undefined, 'easy turns stay on the fast model');
   assert.strictEqual(routeHints({ specialist: 'none', actsOnSystem: 0, underspecified: 0, complexity: 'simple', task: 'question' }), '');
+  // Found by the companion simulation: "open the calculator" got "Use /do open calculator" with the agent off.
+  const desk = { specialist: 'none', actsOnSystem: 0.8, underspecified: 0, complexity: 'simple', task: 'desktop' };
+  assert.doesNotMatch(routeHints(desk), /\/do/, 'no /do suggestion while the desktop agent is off');
+  assert.match(routeHints(desk), /\[\[do \.\.\.\]\] tag/, 'a skill tag comes first');
+  assert.match(routeHints(desk, { agentEnabled: true }), /\/do/);
 });
 
 test('the decision layer can pick the model among eligible ones', async () => {
@@ -193,4 +198,25 @@ test('hard limits: a long request skips brains whose context is too small', asyn
   b.chain[0].cfg = {};
   await b.ask({ text: 'x '.repeat(30000) });
   assert.strictEqual(seen[0].id, 'claude-cli', '60k characters do not fit a small local model');
+});
+
+test('an empty answer is a failure: the next brain answers instead of a blank reply', async () => {
+  const { b, seen } = brainOver({ 'claude-cli': async () => '   ', gemini: async () => 'add() subtracts: it should return a + b.' });
+  const r = await b.ask({ text: 'review: function add(a, b) { return a - b; }' });
+  assert.deepStrictEqual(seen.map((s) => s.id), ['claude-cli', 'gemini']);
+  assert.match(r.reply, /a \+ b/);
+  const { b: b2 } = brainOver({ 'claude-cli': async () => '[[forget Aina birthday]]' });
+  const r2 = await b2.ask({ text: "forget Aina's birthday" });
+  assert.strictEqual(r2.reply.trim(), '', 'an answer made only of actions still counts');
+});
+
+test('every brain on its rate limit: COre says so and when to retry, not "connect another brain"', async () => {
+  const limited = async () => { throw Object.assign(new Error('is rate limited right now (free tier limit).'), { retryAfterMs: 30e3 }); };
+  const { b } = brainOver({ 'claude-cli': limited, gemini: limited });
+  await assert.rejects(b.ask({ text: 'hi' }), (err) => {
+    assert.match(err.message, /All your brains are rate limited/);
+    assert.doesNotMatch(err.message, /connect another brain/);
+    assert.match(err.message, /Timers and the time still work/);
+    return true;
+  });
 });

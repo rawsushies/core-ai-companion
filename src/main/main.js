@@ -2840,7 +2840,25 @@ function quickReply(text, { typed }) {
   const now = new Date();
   if (q.kind === 'time') line = `It's ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
   else if (q.kind === 'date') line = `It's ${now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}.`;
-  else if (q.kind === 'timers') {
+  else if (q.kind === 'weather') {
+    if (config.data.skills.weather === false) return false;
+    addTranscript('user', text);
+    if (presence) presence.noteInteraction();
+    SK.runSkill('weather', q.city, skillCtx()).then((r) => {
+      if (r.glance) showGlance(r.glance);
+      const say = r.error ? `I couldn't get the weather: ${r.error}` : String(r.result || '').replace(/(\d+) C\b/g, '$1 °C');
+      addTranscript(r.error ? 'system' : 'core', say);
+      if (!r.error) toDock('dock:message', { role: 'core', text: say, author: 'prime' });
+    }).catch((err) => addTranscript('system', `I couldn't get the weather: ${err.message}`));
+    return true;
+  } else if (q.kind === 'timer') {
+    const r = reminders.add(q.when, q.label);
+    if (!r) return false; // let the brain explain what it could not parse
+    toDock('dock:reminders', reminders.items);
+    glanceCountdown(r.at, r.text);
+    const secs = Math.round((r.at - Date.now()) / 1000);
+    line = `Timer set: ${r.text}, ${secs >= 3600 ? `${Math.floor(secs / 3600)} h ${Math.round((secs % 3600) / 60)} min` : secs >= 120 ? `${Math.round(secs / 60)} minutes` : `${secs} seconds`}.`;
+  } else if (q.kind === 'timers') {
     const next = reminders.items.filter((x) => x.at > Date.now()).sort((a, b) => a.at - b.at)[0];
     if (next) { glanceCountdown(next.at, next.text); line = `${next.text}: ${Math.max(1, Math.round((next.at - Date.now()) / 60000))} minutes left.`; } else line = 'No timers running.';
   } else if (q.kind === 'glance') {
@@ -3800,6 +3818,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
     abortCurrent();
     toOverlay('speech:stop');
   }
+  const turnEntered = Date.now();
   const mySkills = [];
   turnSkills = mySkills;
   turnVia = internal ? 'COre' : typed ? 'chat' : 'voice';
@@ -3875,6 +3894,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   const ac = new AbortController();
   current = ac;
   const turnStart = Date.now();
+  if (process.env.CORE_DEBUG) console.log(`[core] turn start ${JSON.stringify(text.slice(0, 60))} context ${Date.now() - turnEntered}ms`);
   let firstTextAt = 0;
   timingTurnStart = turnStart;
   const speak = !typed || config.data.voice.speakTyped !== false;
@@ -3914,6 +3934,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
         pipeline.push(item);
       },
       onStatus: (s) => {
+        if (process.env.CORE_DEBUG) console.log(`[core] status ${JSON.stringify(s)} +${Date.now() - turnStart}ms`);
         toPanel('status', s);
         if (s.kind === 'fallback') addTranscript('system', `${s.from} failed: ${s.reason} Switching to ${s.to}.`);
       },

@@ -157,10 +157,31 @@ function nowLine(now = new Date()) {
   return `[Now] ${now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} local time${zone ? ` (${zone})` : ''}. Use this for any question about the time or date; never guess one.`;
 }
 
+// "set a timer for 90 seconds called pasta", "timer 5 minutes tea", "start a 25 minute timer for the eggs":
+// done on the PC at once, with or without a brain (free tiers run out; a timer must not).
+const DUR = /(\d+)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/g;
+function timerIntent(t) {
+  t = t.replace(/(\d)-(?=[a-z])/g, '$1 '); // "5-minute timer"
+  if (t.split(' ').length > 12 || !/\btimer\b/.test(t)) return null;
+  const m = /^(?:(?:set|start|make)(?: me)? )?(?:a |an )?(?:timer (?:for )?(.+?)|(.+?) timer)(?: (?:called|named|labell?ed|for(?: the| my)?) (.{1,40}))?$/.exec(t);
+  if (!m) return null;
+  const spanText = (m[1] || m[2]).trim();
+  const parts = [...spanText.matchAll(DUR)];
+  // The whole span must be durations (and "and"): "timer for the meeting" is not a timer request.
+  if (!parts.length || spanText.replace(DUR, '').replace(/\band\b|-/g, '').trim()) return null;
+  const when = parts.map((p) => `${p[1]}${p[2][0] === 'h' ? 'h' : p[2].startsWith('m') ? 'm' : 's'}`).join('');
+  return { kind: 'timer', when, label: (m[3] || 'Timer').replace(/^(the|my)\s+/, '').trim() };
+}
+
 function quickIntent(text) {
   const t = String(text || '').toLowerCase().replace(/^(?:hey |ok |okay )?core[,\s]+/, '').replace(/\b(?:please|pls|right now|now|for me|currently|at the moment|exactly|here|do you know|can you tell me|could you tell me)\b/g, '')
     .replace(/[?!.,]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!t || t.split(' ').length > 7) return null;
+  if (!t) return null;
+  { const tm = timerIntent(t); if (tm) return tm; }
+  if (t.split(' ').length > 7) return null;
+  // Weather comes from the weather service, never from a model's imagination.
+  { const w = /^(?:(?:what(?:'s| is)|how(?:'s| is)) the )?weather(?: like| forecast)?(?: (?:in|at|for) ([a-z][a-z .'-]{1,40}?))?(?: (today|tomorrow))?$/.exec(t);
+    if (w) return { kind: 'weather', city: (w[1] || '').trim(), day: w[2] || 'today' }; }
   if (/^(?:what(?:'s| is) the (?:current )?time|what time is it|what time it is|time|tell me the time|current time|the time)$/.test(t)) return { kind: 'time' };
   if (/^(?:what(?:'s| is) the date(?: today)?|what day is it(?: today)?|what(?:'s| is) today(?:'s date)?|date)$/.test(t)) return { kind: 'date' };
   if (/^(?:show|open|display|give me)(?: me)?(?: the)? (?:lyrics|lyric)(?: of this song| for this song)?$|^lyrics$|^sing along$/.test(t)) return { kind: 'glance', what: 'lyrics' };
@@ -168,6 +189,7 @@ function quickIntent(text) {
   if (/^(?:hide|close|dismiss)(?: (?:the|that|it|this))?(?: (?:lyrics|card|glance|song))?$/.test(t)) return { kind: 'glance', what: 'off' };
   if (/^(?:how (?:long|much time) (?:is )?left|show (?:me )?(?:my |the )?timers?|my timers?|timer status)$/.test(t)) return { kind: 'timers' };
   for (const [re, action] of MUSIC) if (re.test(t)) return { kind: 'music', action };
+
   return null;
 }
 

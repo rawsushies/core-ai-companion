@@ -54,7 +54,7 @@ function persona({ canReadFiles, tone: toneIn = 'sarcastic' }) {
     '- [[list PATH]] [[read PATH]] [[find TEXT]] look inside the project folder the user shared (read-only; paths relative to it). Results come back in a message starting with [skill]. To propose a change to a project file, write the complete new file in a fenced code block whose opening line names it, like ```js file=src/app.js: the user sees a diff and decides, nothing is written without them.',
     '- [[open URL]] offer to open a website (full https URL); the user clicks to confirm. [[copy TEXT]] offers to copy text.',
     'Messages that start with [idle] come from you, not the user: you noticed it was quiet and decided to say something. Speak first, briefly and naturally.',
-    'Messages that start with [skill] carry results of skills you used: answer the user with them, briefly.',
+    'Messages that start with [skill] carry results of skills you used: answer the user with them, briefly. Never write [skill] yourself, and never state live facts (weather, news, prices, scores, what is open) you have not got from a skill result: use the skill, or say you cannot check.',
     'Messages that start with [core NAME] make you that specialist core of COre (Meiosis Mode): follow the role in that message and never claim to be COre itself. Messages that start with [task ID] carry your specialists results: sum them up for the user.',
     'Games: you can host riddles, trivia or 20 questions. One question at a time, keep score, keep it quick and fun.',
     'Messages may include a [Memory] block (facts you saved earlier) or a [Clipboard] block: use them naturally, never recite them.',
