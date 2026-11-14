@@ -94,11 +94,14 @@ class Brain {
     const since = this.seen[p.id] || 0;
     const missed = this.turns.filter((t) => t.seq > since).slice(-10);
     if (!missed.length) return '';
-    return `[Earlier in this conversation] (another model answered these turns; continue naturally, do not mention the switch)\n${missed.map((t) => `${t.role === 'user' ? 'User' : 'COre'}: ${t.text.length > 600 ? `${t.text.slice(0, 600)}…` : t.text}`).join('\n')}`;
+    return `[Earlier in this conversation] (another model answered these turns; they are finished, so do not redo anything in them. Answer only the new message below, naturally, without mentioning the switch)\n${missed.map((t) => `${t.role === 'user' ? 'User' : 'COre'}: ${t.text.length > 600 ? `${t.text.slice(0, 600)}…` : t.text}`).join('\n')}`;
   }
 
   _logTurn(p, user, reply) {
-    for (const [role, text] of [['user', user], ['core', reply]]) if (text) this.turns.push({ seq: ++this.seq, role, text: String(text).slice(0, 2000) });
+    // A reply that was only actions (a [[forget]], a timer) still answered the message: without a
+    // COre line the recap shows it as unanswered and the next model does it again.
+    const said = String(reply || '').trim() || (user ? '(done with an action; nothing left to do)' : '');
+    for (const [role, text] of [['user', user], ['core', said]]) if (text) this.turns.push({ seq: ++this.seq, role, text: String(text).slice(0, 2000) });
     if (this.turns.length > 30) this.turns.splice(0, this.turns.length - 30);
     this.seen[p.id] = this.seq;
   }
@@ -223,7 +226,9 @@ class Brain {
         await p.ask({
           model: model && model !== (p.cfg && p.cfg.model) ? model : undefined,
           effort: decision ? decision.effort : (this.profile === 'strong' ? 'high' : undefined),
-          prompt: buildPrompt(p, `${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}${recap ? `\n\n${recap}` : ''}`, shot),
+          // The recap goes first and the new message after it: placed last, the recap ends on a "COre: ..."
+          // line and models carry on that transcript, answering twice (seen with Gemini after a Groq rate limit).
+          prompt: buildPrompt(p, `${recap ? `${recap}\n\n[New message]\n` : ''}${typed ? '[typed] ' : ''}${text}${context ? `\n\n${context}` : ''}`, shot),
           tone,
           image: shot && shot.base64 ? { base64: shot.base64, mediaType: shot.mediaType || 'image/png' } : null,
           signal: wd.signal,

@@ -162,11 +162,28 @@ test('continuity: a model taking over gets a recap of the turns it missed, once'
   const g = seen.filter((s) => s.id === 'gemini');
   assert.strictEqual(g.length, 1);
   assert.match(g[0].prompt, /\[Earlier in this conversation\][\s\S]*User: my budget for the trip is 4200 dollars[\s\S]*COre: Your budget is 4,200\./);
+  assert.ok(g[0].prompt.indexOf('[Earlier in this conversation]') < g[0].prompt.indexOf('what was my budget again?'), 'the recap comes before the new message, never after it');
+  assert.doesNotMatch(g[0].prompt.trim(), /COre: [^\n]*$/, 'the prompt does not end on an earlier COre line for the model to continue');
   await b.ask({ text: 'and in euros?' });
   const g2 = seen.filter((s) => s.id === 'gemini')[1];
   assert.doesNotMatch(g2.prompt, /Earlier in this conversation/, 'no recap when nothing was missed');
   b.resetConversation();
   assert.strictEqual(b.turns.length, 0);
+});
+
+test('continuity: a turn answered only with an action is not redone by the model taking over', async () => {
+  const router = new Router();
+  let claudeUp = true;
+  const { b, seen } = brainOver({
+    'claude-cli': async () => { if (!claudeUp) throw new Error("Claude's usage limit is reached"); return '[[forget Aina birthday]]'; },
+    gemini: async () => 'I do not know.',
+  }, { router });
+  await b.ask({ text: "forget Aina's birthday" });
+  claudeUp = false;
+  await b.ask({ text: "when is Aina's birthday?" });
+  const g = seen.find((s) => s.id === 'gemini');
+  assert.match(g.prompt, /User: forget Aina's birthday\nCOre: \(done with an action; nothing left to do\)/);
+  assert.match(g.prompt, /do not redo anything/);
 });
 
 test('hard limits: a long request skips brains whose context is too small', async () => {

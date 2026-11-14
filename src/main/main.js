@@ -1884,13 +1884,14 @@ function handleActionTag(item) {
   if (item.name === 'forget') {
     const gone = memory && memory.forget(item.text);
     if (gone) noteMemoryRemoved(gone.text);
-    if (gone) toDock('dock:message', { role: 'system', text: `Forgot: ${gone.text}` });
+    // Say so when nothing matched, so a model's "done, forgotten" can't stand unchecked.
+    toDock('dock:message', { role: 'system', text: gone ? `Forgot: ${gone.text}` : `Nothing in my memory matched "${String(item.text).slice(0, 80)}", so nothing was removed.` });
     toDock('dock:memory', memory ? memory.list() : []);
     return true;
   }
   if (item.name === 'remind') {
     const r = reminders.add(item.when, item.text);
-    toDock('dock:message', { role: 'system', text: r ? `Reminder set for ${fmtTime(r.at)}: ${r.text}` : `I couldn't understand the time "${item.when}".` });
+    toDock('dock:message', { role: 'system', text: r ? `Reminder set for ${fmtTime(r.at)}: ${r.text}` : `No reminder was set: I couldn't read a time in "${item.when || item.text}". Say it like "tomorrow 9am", "18:30" or "in 20 minutes".` });
     toDock('dock:reminders', reminders.items);
     return true;
   }
@@ -3087,7 +3088,7 @@ function makeVoicePipeline({ speak }) {
   // Until the voice model has loaded (first run downloads ~90 MB), speak with
   // the system voice instead of making every reply wait.
   const useKokoro = speak && v.tts !== false && v.engine !== 'system' && !tts.failed && tts.ready;
-  if (speak && v.engine !== 'system' && !tts.ready && !tts.failed) tts.warm();
+  if (speak && v.tts !== false && v.engine !== 'system' && !tts.ready && !tts.failed) tts.warm();
   return new OrderedVoicePipeline({
     synth: useKokoro ? (text) => tts.synth(text, { voice: v.kokoroVoice, semitones: v.semitones, speed: v.speed }) : null,
     forward: (item) => {
@@ -3835,6 +3836,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
   // (Never let a context problem stop the message itself.)
   const contextBlocks = [];
   let situationNow = null;
+  contextBlocks.push(GL.nowLine());
   try {
     // Memory recall and the desktop read run at the same time (both are on the path to the first word).
     const memP = memory && config.data.memory.enabled !== false ? gateway().context(text).catch(() => null) : null; // active memory + long-term knowledge

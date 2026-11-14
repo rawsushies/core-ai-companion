@@ -440,9 +440,20 @@ class Memory {
     return scored.filter((x) => x.score > 0.31).sort((a, b) => b.score - a.score).slice(0, k);
   }
 
+  // The query's vector. The embedder is on the path to the first word, and its model may still be
+  // downloading or loading (first run): never wait more than embedWaitMs; keyword recall answers meanwhile.
+  async _queryVec(query) {
+    if (!this.embedder) return null;
+    let timer;
+    try {
+      const v = await Promise.race([this.embedder([String(query).slice(0, 500)]), new Promise((r) => { timer = setTimeout(() => r(null), this.embedWaitMs ?? 1500); })]);
+      return (v && v[0]) || null;
+    } catch { return null; } finally { clearTimeout(timer); }
+  }
+
   async searchAsync(query, k = 6, opts = {}) {
     let qvec = null;
-    if (this.embedder) { try { const v = await this.embedder([String(query).slice(0, 500)]); qvec = v && v[0]; } catch {} }
+    qvec = await this._queryVec(query);
     return this.search(query, k, { ...opts, qvec });
   }
 
@@ -473,7 +484,7 @@ class Memory {
 
   async contextForAsync(query, k = 6) {
     let qvec = null;
-    if (this.embedder) { try { const v = await this.embedder([String(query).slice(0, 500)]); qvec = v && v[0]; } catch {} }
+    qvec = await this._queryVec(query);
     return this.contextFor(query, k, qvec);
   }
 }

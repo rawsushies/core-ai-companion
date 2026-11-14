@@ -149,11 +149,19 @@ const MUSIC = [
   [/^mute(?: (?:the )?(?:music|sound))?$/, 'mute'],
 ];
 
+// The model has no clock: every turn gets the local date and time, so 'what time is it',
+// 'how long until 5' or 'what day is Friday' are answered from the PC, not guessed.
+function nowLine(now = new Date()) {
+  let zone = '';
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch {}
+  return `[Now] ${now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} local time${zone ? ` (${zone})` : ''}. Use this for any question about the time or date; never guess one.`;
+}
+
 function quickIntent(text) {
-  const t = String(text || '').toLowerCase().replace(/^(?:hey |ok |okay )?core[,\s]+/, '').replace(/\b(?:please|pls|now|for me)\b/g, '')
+  const t = String(text || '').toLowerCase().replace(/^(?:hey |ok |okay )?core[,\s]+/, '').replace(/\b(?:please|pls|right now|now|for me|currently|at the moment|exactly|here|do you know|can you tell me|could you tell me)\b/g, '')
     .replace(/[?!.,]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || t.split(' ').length > 7) return null;
-  if (/^(?:what(?:'s| is) the time|what time is it|time|tell me the time)$/.test(t)) return { kind: 'time' };
+  if (/^(?:what(?:'s| is) the (?:current )?time|what time is it|what time it is|time|tell me the time|current time|the time)$/.test(t)) return { kind: 'time' };
   if (/^(?:what(?:'s| is) the date(?: today)?|what day is it(?: today)?|what(?:'s| is) today(?:'s date)?|date)$/.test(t)) return { kind: 'date' };
   if (/^(?:show|open|display|give me)(?: me)?(?: the)? (?:lyrics|lyric)(?: of this song| for this song)?$|^lyrics$|^sing along$/.test(t)) return { kind: 'glance', what: 'lyrics' };
   if (/^(?:what(?:'s| is) (?:playing|this song)|what song is (?:this|playing)|now playing|show (?:me )?(?:what's playing|now playing|the song|the music))$/.test(t)) return { kind: 'glance', what: 'music' };
@@ -246,4 +254,4 @@ class MediaReader extends EventEmitter {
   }
 }
 
-module.exports = { artFromUrl, parseLrc, lineIndex, cleanTitle, cleanArtist, fetchLyrics, parseCard, quickIntent, normalise, MediaReader, WIN_SCRIPT };
+module.exports = { nowLine, artFromUrl, parseLrc, lineIndex, cleanTitle, cleanArtist, fetchLyrics, parseCard, quickIntent, normalise, MediaReader, WIN_SCRIPT };

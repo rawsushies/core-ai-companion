@@ -8,9 +8,19 @@ const { randomUUID } = require('crypto');
 const UNIT = { h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600, m: 60, min: 60, mins: 60, minute: 60, minutes: 60, s: 1, sec: 1, secs: 1, second: 1, seconds: 1 };
 const MAX_DELAY = 7 * 24 * 3600 * 1000;
 
-// "10m", "1h30m", "90 s", "18:30", "at 7pm", "7:15 am" -> epoch ms (or null).
+// "10m", "1h30m", "90 s", "18:30", "at 7pm", "7:15 am", "tomorrow 9am" -> epoch ms (or null).
 function parseWhen(when, now = new Date()) {
-  const w = String(when || '').trim().toLowerCase().replace(/^at\s+/, '');
+  let w = String(when || '').trim().toLowerCase().replace(/^at\s+/, '');
+  // "tomorrow 9am", "9am tomorrow", "tomorrow at 9", "today 18:30": a clock time on that day.
+  const day = /\b(tomorrow|today)\b/.exec(w);
+  if (day) {
+    w = w.replace(day[0], ' ').replace(/\bat\b/, ' ').replace(/\s+/g, ' ').trim();
+    const t = new Date(parseWhen(w || '9am', new Date(new Date(now).setHours(0, 0, 0, 0))) || NaN);
+    if (Number.isNaN(t.getTime())) return null;
+    const d = new Date(now);
+    t.setFullYear(d.getFullYear(), d.getMonth(), d.getDate() + (day[1] === 'tomorrow' ? 1 : 0));
+    return t.getTime() > now.getTime() ? t.getTime() : null;
+  }
   const parts = [...w.matchAll(/(\d+)\s*(hours?|hrs?|h|minutes?|mins?|min|m|seconds?|secs?|sec|s)(?=\d|\s|$)/g)];
   if (parts.length && parts.map((p) => p[0]).join('').replace(/\s/g, '') === w.replace(/\s/g, '')) {
     const secs = parts.reduce((n, p) => n + Number(p[1]) * UNIT[p[2]], 0);
@@ -52,6 +62,9 @@ class Reminders {
   }
 
   add(when, text) {
+    // Models often write [[remind 9am tomorrow call the contractor]]: the day ends up in the text.
+    const lead = /^\s*(tomorrow|today)\b[\s,:-]*/i.exec(String(text || ''));
+    if (lead && !/\b(tomorrow|today)\b/i.test(String(when))) { when = `${lead[1]} ${when}`; text = String(text).slice(lead[0].length); }
     const at = parseWhen(when);
     if (!at) return null;
     const r = { id: randomUUID(), at, text: String(text).trim().slice(0, 200) };

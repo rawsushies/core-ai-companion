@@ -67,8 +67,11 @@ function parseTag(body) {
   }
   if ((name === 'remember' || name === 'forget') && rest) return { name, text: rest.slice(0, 300) };
   if (name === 'remind') {
-    const r = /^((?:\d+\s*(?:h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\s*)+|(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+([\s\S]+)$/i.exec(rest);
-    return r ? { name, when: r[1].trim(), text: r[2].trim().slice(0, 200) } : null;
+    // WHEN: a delay (10m, 1h30m) or a clock time, optionally with a day ("tomorrow 9am", "9am tomorrow").
+    const r = /^((?:\d+\s*(?:h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\s*)+|(?:(?:today|tomorrow)\s+)?(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?|(?:today|tomorrow))\s+([\s\S]+)$/i.exec(rest);
+    // A time COre can't read is still a reminder the model promised: keep it (with no time) so the
+    // user is told it was not set, instead of the tag vanishing behind a "done".
+    return r ? { name, when: r[1].trim(), text: r[2].trim().slice(0, 200) } : rest ? { name, when: '', text: rest.slice(0, 200) } : null;
   }
   if (name === 'open') {
     const url = rest.split(/\s+/)[0];
@@ -104,6 +107,24 @@ class TagStreamParser {
       if (lead.toLowerCase().startsWith(ECHO)) this.buf = lead.slice(ECHO.length).replace(/^\s+/, '');
       this.head = false;
     }
+    // The marker later in the reply starts a second version of the same answer (Gemini writes one for
+    // the voice and one for the chat). It is never shown, and its tags never run: a [[remember]] in it
+    // would undo a [[forget]] the first version just did.
+    if (this.done) { this.buf = ''; return out; }
+    let tail = '';
+    const at = this.buf.toLowerCase().indexOf(ECHO);
+    if (at >= 0) { this.buf = this.buf.slice(0, at).replace(/\s+$/, ''); this.done = true; }
+    else {
+      for (let k = ECHO.length - 1; k >= 2; k--) {
+        if (this.buf.toLowerCase().endsWith(ECHO.slice(0, k))) { tail = this.buf.slice(-k); this.buf = this.buf.slice(0, -k); break; }
+      }
+    }
+    this._drain(out);
+    if (!this.done) this.buf += tail;
+    return out;
+  }
+
+  _drain(out) {
     for (;;) {
       const open = this.buf.indexOf('[[');
       if (open === -1) {
@@ -115,7 +136,7 @@ class TagStreamParser {
           pushText(out, this.buf);
           this.buf = '';
         }
-        return out;
+        return;
       }
       pushText(out, this.buf.slice(0, open));
       this.buf = this.buf.slice(open);
@@ -127,7 +148,7 @@ class TagStreamParser {
           this.buf = this.buf.slice(2);
           continue;
         }
-        return out; // wait for more input
+        return; // wait for more input
       }
       const tag = parseTag(this.buf.slice(2, close));
       if (tag) out.push({ type: 'tag', tag });
@@ -158,7 +179,7 @@ function pushText(out, text) {
 }
 
 function stripTags(text) {
-  return text.replace(/^\s*\[typed\]\s*/i, '').replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  return text.replace(/^\s*\[typed\]\s*/i, '').replace(/\s*\[typed\][\s\S]*$/i, '').replace(/\[\[[^\]]{0,48}\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 module.exports = { TagStreamParser, parseTag, stripTags };

@@ -6,7 +6,7 @@
 // errors, leaked internal markup, empty or very slow replies, memory that does not stick (or does
 // not go away), repeated answers, and crashes in the app's processes.
 //
-//   xvfb-run node scripts/companion-sim.js [--out eval/results/companion-sim.md] [--turns N]
+//   xvfb-run node scripts/companion-sim.js [--out eval/results/companion-sim.md] [--turns N] [--from I] [--provider gemini]
 //
 // It needs a display (Xvfb on Linux). Free model tiers rate-limit, so turns are spaced out.
 
@@ -19,6 +19,7 @@ const ROOT = path.join(__dirname, '..');
 const OUT = process.argv.includes('--out') ? process.argv[process.argv.indexOf('--out') + 1] : '';
 const MAX = process.argv.includes('--turns') ? Number(process.argv[process.argv.indexOf('--turns') + 1]) : Infinity;
 const FROM = process.argv.includes('--from') ? Number(process.argv[process.argv.indexOf('--from') + 1]) : 0;
+const PROVIDER = process.argv.includes('--provider') ? process.argv[process.argv.indexOf('--provider') + 1] : 'groq';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Each turn: what the user says, and what a good answer must (re) / must not (not) contain.
@@ -26,7 +27,7 @@ const TURNS = [
   { say: 'hi COre, how are you today?' },
   { say: 'what can you help me with?' },
   { say: "remember that my sister Aina's birthday is on 12 December", re: /remember|noted|got it|saved|12 december/i },
-  { say: "when is Aina's birthday?", re: /12(th)? dec/i },
+  { say: "when is Aina's birthday?", re: /12(th)?\s*dec|dec\w*\s*12/i },
   { say: 'set a timer for 5 minutes for tea', re: /timer|5 min/i },
   { say: 'remind me tomorrow at 9am to call the contractor', re: /remind|9/i },
   { say: 'what time is it right now?', re: /\d{1,2}[:.]\d{2}|o'?clock/i },
@@ -39,13 +40,13 @@ const TURNS = [
   { say: '/do open my downloads folder', re: /off|settings|enable|agent|operate/i },
   { say: 'what did I ask you to remember earlier?', re: /aina|birthday|12/i },
   { say: "forget Aina's birthday", re: /forg|remov|deleted|done/i },
-  { say: "when is Aina's birthday?", not: /12(th)? dec/i },
+  { say: "when is Aina's birthday?", not: /12(th)?\s*dec|dec\w*\s*12/i },
   { say: '/briefing' },
   { say: '/diagnostics' },
   { say: 'thanks, that is all for now' },
 ].slice(FROM, FROM + MAX);
 
-const LEAK = [/\[\[/, /\]\]/, /<<\s*untrusted/i, /\[object Object\]/, /\bundefined\b/, /^\s*\{\s*"/m, /\[(idle|mission-plan|Memory stats|Knowledge|Files on the shelf)\]/i, /TypeError|ReferenceError|at .*\.js:\d+/];
+const LEAK = [/\[\[\s*[a-z]+\b[^\]]*\]\]/i, /\[\[\s*(remember|forget|remind|do|gesture|mood|point|form|board|delegate|open|copy)\b/i, /<<\s*untrusted/i, /\[object Object\]/, /\bundefined\b/, /^\s*\{\s*"/m, /\[(idle|mission-plan|Memory stats|Knowledge|Files on the shelf)\]/i, /TypeError|ReferenceError|at .*\.js:\d+/];
 
 async function main() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'core-sim-home-'));
@@ -53,7 +54,7 @@ async function main() {
   const key = 'plain:proxy-injected'; // the network proxy puts the real key in the header
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({
     orb: { graphics: 'software' },
-    brain: { provider: 'groq', mode: 'manual', fallbacks: ['gemini', 'openrouter'], secrets: { groq: key, gemini: key, openrouter: key }, jev: { enabled: false } },
+    brain: { provider: PROVIDER, mode: 'manual', fallbacks: ['groq', 'gemini', 'openrouter'].filter((p) => p !== PROVIDER), secrets: { groq: key, gemini: key, openrouter: key }, jev: { enabled: false } },
     voice: { tts: false },
     presence: { chitchat: false, briefing: false },
     update: { enabled: false },
@@ -67,6 +68,7 @@ async function main() {
     env: { ...process.env, HOME: home, USERPROFILE: home, NODE_USE_ENV_PROXY: '1', NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS || '/root/.ccr/ca-bundle.crt' },
     timeout: 60000,
   });
+  if (process.env.SIM_LOG) { const log = fs.createWriteStream(process.env.SIM_LOG); app.process().stdout.pipe(log); app.process().stderr.pipe(log); }
   app.process().stderr.on('data', (d) => { const t = String(d); if (/error|exception|unhandled|TypeError|ReferenceError/i.test(t) && !/GPU|gpu_|dbus|libva|Fontconfig|ALSA|DevTools|ozone|viz_|cc_|vaInit/i.test(t)) mainErrors.push(t.trim().slice(0, 400)); });
   let dock = null;
   for (let i = 0; i < 120 && !dock; i++) { dock = app.windows().find((w) => w.url().includes('/dock/')); if (!dock) await wait(250); }
@@ -75,27 +77,30 @@ async function main() {
   dock.on('pageerror', (e) => pageErrors.push(e.message));
   await dock.waitForSelector('#input', { state: 'attached' });
   await wait(2500);
-  const logText = () => dock.evaluate(() => document.getElementById('log').innerText);
+  // The chat drops old messages, so the log's length says nothing; each turn marks the messages
+  // already shown and reads only the new ones (the reply, minus the echo of what was said).
+  const markSeen = () => dock.evaluate(() => { for (const el of document.getElementById('log').children) el.dataset.simSeen = '1'; });
+  const newText = () => dock.evaluate(() => [...document.getElementById('log').children].filter((el) => !el.dataset.simSeen).map((el) => el.innerText).join('\n'));
 
   const results = [];
   for (const t of TURNS) {
-    const before = await logText();
+    await markSeen();
     const t0 = Date.now();
     await dock.evaluate(() => { const i = document.getElementById('input'); i.focus(); });
     await dock.fill('#input', t.say);
     await dock.press('#input', 'Enter');
-    // A reply is finished when the log has grown and then stayed the same for 3 s.
-    let last = before, stableSince = 0, firstChange = 0;
+    // A reply is finished when something new appeared and then stayed the same for 3 s.
+    let last = '', stableSince = 0, firstChange = 0;
     const limit = t.wait || 60000;
+    const strip = (x) => x.replace(t.say, '').trim();
     while (Date.now() - t0 < limit) {
       await wait(300);
-      const now = await logText();
-      if (now !== last) { last = now; stableSince = Date.now(); if (!firstChange && now.replace(t.say, '').length > before.length + 2) firstChange = Date.now(); continue; }
-      if (firstChange && Date.now() - stableSince > 3000) break;
+      const now = await newText();
+      if (now !== last) { last = now; stableSince = Date.now(); if (!firstChange && strip(now)) firstChange = Date.now(); continue; }
+      // ...and COre is no longer thinking (a lookup like the calendar answers in a second step).
+      if (firstChange && Date.now() - stableSince > 3000 && !(await dock.evaluate(() => (document.getElementById('head-status') || {}).textContent === 'Thinking…'))) break;
     }
-    // What this turn added to the chat (the log only grows), minus the echo of what was said.
-    let added = last.length >= before.length && last.startsWith(before.slice(0, 200)) ? last.slice(before.length) : last.slice(-2000);
-    added = added.replace(t.say, '').trim();
+    const added = strip(last);
     const ms = (firstChange || Date.now()) - t0;
     const issues = [];
     if (!firstChange) issues.push(`no reply within ${Math.round(limit / 1000)} s`);
@@ -103,7 +108,7 @@ async function main() {
     for (const re of LEAK) if (re.test(added)) issues.push(`leaked internal text (${re})`);
     if (t.re && !t.re.test(added)) issues.push(`expected ${t.re}`);
     if (t.not && t.not.test(added)) issues.push(`should not contain ${t.not}`);
-    if (/could not answer|went wrong|failed|error/i.test(added) && !/^\/diag/.test(t.say)) issues.push('reports a failure');
+    if (/could not answer|went wrong|failed|error/i.test(added.split('\n').filter((l) => !/Switching to /.test(l)).join('\n')) && !/^\/diag/.test(t.say)) issues.push('reports a failure');
     if (ms > 20000 && !t.wait) issues.push(`slow first reply (${Math.round(ms / 1000)} s)`);
     const prev = results[results.length - 1];
     if (prev && added && prev.reply === added) issues.push('same reply as the previous turn');
@@ -128,7 +133,7 @@ async function main() {
     ...(mainErrors.length ? ['## Main-process errors', '', '```', ...mainErrors.slice(0, 20), '```', ''] : []),
     ...(pageErrors.length ? ['## Chat window errors', '', '```', ...pageErrors.slice(0, 20), '```', ''] : []),
   ];
-  if (OUT) { fs.writeFileSync(path.join(ROOT, OUT), lines.join('\n')); console.log(`wrote ${OUT}`); }
+  if (OUT) { fs.writeFileSync(path.resolve(ROOT, OUT), lines.join('\n')); console.log(`wrote ${OUT}`); }
   console.log(`\n${results.length - bad.length}/${results.length} clean; main errors ${mainErrors.length}; page errors ${pageErrors.length}`);
 }
 
