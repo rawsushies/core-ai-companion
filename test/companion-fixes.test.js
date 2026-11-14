@@ -107,3 +107,8 @@ test('a model imitating a [skill] result never shows the marker, and weather que
   assert.deepStrictEqual(quickIntent('weather'), { kind: 'weather', city: '', day: 'today' });
   assert.strictEqual(quickIntent('is the weather nice for a picnic in the park this weekend'), null, 'open questions still go to the brain');
 });
+
+test('asking how long is left on a timer takes the fast path, singular or plural', () => {
+  for (const say of ['how long is left on my timer?', 'how much time is left on the timers', 'how long left', 'show my timers'])
+    assert.deepStrictEqual(quickIntent(say), { kind: 'timers' }, say);
+});

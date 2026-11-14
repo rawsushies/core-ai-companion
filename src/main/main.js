@@ -3936,7 +3936,7 @@ async function handleUserText(text, { withScreen = false, typed = false, interna
       onStatus: (s) => {
         if (process.env.CORE_DEBUG) console.log(`[core] status ${JSON.stringify(s)} +${Date.now() - turnStart}ms`);
         toPanel('status', s);
-        if (s.kind === 'fallback') addTranscript('system', `${s.from} failed: ${s.reason} Switching to ${s.to}.`);
+        if (s.kind === 'fallback') addTranscript('system', `${s.from} failed: ${String(s.reason || '').replace(/[.\s]*$/, '.')} Switching to ${s.to}.`);
       },
     });
     if (reply) addTranscript('core', reply);
