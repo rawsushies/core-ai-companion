@@ -91,6 +91,7 @@ class Companion {
     this.pairing = null;
     this.server = null;
     this.hits = new Map();
+    this.uploads = new Map(); // file uploads in progress: id -> { device, name, size, total, parts, bytes, at }
     this.now = opts.now || Date.now;
   }
 
@@ -194,7 +195,7 @@ class Companion {
     }
     if (req.method !== 'POST') return this._send(res, 404, { error: 'not found' });
     let body;
-    try { body = await this._body(req); } catch {
+    try { body = await this._body(req, url.pathname === '/api' ? FILE_BODY_MAX : 16384); } catch {
       // Answer, then cut the upload off: otherwise the rest of an oversized body keeps the socket busy.
       res.setHeader('connection', 'close');
       this._send(res, 413, { error: 'too big' });
@@ -261,6 +262,7 @@ class Companion {
     } else if (m.op === 'missionStop') {
       if (this.o.onMissionStop) this.o.onMissionStop({ id: d.id, name: d.name });
     }
+    else if (m.op === 'filePut') reply = this._filePut(m, d);
     else if (m.op === 'memory') reply = { ok: true, memory: this.o.getMemory ? this.o.getMemory() : [] };
     else if (m.op === 'media') {
       // Fixed media keys only (the same list as the music skill).
@@ -273,4 +275,53 @@ class Companion {
   }
 }
 
-module.exports = { APP_ORIGINS, Companion, seal, open, pairCode, isPrivate, lanAddress, b64url, fromB64url };
+// ---- Phone Inbox (13.0 P3): a file sent from the phone arrives in sealed chunks. Limits are
+// checked on every chunk; nothing is written until the whole file has arrived and matches its
+// declared size. The finished file goes to the app (onFile), which treats it as untrusted data.
+const FILE_MAX = 10 * 1024 * 1024; // whole file
+const CHUNK_MAX = 256 * 1024; // decoded bytes per chunk
+const FILE_BODY_MAX = 520 * 1024; // a sealed chunk (base64 inside a base64 box) fits
+const UPLOAD_TTL = 2 * 60000;
+
+// A file name that is safe to create anywhere: the last path segment, no control or reserved
+// characters, no leading dots, no Windows device names, at most 80 characters.
+function safeName(name) {
+  let n = String(name || '').split(/[\\/]/).pop().replace(/[\u0000-\u001f<>:"|?*]/g, '').replace(/^[.\s]+|[.\s]+$/g, '');
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(n)) n = `_${n}`;
+  if (n.length > 80) { const ext = (/\.[a-z0-9]{1,8}$/i.exec(n) || [''])[0]; n = n.slice(0, 80 - ext.length) + ext; }
+  return n || 'file';
+}
+
+Companion.prototype._filePut = function _filePut(m, d) {
+  const t = this.now();
+  for (const [k, u] of this.uploads) if (t - u.at > UPLOAD_TTL) this.uploads.delete(k);
+  const id = String(m.id || '');
+  const index = Number(m.index);
+  const total = Number(m.total);
+  const size = Number(m.size);
+  if (!/^[\w-]{8,40}$/.test(id) || !Number.isInteger(index) || !Number.isInteger(total) || !Number.isInteger(size)) return { ok: false, error: 'bad request' };
+  if (size < 1 || size > FILE_MAX) return { ok: false, error: 'Files up to 10 MB can be sent.' };
+  if (total < 1 || total > Math.ceil(FILE_MAX / CHUNK_MAX) || total !== Math.ceil(size / CHUNK_MAX) || index < 0 || index >= total) return { ok: false, error: 'bad request' };
+  let u = this.uploads.get(id);
+  if (!u) {
+    if (index !== 0) return { ok: false, error: 'That upload expired. Send the file again.' };
+    if ([...this.uploads.values()].filter((x) => x.device === d.id).length >= 2) return { ok: false, error: 'One file at a time, please.' };
+    u = { device: d.id, name: safeName(m.name), size, total, parts: [], bytes: 0, at: t };
+    this.uploads.set(id, u);
+  }
+  if (u.device !== d.id || u.size !== size || u.total !== total) return { ok: false, error: 'bad request' };
+  if (index !== u.parts.length) return { ok: false, error: 'out of order', expect: u.parts.length };
+  const chunk = Buffer.from(String(m.data || ''), 'base64');
+  const want = index < total - 1 ? CHUNK_MAX : size - CHUNK_MAX * (total - 1);
+  if (chunk.length !== want) { this.uploads.delete(id); return { ok: false, error: 'The file arrived damaged. Send it again.' }; }
+  u.parts.push(chunk);
+  u.bytes += chunk.length;
+  u.at = t;
+  if (u.parts.length < total) return { ok: true, next: u.parts.length };
+  this.uploads.delete(id);
+  const data = Buffer.concat(u.parts);
+  if (data.length !== size || !this.o.onFile) return { ok: false, error: 'The file arrived damaged. Send it again.' };
+  try { return { ok: true, done: true, ...(this.o.onFile({ name: u.name, data }, { id: d.id, name: d.name }) || {}) }; } catch (err) { return { ok: false, error: String(err.message || err).slice(0, 120) }; }
+};
+
+module.exports = { APP_ORIGINS, Companion, safeName, FILE_MAX, CHUNK_MAX, seal, open, pairCode, isPrivate, lanAddress, b64url, fromB64url };

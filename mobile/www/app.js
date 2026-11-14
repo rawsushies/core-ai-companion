@@ -126,9 +126,36 @@
       updateStatus();
     }
     $('media').hidden = !pcOnline;
+    $('attach').hidden = !pcOnline;
     const visible = document.visibilityState === 'visible';
     syncTimer = setTimeout(syncPc, !visible ? 30000 : pcOnline ? 2000 : Math.min(30000, 3000 * failures));
   }
+
+  // Phone Inbox (13.0 P3): send a file to COre in sealed 256 KB chunks (up to 10 MB). COre puts it
+  // on its file shelf and reads it as data, never as instructions.
+  const CHUNK = 256 * 1024;
+  // b64() spreads its argument into one call: fine for keys, too many arguments for a 256 KB chunk.
+  const b64big = (u8) => { let out = ''; for (let i = 0; i < u8.length; i += 32768) out += String.fromCharCode.apply(null, u8.subarray(i, i + 32768)); return btoa(out); };
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function sendFile(file) {
+    if (!pc || !file) return;
+    if (file.size > 10 * 1024 * 1024) { addMsg('system', `${file.name} is larger than 10 MB.`); return; }
+    if (!file.size) { addMsg('system', `${file.name} is empty.`); return; }
+    const id = b64url(nacl.randomBytes(12));
+    const total = Math.ceil(file.size / CHUNK);
+    addMsg('system', `Sending ${file.name}…`);
+    try {
+      for (let i = 0; i < total; i++) {
+        const buf = new Uint8Array(await file.slice(i * CHUNK, Math.min(file.size, (i + 1) * CHUNK)).arrayBuffer());
+        const r = await call('filePut', { id, index: i, total, size: file.size, name: file.name, data: b64big(buf) });
+        if (!r.ok) throw new Error(r.error || 'refused');
+        if (i < total - 1) await pause(300); // stays well under the PC's request limit
+      }
+      setTimeout(syncPc, 300);
+    } catch (err) { addMsg('system', `Could not send ${file.name}: ${err.message}`); }
+  }
+  $('attach').addEventListener('click', () => $('attach-file').click());
+  $('attach-file').addEventListener('change', () => { const f = $('attach-file').files[0]; $('attach-file').value = ''; sendFile(f); });
 
   // Notifications (13.0 P3): the PC sends a short list of notices with every sync; each id is
   // raised once, only while the app is in the background, on a private channel (the lock screen
