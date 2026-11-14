@@ -15,6 +15,7 @@ const SECTIONS = [
       { key: 'personality.language', label: 'Reply language', type: 'select', options: [['', 'Same as I speak'], ['English', 'English'], ['Bahasa Indonesia', 'Bahasa Indonesia'], ['Malay', 'Malay'], ['Spanish', 'Spanish'], ['French', 'French'], ['German', 'German'], ['Japanese', 'Japanese'], ['Chinese', 'Chinese'], ['Portuguese', 'Portuguese'], ['Arabic', 'Arabic']] },
       { key: 'personality.tone', label: 'Personality', type: 'select', options: [['sarcastic', 'Sarcastic'], ['dramatic', 'Dramatic'], ['calm', 'Calm'], ['cheerful', 'Cheerful'], ['professional', 'Professional']] },
       { key: 'presence.chitchat', label: 'Chat with me when things are quiet', type: 'toggle' },
+      { key: 'presence.briefing', label: 'Morning briefing: once a day, your calendar, due to-dos and recent missions (only when it is a good moment)', type: 'toggle' },
       { key: 'presence.minutes', label: 'Quiet time before COre speaks up', type: 'range', min: 5, max: 120, step: 5, unit: 'min' },
       { key: 'presence.suggestions', label: 'Once a day, mention unfinished work (interrupted tasks, overdue to-dos, automations that failed)', type: 'toggle' },
       { key: 'presence.quietFrom', label: 'Quiet hours start', type: 'range', min: 0, max: 23, step: 1, unit: 'h' },
