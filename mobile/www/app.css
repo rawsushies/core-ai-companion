@@ -60,3 +60,7 @@ video { width: 100%; border-radius: 12px; background: #000; }
 /* A switch-like row: the checkbox beside its text, not above it. */
 label.check { display: flex; align-items: center; gap: 10px; }
 label.check input { width: auto; margin: 0; }
+/* The attach button sits before the message box, quieter than Send (same size). */
+.attach { flex: none; width: 44px; height: 44px; border-radius: 50%; background: transparent; color: var(--muted); border: 1px solid currentColor; display: grid; place-items: center; }
+/* Recording: the talk button lights up until it is tapped again. */
+.attach.talk.on { color: var(--void); background: var(--emerald); border-color: var(--emerald); }

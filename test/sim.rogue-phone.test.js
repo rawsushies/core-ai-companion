@@ -36,6 +36,7 @@ function server(devices, calls) {
     onMessage: (text) => calls.push(['send', text]),
     onStop: () => calls.push(['stop']),
     onMissionStop: () => calls.push(['missionStop']),
+    onFile: (f) => { calls.push(['file', f.name]); return { name: f.name }; },
     onApprove: (a) => { calls.push(['approve', a]); return { ok: a.id === 'req-00000001' && a.hash === 'a'.repeat(64) && (a.answer === 'no' || a.bio) }; },
     getFeed: () => ({ events: [], status: {} }),
   });
@@ -93,6 +94,19 @@ test(`rogue phone: ${N} hostile messages never reach a handler; the server never
     if (status >= 500) failures.push(`kind ${kind}: server error ${status}`);
   }
   if (calls.length !== before) failures.push(`${calls.length - before} hostile message(s) reached a handler: ${JSON.stringify(calls.slice(before, before + 3))}`);
+
+  // Malformed file uploads from the paired phone itself (wrong sizes, counts, order, data, ids):
+  // none may ever reach the app as a file.
+  const nf = calls.length;
+  for (let i = 0; i < 60; i++) {
+    clock += 300;
+    const size = Math.floor(r() * 3 * C.CHUNK_MAX) + (r() < 0.2 ? C.FILE_MAX : 0);
+    const total = Math.max(1, Math.ceil(size / C.CHUNK_MAX) + Math.floor(r() * 3) - 1);
+    const len = Math.floor(r() * C.CHUNK_MAX * 1.2);
+    const id = r() < 0.2 ? '../x' : `up-${Math.floor(r() * 1e6)}-${i}`;
+    await genuine({ op: 'filePut', id, index: Math.floor(r() * 3) - (r() < 0.1 ? 1 : 0), total, size, name: r() < 0.3 ? '../../evil' : 'f.bin', data: Buffer.alloc(len, 1).toString('base64') });
+  }
+  if (calls.slice(nf).some((x) => x[0] === 'file')) failures.push(`a malformed upload reached the app: ${JSON.stringify(calls.slice(nf).filter((x) => x[0] === 'file'))}`);
 
   // Approvals: a yes without the fingerprint and a yes for another request are refused by the
   // app; a decline needs no fingerprint. The real phone still works after the attack.
